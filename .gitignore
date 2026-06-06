@@ -1,0 +1,31 @@
+# Secrets and local config
+.env
+.env.*
+!.env.example
+
+# User data and runtime state
+memory/
+vault/
+*.sqlite3
+*.db
+*.log
+.session
+dispatch.json
+
+# Python/runtime artifacts
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+
+# Large/local binaries and archives
+ngrok
+*.tgz
+*.tar.gz
+*.zip
+
+# Markdown files, including notes and prompt files
+*.md
+*.MD
+!README.md
+!README.MD
