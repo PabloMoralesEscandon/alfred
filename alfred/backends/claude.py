@@ -6,6 +6,7 @@ uses), and `run` starts a process for a single turn (the terminal chat).
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -49,6 +50,13 @@ def describe_tool_use(block: Dict[str, Any]) -> str:
     return name
 
 
+def _fingerprint(path: Path) -> str:
+    try:
+        return hashlib.sha1(path.read_bytes()).hexdigest()[:12]
+    except OSError:
+        return "-"
+
+
 class ClaudeBackend(Backend):
     name = "claude"
     native_skills = True
@@ -71,6 +79,11 @@ class ClaudeBackend(Backend):
             command += ["--effort", config.claude_effort]
         if session_id:
             command += ["--resume", session_id]
+        for directory in config.add_dirs:
+            command += ["--add-dir", str(directory)]
+        if config.claude_settings_file is not None:
+            # A bot's permissions. Your own ~/.claude/settings.json is left out, so its allow rules never widen them.
+            command += ["--settings", str(config.claude_settings_file), "--setting-sources", "project,local"]
         if config.browser == "chrome" and "--chrome" not in config.claude_extra_args:
             command.append("--chrome")
         for plugin in extensions.plugin_dirs(config):  # the base plugin, then each enabled extension
@@ -78,8 +91,14 @@ class ClaudeBackend(Backend):
         return command + config.claude_extra_args
 
     def live_settings(self) -> List[str]:
-        # An extension that was added, removed or reshaped needs a new process to load.
-        return self.command(None, live=True) + ["#extensions=%s" % extensions.fingerprint(self.config)]
+        # An extension that was added, removed or reshaped needs a new process to load, and so does a
+        # rewritten manual (a bot's task is part of its CLAUDE.md).
+        return self.command(None, live=True) + [
+            "#extensions=%s" % extensions.fingerprint(self.config),
+            "#manual=%s" % _fingerprint(Path(self.config.workspace) / "CLAUDE.md"),
+            # A bot's permissions live in the --settings file: new rules need a new process too.
+            "#permissions=%s" % (_fingerprint(self.config.claude_settings_file) if self.config.claude_settings_file else "-"),
+        ]
 
     def open_live(
         self, *, session_id: Optional[str], cwd: Path, env: Dict[str, str], events: LiveEvents

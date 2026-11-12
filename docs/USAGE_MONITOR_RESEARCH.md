@@ -281,8 +281,9 @@ Por tanto **el monitor no puede ser una tarea programada del agente**. Tiene que
 
 ### Dónde va
 
-`TelegramBot._post_init` ya arranca `run_scheduler(...)` como tarea de asyncio. El monitor se
-arranca al lado (`run_usage_monitor(...)`) y se cancela en `_post_shutdown`. Cumple la regla 3 de
+`BotPool.start` (desde el merge de `refactor`; antes era `TelegramBot._post_init`) ya arranca
+`run_scheduler(...)` como tarea de asyncio. El monitor se arranca al lado (`run_usage_monitor(...)`)
+y se cancela en `BotPool.stop`, una vez por proceso y no una por bot (ver la sección 9). Cumple la regla 3 de
 `docs/EXTENSIONS.md`: es código base, no de una extensión, y si falla no tumba el bot porque cada
 iteración captura sus excepciones, igual que `deliver_one`.
 
@@ -315,7 +316,7 @@ A 15 minutos son unos 96 procesos de ~1 s al día, 0 tokens y 96 peticiones HTTP
 
 ## 5. Umbrales y avisos propuestos
 
-Todos los avisos son mensajes fijos enviados con `TelegramBot._send`, sin pasar por el modelo. Cada
+Todos los avisos son mensajes fijos enviados por el panel de control (antes, `TelegramBot._send`), sin pasar por el modelo. Cada
 uno tiene una clave de deduplicación `(regla, kind, scope, resets_at, umbral)` guardada en disco,
 para que no se repita ni tras reiniciar el bot.
 
@@ -437,7 +438,7 @@ bucle solo consulta, guarda, evalúa, envía y duerme.
 defecto). `TelegramBot` lo implementa guardando `from_rate_limit_event(...)` en `UsageStore`, y si
 `status != "allowed"` despierta al monitor (`asyncio.Event`) para que evalúe ya.
 
-**`alfred/telegram_bot.py`:** arranca y para el monitor en `_post_init` / `_post_shutdown`, añade
+**`alfred/telegram_bot.py`:** arranca y para el monitor en `BotPool.start` / `BotPool.stop` (antes, `_post_init` / `_post_shutdown`), añade
 el comando `/spare N` y consulta el tope en `_deliver` (sección 5).
 
 **`alfred/scheduler.py`:** `defer(item_id, due)`. Opcionalmente, la tabla `backlog`.
@@ -524,7 +525,7 @@ Ninguna actúa todavía.
 | `Rule`, `RuleContext`, `Alert`, `default_rules()` | Interfaz de reglas y las seis declaradas: `ThresholdRule` (R1), `ProjectionRule` (R2), `LimitReachedRule` (R3), `ResetRule` (R4), `SpareSessionRule` (R5) y `SpareWeeklyRule` (R6). Todas tienen `implemented = False` y `evaluate()` devuelve `[]`. | `evaluate()` |
 | `UsageHistory` | Historial en `state/usage.json`: `append()` con escritura atómica y poda a 24 h, `readings()` y `latest()`. Tolera archivos y entradas dañados. No toca el disco hasta que se le llama. | `UsageStore` (aún sin las claves de avisos enviados) |
 | `MonitorSettings`, `is_enabled()` | Configuración: `ALFRED_USAGE_MONITOR` (interruptor, desactivado por defecto) y los ajustes de la sección 7 (`_CHAT_ID`, `_POLL` con mínimo de 5 min, `_WARN`, `_CAP`, `ALFRED_QUIET_HOURS`, `_SPARE` y `_AUTORUN`). Un valor inválido conserva su valor por defecto y deja un aviso en el log. Vive en el propio módulo, no en `config.py`. Solo el interruptor tiene efecto. | Variables de `config.py` |
-| `UsageMonitor`, `start()` | Punto de entrada. `TelegramBot._post_init` llama a `usage_monitor.start(config)` justo después de arrancar el planificador. | `run_usage_monitor` |
+| `UsageMonitor`, `start()` | Punto de entrada. `BotPool.start` llama a `usage_monitor.start(config)` con la configuración de Alfred, una vez por proceso, justo después de arrancar el planificador. Con la configuración de un bot creado (`config.bot_id` distinto de 0) devuelve `None` sin leer nada. | `run_usage_monitor` |
 
 Comportamiento garantizado por los tests (`tests/test_usage_monitor.py`):
 
@@ -540,8 +541,43 @@ Comportamiento garantizado por los tests (`tests/test_usage_monitor.py`):
 - `usage.py`: `fetch()` se ha dividido en `fetch_report()`, que devuelve el texto bruto o lanza
   `UsageUnavailable`, y `fetch()`, que lo resume. La orden y los mensajes de error son los mismos y
   `/usage` responde igual: los tests anteriores pasan sin cambios.
-- `telegram_bot.py`: el atributo `usage_monitor` y la llamada a `start()` en `_post_init`.
+- `telegram_bot.py`: el import, el atributo `BotPool.usage_monitor` y la llamada a `start()` en
+  `BotPool.start`. `TelegramBot` no tiene nada del monitor.
 - `.env.example`: `ALFRED_USAGE_MONITOR=0`, documentado como esqueleto.
+
+### Bots creados (tras el merge de `refactor` / agent-chats)
+
+Desde ese merge, un proceso (`alfred run` → `BotPool`) sirve el panel de control y todos los bots que
+Alfred ha creado. Cada bot tiene su `TelegramBot`, su `Agent` y su `Config` (`config_for(bot_id)`),
+pero todos usan **la misma cuenta de Claude**: el mismo `claude` con el mismo login. Los límites del
+plan son de esa cuenta, así que:
+
+- **El monitor corre una sola vez por proceso, en `BotPool.start`, con la configuración de Alfred.**
+  No va en `TelegramBot`: un monitor por bot repetiría las consultas al endpoint de uso, que tiene
+  límite de frecuencia, y duplicaría los avisos. `TelegramBot._post_init` ya no es la ruta de
+  arranque (el pool llama a `started()`), así que con el enganche anterior el monitor no se habría
+  activado nunca.
+- `start()` devuelve `None` con la configuración de un bot creado (`config.bot_id`), aunque sus
+  ajustes propios (`overrides`) activen el interruptor. Lo comprueban los tests
+  (`CreatedBotTests` y `PoolWiringTests`).
+- El historial va en `state/usage.json` de Alfred, no en el estado de cada bot.
+- `/usage` sigue en cada bot como en `refactor`: todos muestran los mismos límites, los de la
+  cuenta.
+
+Pendiente por esta razón, cuando haya lógica:
+
+- Los avisos deben salir del **panel**, no de un bot concreto. El chat por defecto es el del dueño
+  con el panel (`ALFRED_USAGE_CHAT_ID`, o el único id numérico de `ALFRED_ALLOWED_USERS`).
+- El tope de gasto (paso 7) afecta a las tareas programadas de **todos** los bots: va en
+  `BotPool.deliver`, que es el planificador compartido, no en cada `TelegramBot`.
+- La captura pasiva de `rate_limit_event` (paso 2) llega por el `Agent` de cada bot: todos deben
+  escribir en el mismo historial del proceso (a través del pool), no en uno por bot.
+- La proyección (R2) mezcla el consumo de todos los bots y del uso fuera de Alfred. El mensaje no
+  debe atribuirlo a un bot. Saber qué bot consumió más necesitaría otra fuente (`total_cost_usd`
+  por turno), y queda fuera del alcance.
+- Las propuestas de cuota sobrante (`/spare`, paso 8) deberán decir **a qué bot** se encarga cada
+  tarea pendiente, o guardarlas por bot (`bot_id` en la tabla `backlog`, igual que en el
+  planificador).
 
 ### Lo que falta
 
@@ -559,10 +595,12 @@ Por orden, siguiendo los pasos de la sección 7:
    reinicios, y `alfred usage --json`.
 4. **Lógica de R1, R3 y R4**, deduplicación y horas de silencio, con tests con reloj fijo.
 5. **Bucle de consulta.** Sustituir `announce()` por una tarea de asyncio con intervalo
-   adaptativo y espera exponencial, cancelada en `_post_shutdown`, que envíe con
-   `TelegramBot._send` a `settings.chat_id`. Test de que nunca llama a `agent.submit`.
+   adaptativo y espera exponencial, cancelada en `BotPool.stop`, que envíe desde el panel
+   (`BotPool.main`) a `settings.chat_id`. Test de que nunca llama a `agent.submit` de ningún bot.
 6. **Lógica de R2, R5 y R6** (proyección y cuota sobrante), con mensajes simples.
-7. **Tope en `_deliver`** con `SchedulerStore.defer()`, usando `cap_percent`.
+7. **Tope en `BotPool.deliver`** (el planificador compartido por todos los bots), usando
+   `cap_percent`. `refactor` ya trae `Postpone` en el planificador; ver si sirve en lugar de un
+   `SchedulerStore.defer()` nuevo.
 8. **Backlog**: tabla, `alfred backlog`, skill base, `/spare N`, y `autorun` como opción explícita.
 9. **Documentación de usuario**: README (`/spare`, la sección de configuración), `.env.example`
    con los ajustes restantes cuando tengan efecto, y `docs/PLAN.md`.

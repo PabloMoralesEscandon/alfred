@@ -7,11 +7,12 @@ import json
 import logging
 import unittest
 from datetime import datetime, timedelta, timezone
-from types import SimpleNamespace
 from typing import Any, List
 from unittest import mock
 
-from alfred import usage_monitor
+from alfred import bots, home, usage_monitor
+from alfred.bots import BotRecord
+from alfred.config import Config
 from alfred.usage_monitor import (
     Alert,
     ClaudeUsageSource,
@@ -27,9 +28,10 @@ from alfred.usage_monitor import (
 from fakes import Sandbox
 
 try:
-    from alfred.telegram_bot import TelegramBot
+    from alfred.telegram_bot import BotPool
+    from test_panel import OWNER, TestPool, token_for
 except ImportError:  # pragma: no cover
-    TelegramBot = None  # type: ignore
+    BotPool = None  # type: ignore
 
 REPORT = (
     "You are currently using your subscription to power your Claude Code usage\n\n"
@@ -256,35 +258,68 @@ class SettingsTests(SkeletonTestCase):
         self.assertIsNone(MonitorSettings.from_config(self.sandbox.config).chat_id)
 
 
-@unittest.skipIf(TelegramBot is None, "python-telegram-bot is not installed")
-class BotWiringTests(SkeletonTestCase):
-    def post_init(self) -> Any:
-        self.sandbox.environ["TELEGRAM_BOT_TOKEN"] = "123:abc"
-        app = TelegramBot(self.sandbox.config)
-
-        async def set_my_commands(commands: Any) -> None:
-            pass
-
-        async def run() -> None:
-            await app._post_init(SimpleNamespace(bot=SimpleNamespace(set_my_commands=set_my_commands)))
-            app._scheduler.cancel()
-            await app.agent.shutdown()
-
-        asyncio.run(run())
-        return app
-
-    def test_bot_start_leaves_the_monitor_off(self) -> None:
-        app = self.post_init()
-        self.assertIsNone(app.usage_monitor)
-        self.assertEqual(self.sandbox.calls("claude"), [])
+class CreatedBotTests(SkeletonTestCase):
+    def test_a_created_bots_configuration_never_starts_one(self) -> None:
+        self.sandbox.environ["ALFRED_USAGE_MONITOR"] = "1"
+        config = Config(home=self.sandbox.home, env_files=self.sandbox.config.env_files,
+                        environ=self.sandbox.environ, bot_id=5000000001)
+        self.assertIsNone(usage_monitor.start(config))
         self.assertEqual(self.logs.records, [])
 
-    def test_bot_start_with_the_monitor_on_only_logs(self) -> None:
+
+@unittest.skipIf(BotPool is None, "python-telegram-bot is not installed")
+class PoolWiringTests(SkeletonTestCase):
+    """The process starts the monitor once, from the pool, whatever number of bots it runs."""
+
+    RESEARCH = 5000000001
+    CHEF = 5000000002
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.sandbox.environ["ALFRED_ALLOWED_USERS"] = str(OWNER)
+        self.sandbox.environ["TELEGRAM_BOT_TOKEN"] = token_for(1, "P")
+        home.bootstrap(self.sandbox.config, legacy_dir=None)
+
+    def register_bots(self) -> None:
+        registry = bots.BotRegistry(self.sandbox.config)
+        for bot_id, username in ((self.RESEARCH, "research_bot"), (self.CHEF, "chef_bot")):
+            registry.save(BotRecord(bot_id=bot_id, username=username, name=username, owner_id=OWNER))
+            registry.set_token(bot_id, token_for(bot_id))
+
+    def start_pool(self) -> Any:
+        pool = TestPool(self.sandbox.config)
+
+        async def run() -> None:
+            await pool.start()
+            self.frontends = list(pool.frontends.values())  # stop() empties the pool
+            await pool.stop()
+
+        asyncio.run(run())
+        return pool
+
+    def usage_calls(self) -> List[Any]:
+        return [call for call in self.sandbox.calls("claude") if call.get("stdin") == "/usage"]
+
+    def test_pool_start_leaves_the_monitor_off(self) -> None:
+        self.register_bots()
+        pool = self.start_pool()
+        self.assertEqual(len(pool.connections), 3)  # the panel and both bots ran
+        self.assertIsNone(pool.usage_monitor)
+        self.assertEqual(self.usage_calls(), [])
+        self.assertEqual(self.logs.records, [])
+
+    def test_pool_start_with_the_monitor_on_logs_once_for_all_bots(self) -> None:
         self.sandbox.environ["ALFRED_USAGE_MONITOR"] = "1"
-        app = self.post_init()
-        self.assertIsInstance(app.usage_monitor, UsageMonitor)
+        self.register_bots()
+        pool = self.start_pool()
+        self.assertEqual(len(pool.connections), 3)
+        self.assertIsInstance(pool.usage_monitor, UsageMonitor)
+        self.assertEqual(pool.usage_monitor.settings.history_path, self.sandbox.config.state_dir / "usage.json")
         self.assertEqual(len(self.logs.records), 1)
-        self.assertEqual(self.sandbox.calls("claude"), [])
+        self.assertEqual(self.usage_calls(), [])
+        self.assertEqual(len(self.frontends), 2)
+        for frontend in self.frontends:
+            self.assertFalse(hasattr(frontend, "usage_monitor"))
 
 
 if __name__ == "__main__":

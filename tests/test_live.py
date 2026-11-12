@@ -195,7 +195,8 @@ class LiveSessionTests(unittest.TestCase):
         self.assertEqual(argv[argv.index("--resume") + 1], "sess-A")
 
     def test_a_turn_with_no_sign_of_life_is_stopped(self) -> None:
-        self.sandbox.environ["ALFRED_TIMEOUT"] = "0.4"
+        # Long enough for the fake CLI to start: macOS can take half a second to first run a new script.
+        self.sandbox.environ["ALFRED_TIMEOUT"] = "1.5"
         self.sandbox.fake_cli("claude", {"fresh": [{"_sleep": 30}]})
 
         async def scenario(session: LiveSession) -> None:

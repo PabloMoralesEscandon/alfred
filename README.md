@@ -1,13 +1,17 @@
 # Alfred
 
-Alfred is a personal agent you reach from anywhere through Telegram. Each message is handed to
-[Claude Code](https://claude.com/claude-code) running headless in Alfred's own home directory, with a
-resumable session per chat. Alfred ships with almost no built-in abilities: when it works out how to do
-something for you, it writes itself a skill and uses it next time.
+Alfred is a personal agent you reach from anywhere through Telegram. The bot you set up is a **control
+panel**: it has no agent of its own, and it creates and manages the bots that do the work. Each of those
+is a Telegram bot of its own, with its own chat, task, model, effort, permissions, memory, tools and
+[Claude Code](https://claude.com/claude-code) session, running headless in its own directory. A bot ships
+with almost no built-in abilities: when it works out how to do something for you, it writes itself a
+skill and uses it next time.
 
-Codex is still supported as an alternative backend (`ALFRED_BACKEND=codex`, or `/backend codex` in a chat).
+Codex is still supported as an alternative backend (`/bot set <bot> backend codex`, or `/backend codex`
+in a bot's chat).
 
-The design and roadmap are in [docs/PLAN.md](docs/PLAN.md).
+The design and roadmap are in [docs/PLAN.md](docs/PLAN.md); how the bots are created, and why this way,
+in [docs/AGENT_CHATS_RESEARCH.md](docs/AGENT_CHATS_RESEARCH.md).
 
 ## Requirements
 
@@ -71,23 +75,86 @@ All settings are listed in [.env.example](.env.example).
 
 ## Using it
 
-Write to the bot as you would to a person. Photos, documents and voice notes are saved to Alfred's inbox
-and handed to it by path.
+### The control panel
+
+Once, in @BotFather: open its Mini App (the Open button), choose your bot, and turn on **Bot Management
+Mode**. That is what lets the panel create bots. `/status` in the panel says whether it is on.
+
+Send `/bot` for the menu: **Create bot** walks you through name, task, model, effort and permissions
+with buttons (Back and Cancel on every step) and ends with a summary and the proposed username, which
+extends the panel's (`manolito_bot` → `manolito_<what it does>_bot`). **My bots** changes a bot's model,
+effort, task and permissions, pauses, resumes or destroys it. A menu expires after 30 minutes, when you
+open a newer one, or when Alfred restarts; its old buttons then just say so.
+
+The same can be done with text shortcuts:
 
 | Command | What it does |
 | --- | --- |
-| `/help` | What Alfred can do, and this list. |
-| `/new` | Start a fresh conversation. Memory and skills are kept. |
-| `/stop` | Stop what Alfred is doing, including anything it left running in the background. The conversation is kept. |
-| `/usage` | How much of your Claude plan limits is used, and when they reset. |
-| `/memory` | List what Alfred has memorized. |
-| `/skills` | List the skills Alfred has. |
-| `/schedule` | List pending reminders and timed tasks. |
-| `/backend [claude\|codex]` | Show or switch the backend for this chat. |
-| `/status` | Backend, session, whether its process is open, browser and home directory. |
+| `/bot new <name> [options] [task]` | Create a bot. The panel shows a "Create @…" keyboard button: tap it and confirm in the window Telegram opens, where you can still change the name and username. A `t.me/newbot/…` link follows as a second option, for apps where the button does not show. The panel connects to the new bot at once, no restart, and removes the keyboard. |
+| `/bots` | List your bots. |
+| `/bot show <bot>` | Its settings and permissions. |
+| `/bot set <bot> <setting> <value>` | `task`, `model`, `effort`, `backend` or `workdir`. `default` clears one. |
+| `/bot perm <bot> <permission> <value>` | Change a permission (below). |
+| `/bot pause <bot>`, `/bot resume <bot>` | Disconnect or reconnect it. Messages sent to a paused bot are dropped; its reminders wait. |
+| `/bot destroy <bot>` | Asks first. Then stops it, deletes its reminders, conversations, memory, files and settings, and revokes its token. Telegram has no way for Alfred to delete the bot account itself, so the panel points you to @BotFather's `/deletebot`. |
+| `/status`, `/usage`, `/help` | Bot management on or off and how many bots run; plan limits; help. |
 
-The commands live in one list (`COMMANDS` in `alfred/telegram_bot.py`); adding one is a line there plus a
-`_cmd_<name>` method. Any other `/command` is passed to the agent as text, so `/disk-report` is a short way to ask for that skill.
+`<bot>` is the bot's `@username`, its name or its id. Options for `/bot new` come before the task:
+`+web`, `+browser`, `+shell`, `+edit`, `+mcp`, `+contact`, `+bots`, `+bypass`, `-schedule`, `-sandbox`,
+and `setting=value` or `permission=value`, for example:
+
+```text
+/bot new Research +web model=sonnet effort=high Every morning, find new papers on protein folding and summarize them.
+```
+
+### A bot's chat
+
+Open the link the panel sends and press Start. Then write to the bot as you would to a person. Photos,
+documents and voice notes are saved to the bot's inbox and handed to it by path.
+
+| Command | What it does |
+| --- | --- |
+| `/help` | What the bot is for, and this list. |
+| `/new` | Start a fresh conversation. Memory and skills are kept. |
+| `/stop` | Stop what the bot is doing, including anything it left running in the background. The conversation is kept. |
+| `/usage` | How much of your Claude plan limits is used, and when they reset. |
+| `/memory` | List what the bot has memorized. |
+| `/skills` | List the skills the bot has. |
+| `/schedule` | List its pending reminders and timed tasks. |
+| `/backend [claude\|codex]` | Show or switch the backend for this chat. |
+| `/status` | Backend, model, session, whether its process is open, its directory. |
+
+The commands live in one list (`COMMANDS` in `alfred/telegram_bot.py`, and `PANEL_COMMANDS` for the
+panel); adding one is a line there plus a `_cmd_<name>` method. Any other `/command` is passed to the
+agent as text, so `/disk-report` is a short way to ask for that skill. In a chat with topics, each topic
+is its own conversation.
+
+### Permissions
+
+A new bot starts with the least: its own directory, the `alfred` command (to post and to schedule
+reminders in its own chat) and nothing else. Grant more when you create it or later with `/bot perm`:
+
+| Permission | Default | Values |
+| --- | --- | --- |
+| `mode` | `dontAsk` | Claude Code permission mode: `dontAsk`, `acceptEdits`, `auto`, `plan`, `default`, `bypassPermissions` |
+| `shell` | `alfred` | `alfred` (only the alfred command) or `full` (any shell command) |
+| `sandbox` | `on` | With `shell full`, run commands inside Claude Code's OS sandbox |
+| `edit` | `off` | Edit files in its working directory and extra folders (its own directory, always) |
+| `folders` | none | Extra folders it may read, and edit with `edit on`, separated by commas |
+| `web` | `off` | WebSearch and WebFetch |
+| `browser` | `off` | Alfred's browser (Orca's, or Chrome) |
+| `mcp` | `off` | MCP tools: your connectors and servers, and its extensions'. Off removes them all |
+| `schedule` | `on` | Reminders and timed tasks |
+| `contact` | `off` | Post or schedule messages to chats other than yours |
+| `bots` | `off` | List bots, change other bots' settings, ask you for new ones. Never destroy |
+| `allow`, `deny` | none | Extra Claude Code permission rules, separated by `;` |
+
+Most of this is enforced by Claude Code itself: each bot runs with its own `--settings` file (permission
+mode, allow and deny rules, its directories, and the switches that stop the file tools at the edge of
+those directories), and your own `~/.claude/settings.json` is not loaded for it, so its allow rules never
+widen a bot. Some is enforced by the `alfred` command, and a little is only an instruction in the bot's
+manual. [docs/AGENT_CHATS_RESEARCH.md](docs/AGENT_CHATS_RESEARCH.md) has the exact split. In short: with
+`shell full` and no sandbox, a bot can do whatever your user can, whatever the other switches say.
 
 ### How a conversation runs
 
@@ -224,6 +291,19 @@ Everything Alfred knows lives in `ALFRED_HOME` (default `~/.alfred`), outside th
 The home is its own git repository and Alfred commits to it after every turn that changes something.
 `git -C ~/.alfred log --stat` shows what it taught itself and when, and `git revert` undoes it.
 
+### The bots' own directories
+
+Each bot Alfred created has a directory of its own in `~/.alfred-bots/<bot id>/` (`ALFRED_BOTS_HOME`), with
+the same layout: `CLAUDE.md` (its manual, written from its task and permissions), `memory/`, `inbox/`,
+`outbox/` and `extensions/`. Its agent runs there, and the directory is its own git repository. It is next
+to the home and not inside it on purpose: Claude Code reads every `CLAUDE.md` from its working directory up
+to the root, so a bot inside `~/.alfred` would also read Alfred's manual and memory index.
+
+What a bot must not be able to change lives in the home, under `state/bots/<bot id>/` (folder `0700`,
+files `0600`, never committed): `bot.json` (settings and permissions), `token`, `sessions.json` and
+`claude-settings.json` (its permissions, as Claude Code settings). One scheduler serves every bot; each
+item records the bot, chat and topic it belongs to and is only ever delivered there.
+
 ### Base and extensions
 
 Alfred keeps what it is given apart from what it adds to itself (full protocol in
@@ -233,22 +313,30 @@ Alfred keeps what it is given apart from what it adds to itself (full protocol i
   `alfred:reminders`, `alfred:web-logins`, `alfred:orca-agents` and `alfred:extensions` (the protocol
   itself), and its `bin/` adds commands such as `alfred-wait-agent`. It changes when you update Alfred;
   Alfred is told never to edit it.
-- **Extensions**: what Alfred writes, in `~/.alfred/extensions/<name>/`, one Claude Code plugin per
-  domain, with skills (`<name>:<skill>`), commands in `bin/`, tests, and, only with your yes, hooks or
-  MCP servers. Every process loads the base and each enabled extension with `--plugin-dir`, and a
-  changed extension is picked up at the next message without restarting the bot.
+- **Extensions**: what a bot writes, in `extensions/<name>/` of its own directory, one Claude Code plugin
+  per domain, with skills (`<name>:<skill>`), commands in `bin/`, tests, and, only with your yes, hooks or
+  MCP servers. Every bot loads the base and its own enabled extensions with `--plugin-dir`, never another
+  bot's, and a changed extension is picked up at the next message without restarting anything.
 
 Every turn that adds, changes or removes an extension ends with a 🧩 note in the chat, flagged ⚠️ when
 it adds something that runs by itself. To manage them yourself:
 
 ```bash
-~/.alfred/bin/alfred ext list
-~/.alfred/bin/alfred ext check <name>
-~/.alfred/bin/alfred ext disable <name>     # or enable, remove
+ALFRED_BOT_ID=<bot id> ~/.alfred/bin/alfred ext list
+ALFRED_BOT_ID=<bot id> ~/.alfred/bin/alfred ext check <name>
+ALFRED_BOT_ID=<bot id> ~/.alfred/bin/alfred ext disable <name>     # or enable, remove
 ```
 
-Because the backend is your own Claude Code installation, Alfred also has whatever that has: your
-global skills, MCP servers and connectors.
+Because the backend is your own Claude Code installation, a bot can also reach what that has (your global
+skills, MCP servers and connectors) as far as its permissions let it: with `mcp off`, the default, no MCP
+tool at all.
+
+## Upgrading to the control panel
+
+The main bot used to be Alfred's agent. Now it is the control panel and runs no agent; `~/.alfred` keeps
+its memory, skills and extensions, and `alfred chat` still talks to that agent from a terminal. Reminders
+scheduled in the main bot's chat are still delivered there; timed tasks there are announced instead of
+run, so recreate them in one of your bots. `alfred chat --bot <bot>` talks to a created bot from a terminal.
 
 ## Upgrading from the first version
 
@@ -259,18 +347,25 @@ carried into the memory folder. Existing reminders carry over if you move `sched
 
 ## Security
 
-Alfred runs an agent with your user's full permissions, driven by chat messages. Treat the allow-list
-and the bot token like SSH keys.
+Alfred runs agents with your user's account, driven by chat messages. Treat the allow-list and the bot
+tokens like SSH keys.
 
-- Only allow-listed accounts get any response. Everyone else is ignored and logged.
-- `ALFRED_CLAUDE_PERMISSION_MODE=bypassPermissions` is the default, because nobody is at the keyboard to
-  approve prompts. Set it to `acceptEdits` or `dontAsk` for a more restricted Alfred, or run the bot as a
-  dedicated user or inside a container or VM.
+- Only allow-listed accounts get any response, in the panel and in every bot. Everyone else is ignored
+  and logged. Each new bot is also restricted on Telegram's side to you (`setManagedBotAccessSettings`).
+- Anyone who knows the panel's username can open a bot-creation link naming it as manager. Such a bot is
+  ignored unless its creator is on the allow-list; its token is never fetched.
+- Tokens live only in `.env` (the panel's) and `state/bots/<id>/token` (`0600`, git-ignored). They are
+  not passed to the agents' environment, `alfred send` looks them up itself, and every bot is denied
+  reading Alfred's home. `httpx`, which logs Bot API URLs with the token in them, is kept quiet.
+- Bots start in `dontAsk` mode with the least permissions (see [Permissions](#permissions)). Widening a
+  bot to `shell full` without the sandbox, or to `bypassPermissions`, gives it what your user can do.
+  For more isolation, run Alfred as a dedicated user or inside a container or VM.
 - The browser carries your logged-in sessions. A web page can contain text written to manipulate an
-  agent. Alfred is told to treat page content as data, and a browser profile with fewer
-  logins is the stronger protection if that worries you.
-- Alfred is instructed to confirm before destructive, costly or outward-facing actions, and to treat
-  web pages and files as data. Those are instructions to a model, so they reduce risk without removing it.
+  agent. Bots are told to treat page content as data; keeping `browser off`, and a browser profile with
+  fewer logins, are the stronger protections.
+- Bots are instructed to confirm before destructive, costly or outward-facing actions. That is an
+  instruction to a model, so it reduces risk without removing it; the permissions above are the part
+  Claude Code enforces.
 
 ## Tests
 

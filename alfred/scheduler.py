@@ -30,6 +30,14 @@ DURATION_PATTERN = re.compile(r"^\s*(\d+)\s*([smhdw])\s*$", re.IGNORECASE)
 Item = Dict[str, Any]
 
 
+class Postpone(Exception):
+    """Raised by a delivery that cannot happen yet (its bot is paused): try again in `seconds`."""
+
+    def __init__(self, seconds: int = 300, reason: str = "") -> None:
+        super().__init__(reason or "postponed")
+        self.seconds = seconds
+
+
 def parse_duration(text: str) -> int:
     """`90s`, `45m`, `2h`, `1d`, `1w` -> seconds."""
     match = DURATION_PATTERN.match(text)
@@ -103,12 +111,18 @@ class SchedulerStore:
             connection.execute("ALTER TABLE scheduled_messages ADD COLUMN kind TEXT NOT NULL DEFAULT 'message'")
         if "repeat_seconds" not in existing:
             connection.execute("ALTER TABLE scheduled_messages ADD COLUMN repeat_seconds INTEGER")
+        # Which bot the item belongs to (0 is the main bot) and the topic it goes to, if any.
+        if "bot_id" not in existing:
+            connection.execute("ALTER TABLE scheduled_messages ADD COLUMN bot_id INTEGER NOT NULL DEFAULT 0")
+        if "thread_id" not in existing:
+            connection.execute("ALTER TABLE scheduled_messages ADD COLUMN thread_id INTEGER")
         connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_scheduled_messages_due ON scheduled_messages(status, due_at_utc)"
         )
         connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_scheduled_messages_chat ON scheduled_messages(chat_id, created_at_utc)"
         )
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_scheduled_messages_bot ON scheduled_messages(bot_id, chat_id)")
         connection.commit()
 
     # -- writes from the CLI ------------------------------------------------
@@ -123,6 +137,8 @@ class SchedulerStore:
         repeat_seconds: Optional[int] = None,
         user_id: int = 0,
         username: str = "",
+        bot_id: int = 0,
+        thread_id: Optional[int] = None,
     ) -> Item:
         if kind not in (KIND_MESSAGE, KIND_TASK, KIND_EVENT):
             raise ValueError("kind must be 'message', 'task' or 'event'")
@@ -137,12 +153,12 @@ class SchedulerStore:
                 """
                 INSERT INTO scheduled_messages (
                     id, chat_id, user_id, username, due_at_utc, message, source_request,
-                    status, created_at_utc, kind, repeat_seconds
-                ) VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?)
+                    status, created_at_utc, kind, repeat_seconds, bot_id, thread_id
+                ) VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     item_id, chat_id, user_id, username, to_utc_text(due), text,
-                    STATUS_SCHEDULED, to_utc_text(utc_now()), kind, repeat_seconds,
+                    STATUS_SCHEDULED, to_utc_text(utc_now()), kind, repeat_seconds, bot_id, thread_id or None,
                 ),
             )
         created = self.get(item_id)
@@ -154,9 +170,10 @@ class SchedulerStore:
             row = connection.execute("SELECT * FROM scheduled_messages WHERE id = ?", (item_id,)).fetchone()
         return dict(row) if row else None
 
-    def list(self, chat_id: int, *, include_done: bool = False) -> List[Item]:
-        query = "SELECT * FROM scheduled_messages WHERE chat_id = ?"
-        parameters: List[Any] = [chat_id]
+    def list(self, chat_id: int, *, include_done: bool = False, bot_id: int = 0) -> List[Item]:
+        """A chat's items in one bot. The same chat id in another bot is another conversation."""
+        query = "SELECT * FROM scheduled_messages WHERE chat_id = ? AND bot_id = ?"
+        parameters: List[Any] = [int(chat_id), bot_id]
         if not include_done:
             query += " AND status IN (?, ?)"
             parameters += [STATUS_SCHEDULED, STATUS_DELIVERING]
@@ -164,12 +181,12 @@ class SchedulerStore:
             rows = connection.execute(query + " ORDER BY due_at_utc, created_at_utc", parameters).fetchall()
         return [dict(row) for row in rows]
 
-    def cancel(self, id_or_prefix: str, chat_id: int) -> Optional[Item]:
-        """Cancel a pending item of this chat by id or unambiguous id prefix."""
+    def cancel(self, id_or_prefix: str, chat_id: int, bot_id: int = 0) -> Optional[Item]:
+        """Cancel a pending item of this chat (in this bot) by id or unambiguous id prefix."""
         prefix = id_or_prefix.strip().lower()
         if not prefix:
             return None
-        matches = [item for item in self.list(chat_id) if item["id"].startswith(prefix)]
+        matches = [item for item in self.list(chat_id, bot_id=bot_id) if item["id"].startswith(prefix)]
         if len(matches) != 1:
             return None
         with self._connect() as connection:
@@ -177,6 +194,22 @@ class SchedulerStore:
                 "UPDATE scheduled_messages SET status = ? WHERE id = ?", (STATUS_CANCELLED, matches[0]["id"])
             )
         return self.get(matches[0]["id"])
+
+    def count_for_bot(self, bot_id: int) -> int:
+        """Pending items of a bot, in any chat."""
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT COUNT(*) AS n FROM scheduled_messages WHERE bot_id = ? AND status IN (?, ?)",
+                (bot_id, STATUS_SCHEDULED, STATUS_DELIVERING),
+            ).fetchone()
+        return int(row["n"])
+
+    def delete_for_bot(self, bot_id: int) -> int:
+        """Remove every item of a bot, done or pending, when the bot is destroyed. Returns how many."""
+        if not bot_id:
+            raise ValueError("the main bot's items are never deleted in bulk")
+        with self._connect() as connection:
+            return connection.execute("DELETE FROM scheduled_messages WHERE bot_id = ?", (bot_id,)).rowcount
 
     # -- worker side --------------------------------------------------------
 
@@ -213,6 +246,16 @@ class SchedulerStore:
         finally:
             connection.close()
         return self.get(row["id"]) if row is not None else None
+
+    def postpone(self, item_id: str, seconds: int, *, now: Optional[datetime] = None) -> Optional[Item]:
+        """Put an item that could not be delivered yet back in the queue, `seconds` from now."""
+        due = to_utc_text((now or utc_now()) + timedelta(seconds=max(1, seconds)))
+        with self._connect() as connection:
+            connection.execute(
+                "UPDATE scheduled_messages SET status = ?, due_at_utc = ? WHERE id = ? AND status = ?",
+                (STATUS_SCHEDULED, due, item_id, STATUS_DELIVERING),
+            )
+        return self.get(item_id)
 
     def finish(self, item_id: str, *, error: Optional[str] = None, now: Optional[datetime] = None) -> Optional[Item]:
         """Record a delivery attempt. Recurring items are put back with their next due time."""
@@ -258,6 +301,8 @@ async def run_scheduler(
     async def deliver_one(item: Item) -> None:
         try:
             await deliver(item)
+        except Postpone as wait:
+            store.postpone(item["id"], wait.seconds)
         except Exception as exc:  # delivery failures must not stop the loop
             log.exception("delivery of %s failed", item["id"])
             store.finish(item["id"], error=str(exc) or exc.__class__.__name__)

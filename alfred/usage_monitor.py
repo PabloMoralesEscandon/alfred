@@ -11,7 +11,7 @@ step at a time (see docs/USAGE_MONITOR_RESEARCH.md, section 9):
   logic yet and never return an alert.
 - `UsageHistory`: the last readings, kept in a small JSON file.
 - `MonitorSettings`: configuration, read from the environment and `.env`.
-- `UsageMonitor` and `start()`: the entry point the bot calls.
+- `UsageMonitor` and `start()`: the entry point; `BotPool.start` calls it once per process.
 
 The monitor is off unless `ALFRED_USAGE_MONITOR` is set. When it is off, `start()`
 reads no other setting, builds nothing and returns None. When it is on, it only
@@ -408,8 +408,13 @@ class UsageMonitor:
 
 
 def start(config: Config, environ: Optional[Dict[str, str]] = None) -> Optional[UsageMonitor]:
-    """Called once when the bot starts. Off by default: then this reads nothing else and returns None."""
-    if not is_enabled(config):
+    """Called once per process, by `BotPool.start`, with Alfred's own configuration.
+
+    Off by default: then this reads nothing else and returns None. A created bot's configuration
+    (`config.bot_id` set) never starts one, because the plan limits belong to the Claude account that
+    every bot of the process shares, so one monitor covers them all.
+    """
+    if config.bot_id or not is_enabled(config):
         return None
     settings = MonitorSettings.from_config(config)
     monitor = UsageMonitor(settings, ClaudeUsageSource(config, environ), UsageHistory(settings.history_path))
