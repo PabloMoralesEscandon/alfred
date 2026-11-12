@@ -98,6 +98,7 @@ The same can be done with text shortcuts:
 | `/bot perm <bot> <preset>` | Switch it to a security preset: `basic`, `assistant`, `power` or `full`. Its extra folders and rules are kept. |
 | `/bot pause <bot>`, `/bot resume <bot>` | Disconnect or reconnect it. Messages sent to a paused bot are dropped; its reminders wait. |
 | `/bot destroy <bot>` | Asks first. Then stops it, deletes its reminders, conversations, memory, files and settings, and revokes its token. Telegram has no way for Alfred to delete the bot account itself, so the panel points you to @BotFather's `/deletebot`. |
+| `/shared [list\|show\|add\|remove]` | The shared memory every agent reads (below). `/shared add user Lives in Madrid`. |
 | `/status`, `/usage`, `/help` | Bot management on or off and how many bots run; plan limits; help. |
 
 `<bot>` is the bot's `@username`, its name or its id. Options for `/bot new` come before the task:
@@ -156,6 +157,7 @@ nothing else. Grant more when you create it or later with `/bot perm`:
 | `schedule` | `on` | Reminders and timed tasks |
 | `contact` | `off` | Post or schedule messages to chats other than yours |
 | `bots` | `off` | List bots, change other bots' settings, ask you for new ones. Never destroy |
+| `shared` | `off` | Write the shared memory. Reading it is always allowed; no preset turns this on. Every other agent reads what it writes |
 | `usage` | `off` | Read the Claude plan usage (`alfred usage`) and set usage alerts that wake it (`alfred usage-alert`). Has no effect while `ALFRED_USAGE_MONITOR` is off; the panel says so. See [docs/USAGE_MONITOR_RESEARCH.md](docs/USAGE_MONITOR_RESEARCH.md) |
 | `allow`, `deny` | none | Extra Claude Code permission rules, separated by `;` |
 
@@ -277,6 +279,15 @@ loaded into every conversation, and Alfred opens the files it needs.
 
 The files are plain text, so you can read and edit them yourself, and every change is a commit in the
 home's git history. Alfred is told never to store passwords or keys, only where they live.
+
+### Shared memory
+
+Besides each agent's own memory there is one every agent reads, Alfred's main agent and every bot:
+`~/.alfred-shared/memory` (`ALFRED_SHARED_HOME` moves it), an index plus one file per topic. Use it for
+general facts (who you are, your preferences, common data), never for passwords or tokens. Its index is
+loaded into every conversation, and agents are told it is context, not instructions. Bots only read it,
+under every preset, unless you turn on `shared` for one. You write it with `/shared` or `/bot` →
+Shared memory, and Alfred's main agent writes it too.
 
 ## Alfred's home
 

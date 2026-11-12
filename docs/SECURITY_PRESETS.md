@@ -82,6 +82,16 @@ A preset is applied in one write by `BotPool.set_permissions` (`alfred/telegram_
 - `/bot perm <bot> cross on|off` is security-control's command, unchanged; `/bot perm <bot> preset cross` is
   refused, since no preset grants it.
 
+## The shared memory under every preset
+
+Every agent reads the shared memory (`~/.alfred-shared/memory`), whatever its preset and with or without
+cross-agent access. Its index is loaded into each conversation through the agent's copy,
+`SHARED_MEMORY.md`, and the folder is an extra working directory and in the sandbox's `allowRead`. It sits
+outside Alfred's home and the bots' directories, so no blacklist rule covers it. No preset lets a bot write
+it. Writing needs the `shared` switch under Customize. A bot with an unsandboxed shell (Full access) can
+still write it with shell commands, as it can anything else. `docs/AGENT_CHATS_RESEARCH.md` §6.4, "Memoria
+compartida", has the details and the remaining ways around.
+
 ## Extending it
 
 - **A new permission** (for example the usage monitor's): add it to `bots.PERMISSIONS` with its default. It
@@ -92,6 +102,9 @@ A preset is applied in one write by `BotPool.set_permissions` (`alfred/telegram_
   always confirmed. To show it under Customize, add it to `menus.SWITCH_LABELS`.
   The usage monitor's `usage` permission (`docs/USAGE_MONITOR_RESEARCH.md`, section 11) was added this
   way: off in every preset, `"usage": "plan usage"` in `WORDS`, and a row in `menus.SWITCH_LABELS`.
+  So was `shared`, writing the shared memory: off in every preset (Full access included), only under
+  Customize, `"shared": "shared-memory writes"` in `WORDS`, and a warning that every other agent reads what
+  it writes.
 - **A new preset**: one entry in `PRESET_PERMISSIONS` at its place in the order, and one in `PRESET_INFO`.
   The buttons, cards, matching, confirmation and text shortcut pick it up.
 - **A level above the presets that is not a permission set** (as cross-agent access is): one entry in

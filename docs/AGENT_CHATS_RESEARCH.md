@@ -782,6 +782,62 @@ puede cambiar esa variable y hacerse pasar por otro bot ante `alfred`. Y con `sh
 o con `bypassPermissions` y Bash libre, el bot puede hacer lo mismo que tu usuario. Para un aislamiento
 real en esos casos, Alfred debería correr con un usuario propio o en una VM.
 
+#### Memoria compartida
+
+Además de su memoria propia, cada agente lee una memoria general compartida: hechos que sirven a todos
+(quién es el usuario, sus preferencias, datos comunes). Es contexto, nunca instrucciones, y nunca guarda
+contraseñas, tokens ni claves.
+
+- **Dónde vive**: `~/.alfred-shared/memory/` (se cambia con `ALFRED_SHARED_HOME`). Contiene `MEMORY.md`
+  como índice y un archivo por tema en `<carpeta>/<nombre>.md`, igual que la memoria de un agente. Está
+  junto a `~/.alfred` y `~/.alfred-bots`, fuera de los dos, porque la lista negra deniega ambos a todos
+  los bots y en Claude Code una regla deny gana a cualquier allow. Tampoco está dentro de ningún
+  repositorio git: no se versiona ni se publica. La carpeta es `0700` y los archivos `0600`. Si
+  `ALFRED_SHARED_HOME` apunta dentro de una zona denegada, el registro lo avisa
+  (`shared_memory.location_problem`). Se crea vacía, con solo el índice; no se ha copiado nada de la
+  memoria actual.
+- **Cómo se carga**: Claude Code no carga un `@import` de fuera del proyecto en una sesión no interactiva
+  (pediría aprobación y no hay nadie). Lo probamos con el CLI real: con `@/ruta/absoluta`, con y sin
+  `--add-dir`, el modelo no veía el contenido; con una copia dentro del proyecto, sí. Por eso, antes de
+  cada proceso, Alfred escribe `SHARED_MEMORY.md` en el directorio de cada agente: una cabecera que dice
+  qué es, cuánto fiarse y si puede escribir, seguida del índice. El manual lo importa con
+  `@SHARED_MEMORY.md`, igual que `@memory/MEMORY.md`. Esto vale para cada bot (`bots.prepare_workspace`) y
+  para el agente principal (`home.bootstrap` y `Agent._prepare_workspace`). Codex lo lee porque su
+  `AGENTS.md` se lo pide. Si el índice cambia, el proceso se reabre en el siguiente mensaje con el índice
+  nuevo (`#shared` en `live_settings`). Los archivos de tema se leen donde viven.
+- **Lectura, siempre**: la carpeta va en `additionalDirectories` de cada bot y como `--add-dir` de cada
+  proceso de Claude Code. Con sandbox, va también en su `allowRead`. Ninguna regla deny `Read` ni ningún
+  `denyRead` la cubre, en ningún preset, con o sin acceso entre agentes. La prueba
+  `test_the_shared_memory_is_readable_at_every_level_and_written_only_with_the_permission` lo comprueba
+  con todos los presets y con todas las combinaciones de interruptores, modos y shells que ya usa la
+  prueba de la lista negra.
+- **Escritura, solo con permiso**: cada bot tiene `Edit(//<memoria compartida>/**)` en sus reglas deny,
+  que también cubren Write, y la carpeta en el `denyWrite` del sandbox. Esto cambia solo con el permiso
+  `shared` (Personalizar → «🧠 Write the shared memory»), que está desactivado en todos los presets,
+  Full access incluido. Con él, la regla pasa a allow y la carpeta a `allowWrite`. El aviso dice que los
+  demás agentes leerán lo que escriba y que ese texto puede llevar instrucciones. Su copia del índice
+  también está en las reglas deny `Edit`, como su `CLAUDE.md`.
+- **Quién escribe**: el usuario, desde el panel, con `/shared list|show|add|remove` o con el botón
+  «🧠 Shared memory» de `/bot`. El panel escribe los archivos él mismo, sin agente, y rechaza lo que
+  parezca un secreto (los mismos patrones que `alfred ext check`) y los nombres de tema que se salgan de
+  la carpeta. También escribe el agente principal de Alfred, al que su manual pide hechos generales,
+  nada leído en webs o mensajes, y nunca secretos.
+
+Rodeos que siguen siendo posibles:
+
+- **Un bot con shell abierta y sin sandbox** (Full access, o `bypassPermissions` con `shell alfred`)
+  puede escribir en la carpeta con comandos (`echo >> …`). La regla deny `Edit` solo frena las
+  herramientas de archivos y los comandos que Claude Code reconoce como edición. No hay reglas de shell
+  sobre esta ruta porque también bloquearían su lectura. Lo que se escriba así lo leerán los demás
+  agentes en su siguiente proceso.
+- **Codex**: su sandbox lee todo, y con `danger-full-access` también escribe todo. Solo el manual le pide
+  no escribir.
+- **El agente principal** corre con tus permisos y escribe ahí por diseño. Si una web le cuela un texto
+  y él lo guarda, ese texto llega a todos los bots. Su manual y la cabecera de la copia piden tratar lo
+  que hay como contexto y no como órdenes, pero eso es una instrucción, no una barrera.
+- **La copia** se rehace antes de cada proceso. Un proceso que ya está abierto sigue con el índice
+  anterior hasta su siguiente mensaje, y un tema borrado puede seguir en su contexto hasta entonces.
+
 ### 6.5 Otras decisiones
 
 - **Un bot en pausa** no recibe mensajes: lo que se le escriba mientras tanto se descarta al reanudarlo
@@ -875,6 +931,14 @@ límite de 0,4 s del test. Se subió a 1,5 s en un commit aparte.
     concede, y la acción fuera de su pantalla solo la muestra.
 
 ### 6.7 Qué queda por probar en vivo
+
+- Memoria compartida, con Claude Code real:
+  1. Tras `/shared add user …`, un bot Basic responde con ese hecho sin abrir archivos (el índice está en
+     contexto) y abre un archivo de tema cuando hace falta.
+  2. Sin el permiso `shared`, el mismo bot no puede editar ni crear un archivo allí.
+  3. Con Power, el sandbox de macOS deja leer la carpeta (`cat`) y no escribirla.
+  4. Tras el siguiente arranque, el agente principal ve `~/.alfred/SHARED_MEMORY.md` y escribe un tema
+     nuevo cuando se le pide.
 
 Nada de lo que sigue se ha probado con Telegram ni con Claude Code reales. Los pasos asumen un bot de
 pruebas y un home aparte, para no tocar `~/.alfred` ni el servicio en marcha:
