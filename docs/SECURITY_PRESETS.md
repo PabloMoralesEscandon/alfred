@@ -83,9 +83,10 @@ A preset is applied in one write by `BotPool.set_permissions` (`alfred/telegram_
 - `/bot perm <bot> cross on|off` is security-control's command, unchanged; `/bot perm <bot> preset cross` is
   refused, since no preset grants it.
 
-## The personality under every preset
+## The SOUL.md under every preset
 
-Each bot's `SOUL.md` is its owner's to change, from the panel. No preset lets a bot edit it: that needs the
+Each bot's `SOUL.md` (its role and mission as well as its personality: what it does, never what it may do)
+is its owner's to change, from the panel. Letting a bot edit it lets it change its own mission. No preset lets a bot edit it: that needs the
 `soul` switch under Customize, which opens only the bot's own `SOUL.md` (`Edit` allowed, out of the sandbox's
 `denyWrite`), never another bot's. Without it, `Edit` of the file is denied, the sandbox's `denyWrite` covers
 it, and with an open shell `Bash(*SOUL.md*)` is denied too. As with everything else, a bot with an

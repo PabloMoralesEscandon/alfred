@@ -91,7 +91,7 @@ Once, in @BotFather: open its Mini App (the Open button), choose your bot, and t
 Mode**. That is what lets the panel create bots. `/status` in the panel says whether it is on.
 
 Send `/bot` for the menu, where everything is managed with buttons. **Create bot** walks you through
-name, task, personality, model, effort and permissions (Back and Cancel on every step) and ends with a
+name, task (a short label), role and personality, model, effort and permissions (Back and Cancel on every step) and ends with a
 summary and the proposed username, which extends the panel's (`manolito_bot` → `manolito_<what it
 does>_bot`). **My bots** lists your bots; a bot's screen changes its model, effort, task, personality,
 permissions (presets, single switches, cross-agent access), working folder, extra folders and rules, shows
@@ -180,7 +180,7 @@ nothing else. Grant more when you create it or later with `/bot perm`:
 | `bots` | `off` | List bots, change other bots' settings, ask you for new ones. Never destroy |
 | `shared` | `off` | Write the shared memory. Reading it is always allowed; no preset turns this on. Every other agent reads what it writes |
 | `usage` | `off` | Read the Claude plan usage (`alfred usage`) and set usage alerts that wake it (`alfred usage-alert`). Has no effect while `ALFRED_USAGE_MONITOR` is off; the panel says so. See [docs/USAGE_MONITOR_RESEARCH.md](docs/USAGE_MONITOR_RESEARCH.md) |
-| `soul` | `off` | Edit its own personality (`SOUL.md`). No preset turns this on; it changes how the bot behaves and talks, never what it may do, and never opens another bot's |
+| `soul` | `off` | Edit its own `SOUL.md`: its role and mission as well as its tone, so what it does and how, never what it may do. No preset turns this on, and it never opens another bot's |
 | `allow`, `deny` | none | Extra Claude Code permission rules, separated by `;` |
 
 Most of this is enforced by Claude Code itself: each bot runs with its own `--settings` file (permission
@@ -314,24 +314,30 @@ unless you turn on `shared` for one. You write it with `/shared` or `/bot` → S
 users it is one shared memory for all of them for now; see the open questions in
 [docs/PANEL_ONLY.md](docs/PANEL_ONLY.md).
 
-### Personality
+### Role and personality
 
-Each bot has its own personality, `SOUL.md` in its directory, loaded into every conversation. It shapes
-tone and manner, never permissions: the manual says nothing in it can grant or lift one. A new bot starts
-with the **base personality** (the template shipped in `alfred/templates/SOUL.md` until you edit it from
-the home screen or with `/bot base-soul`), or with one written in the creation assistant. On a bot's
-screen, **Personality** shows it, replaces it (you send the new text) and resets it to the base; `/bot
-soul <bot> show|set|reset` does the same. A change applies from the bot's next message, in the same
+Each bot has its own `SOUL.md` in its directory, loaded into every conversation: who it is, what it is
+for and its scope (`## Role`), and how it talks (`## Tone`, `## Style`, `## Attitude`). The SOUL says what
+the bot does; what it *may* do is its permissions, enforced outside it: the manual says nothing in SOUL.md
+can grant, widen or lift one. A new bot starts from the **base** (the template shipped in
+`alfred/templates/SOUL.md` until you edit it from the home screen or with `/bot base-soul`), with its task
+as its role, or from one written in the creation assistant. The task is then just a short label for lists
+and the bot's profile; a bot whose SOUL.md has no Role section keeps using its task as its job. On a bot's
+screen, **Personality** shows the SOUL, replaces it (you send the new text) and resets it to the base;
+`/bot soul <bot> show|set|reset` does the same. A change applies from the bot's next message, in the same
 conversation.
 
-**Describe it** has Claude write a draft from a sentence or two: one `claude -p` call made by the panel
-itself, with no tools, no saved session, none of your settings or CLAUDE.md, a small model
-(`ALFRED_SOUL_MODEL`, default `haiku`) at low effort. You see the draft and choose Accept, Regenerate,
-Edit by hand or Cancel; nothing is saved without Accept. At most `ALFRED_SOUL_ATTEMPTS` drafts per user per
-hour (default 5), and a warning when the usage monitor says the plan is nearly used up.
+**Describe it** has Claude write a draft of the role and the personality from a sentence or two (or from
+the bot's task, with **Use its task**): one `claude -p` call made by the panel itself, with no tools, no
+saved session, none of your settings or CLAUDE.md, a small model (`ALFRED_SOUL_MODEL`, default `haiku`) at
+low effort. It never writes permissions, tools, access or secrets into it. You see the draft and choose
+Accept, Regenerate, Edit by hand or Cancel; nothing is saved without Accept. At most `ALFRED_SOUL_ATTEMPTS`
+drafts per user per hour (default 5), and a warning when the usage monitor says the plan is nearly used
+up.
 
 A bot can edit its own `SOUL.md` only with the `soul` permission (🎭 under Permissions → Customize, off in
-every preset), and never another bot's.
+every preset), and never another bot's. Since the SOUL holds its role, that means changing its own
+mission, not only its tone.
 
 ## Consiglieri's home
 

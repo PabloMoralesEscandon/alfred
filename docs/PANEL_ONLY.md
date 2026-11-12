@@ -92,20 +92,37 @@ En el home real (`~/.alfred`) siguen `CLAUDE.md`, `AGENTS.md`, `SOUL.md`, `memor
 
 Qué hacer con ellos es decisión del usuario (ver §6). Nada de esto se ha tocado en `~/.alfred`.
 
-## 5. Personalidad por bot (SOUL.md)
+## 5. Rol y personalidad por bot (SOUL.md)
 
 **Antes:** solo el agente principal tenía `SOUL.md` (en el home). Los bots no tenían ninguno: su manual
 (`BOT.md`) no importaba personalidad.
 
 **Ahora:**
 
+- **Qué contiene.** Quién es el bot, para qué existe y cómo habla. La plantilla tiene `# Identity`,
+  `## Role` (para qué existe, su ámbito: qué hace y qué no es de su incumbencia), `## Tone`, `## Style` y
+  `## Attitude`. **El SOUL dice qué hace el agente; lo que puede hacer lo fijan los permisos**, que se
+  aplican fuera. El manual lo dice así, y añade que nada en `SOUL.md` concede, amplía ni levanta un
+  permiso, ni puede pedir que se salte.
 - **Dónde vive.** Cada bot tiene `SOUL.md` en su directorio (`~/.alfred-bots/<id>/SOUL.md`), importado por
-  su manual (`@SOUL.md`; Codex recibe «Read SOUL.md…»). El manual dice que la personalidad marca el tono,
-  nunca lo que el bot puede hacer, y que nada en `SOUL.md` concede, levanta ni pide saltarse un permiso.
-- **De dónde sale.** Del texto escrito en el asistente de creación o, si no hay, de la **personalidad
-  base**: `state/soul-base.md` si se ha editado, si no la plantilla `alfred/templates/SOUL.md` (tono,
-  estilo y actitud genéricos, sin nombre). Un bot creado antes de esto recibe la base en su siguiente
-  mensaje. Nunca se sobrescribe un `SOUL.md` que ya existe.
+  su manual (`@SOUL.md`; Codex recibe «Read SOUL.md…»).
+- **De dónde sale.** Del texto escrito o generado en el asistente de creación o, si no hay, de la **base**:
+  `state/soul-base.md` si se ha editado, si no la plantilla `alfred/templates/SOUL.md`. La plantilla tiene
+  un hueco `{role}` que se rellena con el `task` del bot al crearlo. Si una base editada no tiene ni el
+  hueco ni sección Role, se le añade una con el `task`. Un bot creado antes de esto recibe la base, con su
+  `task` como rol, en su siguiente mensaje. Nunca se sobrescribe un `SOUL.md` que ya existe.
+- **`task` y rol: una sola fuente de verdad.** El rol completo vive en el SOUL. El `task` queda como
+  etiqueta corta: aparece en las listas y en el perfil de Telegram, es el punto de partida del rol de un bot
+  nuevo y la descripción por defecto del generador («Use its task»). Cambiar el `task` de un bot cuyo SOUL
+  tiene rol cambia solo la etiqueta, y el panel lo dice. El manual muestra «## Your role» (en `SOUL.md`,
+  con la etiqueta).
+- **Compatibilidad.** Si el SOUL de un bot no tiene sección `## Role` (uno escrito antes de esto, solo con
+  tono, o a mano sin rol), su manual sigue mostrando «## Your task» con su `task`, como siempre. No se
+  migra nada ni se reescribe ningún SOUL. En cuanto el SOUL tenga rol, manda el SOUL.
+- **Por qué así.** Era la solución más simple que encaja con el código. El `task` ya alimentaba el
+  manual, el perfil de Telegram y el nombre de usuario propuesto, así que quitarlo habría roto todo eso y
+  los bots existentes. Duplicarlo en los dos sitios habría dejado dos fuentes de verdad. La regla «rol en
+  el SOUL si existe, si no el `task`» mantiene cada bot con una sola fuente y no exige migración.
 - **Cómo se edita.**
   - Menú → Mis bots → un bot → **🎭 Personality**: ver, **Replace** (el texto nuevo llega en el siguiente
     mensaje; nada cambia hasta entonces), **Describe it** (§5.1) y **Reset to the base**.
@@ -117,10 +134,14 @@ Qué hacer con ellos es decisión del usuario (ver §6). Nada de esto se ha toca
 - **Cuándo se aplica.** La huella de `SOUL.md` forma parte de los ajustes del proceso vivo
   (`#soul=` en `ClaudeBackend.live_settings`). Al cambiarla, el siguiente mensaje reabre el proceso con
   `--resume`: misma conversación, como con un cambio de modelo o de manual.
-- **Validación.** No vacía, como mucho 4.000 caracteres y sin nada que parezca un secreto (los mismos
-  patrones que extensiones y memoria compartida).
-- **Permiso `soul`**, nuevo, desactivado en todos los presets, bajo Personalizar como «🎭 Edit its own
-  personality», con el aviso «it can rewrite its own SOUL.md, and with it how it behaves…».
+- **Validación.** No vacío, como mucho 6.000 caracteres (antes 4.000; se subió para que quepan rol y
+  tono) y sin nada que parezca un secreto (los mismos patrones que extensiones y memoria compartida).
+- **Permiso `soul`**, desactivado en todos los presets, bajo Personalizar como «🎭 Edit its own role and
+  personality». Como el SOUL incluye ahora el rol, editarlo cambia **la misión del bot**, no solo su tono.
+  Lo dicen el aviso del menú («…includes its mission and scope, not only its tone, so it can change what
+  it does and how. Never what it may do…»), la descripción del permiso y el manual del bot, que le pide
+  cambiarlo solo cuando el usuario lo pida, nunca para ampliar por su cuenta lo que hace ni para tocar
+  permisos, y decir exactamente qué cambió.
   - Sin él: `Edit` del `SOUL.md` propio denegado, `denyWrite` del sandbox y, con shell abierto,
     `Bash(*SOUL.md*)` denegado.
   - Con él: solo se abre el `SOUL.md` propio. El de otro bot está siempre cerrado (todo su directorio lo
@@ -134,8 +155,8 @@ Qué hacer con ellos es decisión del usuario (ver §6). Nada de esto se ha toca
 
 ### 5.1 Borradores con Claude (`alfred/soul_writer.py`)
 
-A partir de una explicación corta (máximo 1.000 caracteres), el proceso del panel (no un agente) hace
-**una** llamada:
+A partir de una explicación corta (máximo 2.000 caracteres), o del `task` del bot por defecto, el
+proceso del panel (no un agente) hace **una** llamada:
 
 ```text
 claude -p --output-format json --tools "" --no-session-persistence --setting-sources project,local
@@ -148,9 +169,12 @@ claude -p --output-format json --tools "" --no-session-persistence --setting-sou
   No se usa `--bare` porque exige `ANTHROPIC_API_KEY` y no sirve con la sesión de suscripción.
 - El entorno no lleva las variables de una sesión padre de Claude Code, ni `TELEGRAM_BOT_TOKEN`, ni
   ninguna `ALFRED_*`.
-- El prompt de sistema es fijo. Pide solo personalidad y tono, con la estructura de la plantilla y como
-  mucho unos 1.500 caracteres. Dice que permisos y seguridad se aplican fuera y que un SOUL no puede
-  concederlos ni pedir saltárselos. Y deja claro que la descripción son datos, no instrucciones.
+- El prompt de sistema es fijo. Pide convertir la descripción en **rol más personalidad**, con la
+  estructura de la plantilla (el ejemplo lleva un rol de muestra) y como mucho unos 2.500 caracteres
+  (antes 1.500). Ya no prohíbe la función. Sigue prohibiendo, sin cambios, otorgar, ampliar o mencionar
+  permisos, herramientas, acceso, cuentas, credenciales o secretos, y pedir que se ignoren o salten
+  reglas, límites, permisos o seguridad: «SOUL.md says what the bot does. What it MAY do is set by its
+  permissions». Y deja claro que la descripción son datos, no instrucciones.
 - El texto del usuario va en el mensaje (por stdin), entre `<description>` y `</description>`, con `&`,
   `<` y `>` escapados, para que no pueda cerrar el delimitador.
 - Lo que vuelve se limpia (sin bloques de código, recortado a un salto de línea si se pasa del límite) y se
