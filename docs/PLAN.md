@@ -1,6 +1,9 @@
 # Alfred refactor: plan
 
 Status: phase 1 is implemented on the `refactor` branch and verified. Phases 2 to 4 are proposals.
+The `agent-chats` branch turns the main bot into a control panel that creates one Telegram bot per agent,
+each with its own settings, permissions, memory, tools and session; see
+[AGENT_CHATS_RESEARCH.md](AGENT_CHATS_RESEARCH.md), section 6.
 
 ## Premises
 
