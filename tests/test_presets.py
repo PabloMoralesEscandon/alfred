@@ -10,7 +10,8 @@ from alfred import bots, presets
 
 class PresetDataTests(unittest.TestCase):
     def test_every_preset_has_text_and_only_names_real_permissions(self) -> None:
-        self.assertEqual(list(presets.PRESET_PERMISSIONS), list(presets.PRESET_INFO))
+        self.assertEqual(presets.levels(), list(presets.PRESET_INFO))
+        self.assertEqual(presets.keys(), list(presets.PRESET_PERMISSIONS))
         self.assertIn(presets.RECOMMENDED, presets.PRESET_PERMISSIONS)
         for key, permissions in presets.PRESET_PERMISSIONS.items():
             for name, value in permissions.items():
@@ -79,6 +80,27 @@ class MatchingTests(unittest.TestCase):
                           ("mínimo", "basic"), ("broad", "power"), ("POWER", "power")):
             self.assertEqual(presets.find(word), key, word)
         self.assertIsNone(presets.find("web"))
+
+
+class SpecialLevelTests(unittest.TestCase):
+    """Cross-agent access: the level above Full access, held by the bot apart from its permissions."""
+
+    def test_it_is_a_level_in_the_tables_but_not_a_set_of_permissions(self) -> None:
+        self.assertEqual(presets.levels()[-1], "cross")
+        self.assertNotIn("cross", presets.PRESET_PERMISSIONS)
+        self.assertIn("cross_agent", bots.BotRecord.__dataclass_fields__)
+        self.assertIn("⚠️⚠️ Above Full access", presets.card("cross"))
+
+    def test_no_word_turns_it_on_as_a_preset(self) -> None:
+        for word in ("cross", "Cross-agent access", "cross-agent", "cross_agent"):
+            self.assertIsNone(presets.find(word), word)
+
+    def test_a_bots_level_names_its_preset_and_cross_agent_access(self) -> None:
+        record = bots.BotRecord(bot_id=1, username="r_bot", name="R", owner_id=1, permissions={"web": "on", "edit": "on"})
+        self.assertEqual(presets.level_name(record), "⭐ Assistant")
+        record.cross_agent = True
+        self.assertEqual(presets.level_name(record), "⭐ Assistant + ⚠️ Cross-agent access")
+        self.assertEqual(presets.apply("basic", record.permissions), {})  # a preset only ever sets permissions
 
 
 class GainsTests(unittest.TestCase):

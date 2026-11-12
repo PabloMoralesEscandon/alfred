@@ -595,6 +595,9 @@ Detalles de los menús:
 - `/bots` y `/bot show <bot>`: listar y ver ajustes y permisos.
 - `/bot set <bot> <ajuste> <valor>`: `task`, `model`, `effort`, `backend` o `workdir`.
 - `/bot perm <bot> <permiso> <valor>`.
+- `/bot perm <bot> cross on|off`: el acceso entre agentes (sección 6.4, *Memoria y herramientas de otros
+  agentes*). `on` muestra una advertencia y pide un botón de confirmación; `off` se aplica sin preguntar.
+- `/bot audit`: las últimas concesiones y retiradas del acceso entre agentes.
 - `/bot pause|resume <bot>`.
 - `/bot destroy <bot>`: pide confirmación con botones, que solo puede pulsar quien lo pidió y que caducan en 5 minutos.
 - `/status`, `/usage`, `/help`.
@@ -632,7 +635,7 @@ Siempre:
 | `mode` | `--permission-mode` y `defaultMode` | **Sí, Claude Code.** |
 | `shell` = `alfred` | allow `Bash(alfred *)`; en `dontAsk` cualquier otro comando se deniega | **Sí, Claude Code.** Siguen permitidos los comandos de solo lectura que Claude Code considera seguros (`ls`, `cat`…), dentro de las reglas de lectura. |
 | `shell` = `full` | allow `Bash` | Se permite cualquier comando. Las reglas de Bash y de Read/Edit miran el texto del comando, así que un script que abre ficheros por su cuenta se las salta ([límites de las reglas Bash](https://code.claude.com/docs/en/permissions#what-a-bash-rule-doesnt-match)). Por eso existe `sandbox`. |
-| `sandbox` (con `shell full`) | `sandbox.enabled`, `allowUnsandboxedCommands: false`, `failIfUnavailable: true`, `denyRead` del home de Alfred, del `.env` y de los demás bots; escritura solo en sus directorios (lo que el sandbox permite por defecto) | **Sí, el sistema operativo** (Seatbelt en macOS) para la shell y sus procesos hijos ([sandboxing](https://code.claude.com/docs/en/sandboxing)). Algunos subcomandos de `alfred` (`send`, `schedule`, `event`, `skills` y `bots`, este solo con el permiso `bots`) corren fuera del sandbox porque necesitan el estado y Telegram; comprueban ellos mismos los permisos. Si el sandbox no puede arrancar, Claude Code no arranca. |
+| `sandbox` (con shell abierta: `shell full`, o los modos `bypassPermissions` y `auto`, que ejecutan Bash sin regla allow) | `sandbox.enabled`, `allowUnsandboxedCommands: false`, `autoAllowBashIfSandboxed: false` (el sandbox nunca amplía lo que puede ejecutarse), `failIfUnavailable: true`, `denyRead` y `denyWrite` del home de Alfred, del `.env`, de los demás bots y de sus carpetas de Claude Code; escritura solo en sus directorios (lo que el sandbox permite por defecto) | **Sí, el sistema operativo** (Seatbelt en macOS) para la shell y sus procesos hijos ([sandboxing](https://code.claude.com/docs/en/sandboxing)). Algunos subcomandos de `alfred` (`send`, `schedule`, `event`, `skills` y `bots`, este solo con el permiso `bots`) corren fuera del sandbox porque necesitan el estado y Telegram; comprueban ellos mismos los permisos. Si el sandbox no puede arrancar, Claude Code no arranca. |
 | `edit`, `folders`, `workdir` | `additionalDirectories` y `--add-dir`; allow `Edit(//dir/**)` solo con `edit on`; los dos `block…OutsideWorkingDirectories` | **Sí, para las herramientas de ficheros de Claude Code.** Para la shell, solo con `sandbox`. |
 | `web` | allow o deny `WebFetch` y `WebSearch`; `WebFetch(domain:*)` abre también la red del sandbox | **Sí, Claude Code.** |
 | `browser` | allow o deny `Bash(orca *)` y `mcp__claude-in-chrome__*`; sin `--chrome` | **Sí, en la forma habitual de invocarlo.** Con `shell full`, la deny de `Bash(orca *)` es por texto y se puede rodear (por ejemplo con `/ruta/orca`). |
@@ -659,6 +662,119 @@ Lo que es **solo instrucción** en el manual del bot (`BOT.md`):
 - no intentar las herramientas que tiene desactivadas;
 - no leer el home de Alfred. Esto además lo impiden las reglas deny y, con `shell full`, el sandbox.
 
+#### Memoria y herramientas de otros agentes: lista negra y acceso entre agentes
+
+Rama `PabloMoralesEscandon/agent-permissions`. **Requisito:** en todos los niveles (Mínimo, Estándar,
+Amplio, el acceso completo y cualquier combinación), un bot no lee la memoria de otros agentes ni usa sus
+herramientas. "Otros agentes" son los demás bots y el agente principal de Alfred (su home). Cada bot sigue
+usando con normalidad su memoria, sus herramientas y la base de Alfred (`alfred`, `alfred/plugin`). Por
+encima del acceso completo hay un nivel, **acceso entre agentes** (*cross-agent access*), que levanta esa
+lista negra.
+
+**Qué es la memoria y qué son las herramientas de un agente:**
+
+- memoria: `memory/`, su historial en `.git/` y la carpeta de Claude Code del agente,
+  `~/.claude/projects/<cwd codificado>/`, con sus transcripciones y la auto-memoria de Claude Code;
+- herramientas: `extensions/` (plugins, con sus `bin/`), `extensions-disabled/` y `.claude/` (skills,
+  agentes, ajustes).
+
+Para cada bot se niega su directorio entero. Para el home de Alfred se niega todo el home, como antes.
+
+**La lista negra, en cada nivel por debajo del acceso entre agentes** (`bots.blacklist()`):
+
+| Mecanismo | Qué cubre | Quién lo hace cumplir |
+| --- | --- | --- |
+| deny `Read(//<dir>/**)` y `Edit(//<dir>/**)` para el directorio de cada otro bot, el home de Alfred y la carpeta de Claude Code de cada uno | Read, Edit y Write. Las reglas `Read` también se aplican a Grep y Glob, a los comandos de fichero que Claude Code reconoce en Bash (`cat`, `head`, `tail`, `sed`, `tee`) y a las redirecciones `<` y `>` | Claude Code, en todos los modos, también `bypassPermissions`. Las deny ganan a las allow, así que las reglas extra `allow` del bot no las abren |
+| `blockReadsOutsideWorkingDirectories` y `blockWritesOutsideWorkingDirectories`, ya presentes. `folders` y `workdir` siguen rechazando cualquier ruta dentro del home o de `~/.alfred-bots` | Las herramientas de ficheros y los comandos de solo lectura de Bash fuera de los directorios de trabajo | Claude Code |
+| deny `Bash(*<ruta>/*)`, `Bash(*<ruta>)` y `Bash(*<ruta> *)` para la memoria y las herramientas de cada agente, en forma absoluta, con `~/` y relativa (`../<id>/memory`) | Que un comando las nombre, por ejemplo para ejecutar `…/extensions/x/bin/y` de otro bot | Claude Code, pero solo por el texto del comando |
+| sandbox con `denyRead` y `denyWrite` de todo lo anterior y `denyRead` de todo `~/.alfred-bots` salvo el directorio propio (`allowRead`), siempre que la shell esté abierta y `sandbox` esté activo (el valor por defecto) | Cualquier proceso que lance la shell: scripts, intérpretes, binarios | **El sistema operativo** (Seatbelt en macOS) |
+| `disableAllHooks: true` en los ajustes de cada bot. Además, Alfred no carga las extensiones de un bot que tengan hooks, monitores o servidores LSP, ni las que tengan servidores MCP sin el permiso `mcp` (`extensions.held_back`) | Un hook o un servidor que el propio bot haya escrito correría como el usuario, fuera de las reglas y del sandbox. Sin esto, cualquier bot podía saltarse la lista negra (y todos sus permisos) escribiéndose una extensión con un hook | Claude Code y Alfred, que decide qué `--plugin-dir` pasa |
+
+No hay reglas `Grep(ruta)` ni `Glob(ruta)`: Claude Code las acepta pero no las aplica
+([permissions](https://code.claude.com/docs/en/permissions#writepath-globpath-and-greppath-rules-dont-match)).
+Su documentación dice que hay que usar `Read(ruta)`, y eso es lo que se hace.
+
+**Por qué no se puede quitar con los interruptores:** el nivel no es un permiso. Es un campo aparte del
+registro, `cross_agent`, fuera de `permissions`. Ningún preajuste, interruptor, regla extra, valor de
+`/bot perm`, opción de `/bot new` ni comando `alfred` llega a él:
+
+- `clean_permission` y `parse_options` rechazan `cross`, `cross-agent`, `+cross` y `cross=on`;
+- `alfred bots set` solo cambia ajustes;
+- las peticiones de bots nuevos (`Pending`) no tienen ese campo;
+- en `bot.json` solo cuenta un `true` JSON en su propio campo: ni un texto `"true"` ni un
+  `cross_agent` dentro de `permissions`. Quien pueda escribir ese fichero sí puede concederlo; ningún
+  bot puede, salvo con shell sin sandbox (ver los rodeos).
+
+**El acceso entre agentes:**
+
+- **Quién lo concede:** solo el panel, el usuario permitido que lo pide y solo después de una
+  advertencia explícita. Por texto, `/bot perm <bot> cross on` envía un botón que caduca a los 5
+  minutos. Un botón de *destroy* no sirve para concederlo, ni al revés. En el menú está en *Mis bots →
+  Permisos*, en su propia pantalla de confirmación.
+- **Al crear un bot:** nunca se concede. Se da a un bot que ya existe.
+- **Dónde se ve:** en `/bots`, `/bot show`, la lista y la ficha del menú (⚠️ CROSS-AGENT ACCESS) y en el
+  resumen de permisos.
+- **Auditoría:** cada concesión o retirada deja una línea JSON en `<home>/state/audit.log` (0600), con
+  hora, evento, bot, usuario y vía. Se registran también las retiradas al destruir el bot y al pasar su
+  propiedad a alguien fuera de la lista de permitidos, que además lo retira. `/bot audit` muestra las
+  últimas.
+- **Qué abre:**
+  - lectura de la memoria, `extensions/` y `.claude/skills/` de cada otro agente, y de la auto-memoria de
+    Claude Code de cada uno. Se añaden como `additionalDirectories` y, en el sandbox, como `allowRead`
+    (la ruta más estrecha gana);
+  - ejecutar sus ejecutables, con allow `Bash(<dir>/extensions/*/bin/*)`, también con shell `alfred`;
+  - el manual del bot pasa a listar esas rutas.
+- **Qué sigue cerrado:**
+  - escribir nada suyo (deny `Edit` y `denyWrite`);
+  - `state/` y `.env` del home;
+  - los `inbox/`, `outbox/` y `.git/` de los demás;
+  - sus transcripciones (`*.jsonl`).
+
+  Sus extensiones no se cargan como plugins en el bot: sus hooks y servidores no corren en él.
+
+**Qué queda garantizado:**
+
+- Con shell `alfred` en `dontAsk` o `acceptEdits`, que son los valores por defecto y los de Mínimo,
+  Estándar y Amplio sin shell, Claude Code impide leer y ejecutar lo de los demás. Las herramientas de
+  ficheros y los comandos que reconoce quedan cubiertos por las reglas deny y por el confinamiento a los
+  directorios de trabajo. Cualquier otro comando se deniega por no tener regla allow.
+- Con shell abierta y sandbox, que es Amplio, el sistema operativo lo impide para todo lo que lance la
+  shell.
+- Ningún bot se concede el nivel a sí mismo ni a otro por las vías de Alfred.
+
+**Qué rodeos siguen posibles, y lo que avisa de ellos:**
+
+- **Shell abierta sin sandbox:**
+  - qué abre: `shell full` con `sandbox off`, o `bypassPermissions` o `auto` con `sandbox off`;
+  - el rodeo: el bot puede hacer lo mismo que tu usuario, leer cualquier ruta y ejecutar cualquier
+    script. Las reglas Bash solo miran el texto, así que una variable, un glob, un `cd` previo o un
+    script que abre el fichero por su cuenta las pasan. Las reglas `Read` siguen cubriendo las
+    herramientas de ficheros;
+  - quién avisa: el menú (pantalla de permisos y resumen) y el manual del bot.
+- **Codex como backend:** su sandbox `read-only` lee todo el disco y no tiene reglas por ruta. La lista
+  negra no se hace cumplir; solo el manual la pide. El menú lo avisa.
+- **Comandos `alfred` fuera del sandbox:** `send`, `schedule`, `event`, `skills` y, con el permiso
+  `bots`, `bots`. Comprueban ellos mismos qué bot los llama, por `ALFRED_BOT_ID` (ver abajo). Ninguno
+  lee memoria. `alfred skills` lista nombres y rutas de skills del bot que diga esa variable.
+- **Un bot con shell completa sin sandbox:** puede editar su propio `bot.json` (y con ello darse el
+  acceso entre agentes) o el registro de auditoría. Solo un usuario del sistema propio o una VM lo
+  impide.
+- **El acceso entre agentes en sí:** lo que el bot lee de otro agente es texto que puede llevar
+  instrucciones. La advertencia y el manual lo dicen, pero es una instrucción, no un mecanismo.
+- **Un bot creado mientras otro está a mitad de turno:** entra en las reglas deny del otro en su siguiente
+  mensaje, porque los ajustes se regeneran antes de cada uno. Mientras tanto lo cubren el confinamiento
+  de las herramientas de ficheros y, con sandbox, el `denyRead` de todo `~/.alfred-bots` (con `allowRead`
+  solo del directorio propio). Lo único que se retrasa son las reglas de texto de Bash, que ya eran solo
+  una capa extra.
+
+Efecto secundario: al crear o destruir un bot cambian los ajustes de todos los demás, y cada uno reabre
+su proceso, con la misma sesión, en su siguiente mensaje.
+
+Visto de paso, sin tocar: con el sandbox, `alfred ext` corre dentro de él y no puede leer
+`state/bots/<id>/bot.json` (está en el home). El comando no sabe entonces qué bot es y falla al escribir.
+El bot puede crear sus extensiones con las herramientas de ficheros. Pasaba ya antes de estos cambios con
+`shell full`.
+
 Límite que conviene tener claro: el comando `alfred` sabe qué bot lo llama por la variable
 `ALFRED_BOT_ID`. Con `shell` = `alfred`, Claude Code no deja anteponer variables a un comando permitido
 (una regla allow no casa con `VAR=x alfred …`), así que no se puede suplantar. Con `shell full`, el bot
@@ -683,8 +799,8 @@ real en esos casos, Alfred debería correr con un usuario propio o en una VM.
 
 ### 6.6 Qué se probó
 
-`PYTHONPATH=tests venv/bin/python -m unittest discover -s tests` pasa **186 tests**: los 125 que había y
-61 nuevos. Se ejecutaron en un venv con Python 3.9.6 y python-telegram-bot 22.5, con stand-ins para
+`PYTHONPATH=tests venv/bin/python -m unittest discover -s tests` pasa **198 tests**: los 125 que había,
+61 de la rama `agent-chats` y 12 de la lista negra y el acceso entre agentes (rama `agent-permissions`). Se ejecutaron en un venv con Python 3.9.6 y python-telegram-bot 22.5, con stand-ins para
 `claude`, `codex`, `orca` y Telegram.
 
 Uno de los 125 (`test_a_turn_with_no_sign_of_life_is_stopped`) ya fallaba antes de estos cambios en esta
@@ -737,6 +853,27 @@ límite de 0,4 s del test. Se subió a 1,5 s en un commit aparte.
   - 64 bytes en todos los botones;
   - Mis bots: modelo, esfuerzo, tarea, permisos, pausar, reanudar y destruir con confirmación.
 
+- **Lista negra y acceso entre agentes (12):**
+  - la lista negra está en cada nivel: Mínimo, Estándar, Amplio, acceso completo con y sin sandbox,
+    `auto`, `bypassPermissions` con shell `alfred`, reglas extra `allow` que nombran a otro bot, y cada
+    combinación de modo, shell e interruptores (`test_bots.py`);
+  - las shells abiertas llevan sandbox salvo con `sandbox off`;
+  - ningún interruptor, valor, opción, preajuste ni edición a mano de `permissions` la quita;
+  - el nivel la levanta: abre memoria, extensiones y skills para leer y ejecutar, y mantiene cerrados
+    `state/`, `.env`, inbox, `.git` y transcripciones;
+  - el manual y los resúmenes lo dicen;
+  - el registro es privado y solo añade;
+  - las extensiones de un bot con hooks o MCP (sin `mcp`) no se cargan;
+  - un bot no se lo concede a sí mismo ni a otro con `alfred bots set` o `alfred bots new`, ni el
+    operador desde el CLI (`test_cli_bots.py`);
+  - panel por texto (`test_panel.py`): `/bot new +cross` rechazado; confirmación que un desconocido no
+    puede pulsar y que caduca; un botón de *destroy* no concede y uno de concesión no destruye; las
+    reglas del bot cambian en su siguiente mensaje y las del otro no; `/bots` y `/bot show` lo marcan;
+    `off`; destrucción y transferencia lo retiran; cada paso en el registro y en `/bot audit`;
+  - menús (`test_menus.py`): no aparece al crear; advertencia, *No, back*, conceder, preajustes que no
+    lo tocan, marcas en la ficha y la lista, retirar, auditoría; botones de 64 bytes; un desconocido no
+    concede, y la acción fuera de su pantalla solo la muestra.
+
 ### 6.7 Qué queda por probar en vivo
 
 Nada de lo que sigue se ha probado con Telegram ni con Claude Code reales. Los pasos asumen un bot de
@@ -788,6 +925,28 @@ pruebas y un home aparte, para no tocar `~/.alfred` ni el servicio en marcha:
 14. Opcional, temas: activa los temas en chats privados para un bot (BotFather) y escribe dentro de un
     tema. La respuesta debe llegar en el mismo tema.
 
+15. Lista negra con un Claude Code real, con dos bots de pruebas A y B. Guarda algo en la memoria de B y en
+    la de Alfred (`~/.alfred-test/memory/`), y crea en B una extensión con un `bin/` que imprima algo.
+    - Con A en Mínimo, pídele que lea la memoria de B, que la busque con Grep, que haga `cat` de su
+      ruta, `ls ../<id de B>` y que ejecute el script de B por su ruta. Todo debe fallar. `claude doctor`
+      desde el directorio de A no debe listar reglas rechazadas.
+    - Con A en Amplio (sandbox), pide `python3 -c "print(open('<ruta de B>/memory/MEMORY.md').read())"`.
+      Debe fallar con "Operation not permitted".
+    - Con `shell full` y `sandbox off`, el mismo comando funciona. Es el rodeo documentado, y el menú
+      debe mostrar el aviso.
+    - Pide a A que se escriba una extensión con un hook `SessionStart` que lea la memoria de B. En el
+      siguiente mensaje el hook no debe correr, y `alfred ext check` debe listarlo en
+      `not_loaded_for_this_bot`.
+16. `/bot perm A cross on`: lee la advertencia, confirma y repite el paso 15 con A en Mínimo. Ahora A
+    debe poder leer la memoria de B y de Alfred y ejecutar el script de B. No debe poder editarlos, ni
+    leer `~/.alfred-test/.env`, `state/` o el `inbox/` de B. Comprueba `/bots`, `/bot audit` y
+    `~/.alfred-test/state/audit.log`. Luego `/bot perm A cross off`, y en el siguiente mensaje todo debe
+    volver a fallar. Prueba lo mismo desde *Mis bots → Permisos*.
+17. Con A en Amplio, comprueba que su shell sigue leyendo su propio directorio (`allowRead` dentro del
+    `denyRead` de `~/.alfred-bots`). Con `cross on`, comprueba que el sandbox deja leer la memoria de B (`allowRead` dentro de
+    un `denyRead`, la regla más estrecha gana) y no deja escribirla (`denyWrite` sobre un directorio que
+    también es `additionalDirectories`).
+
 Puntos que la documentación no aclara y que esos pasos resuelven:
 
 - si `getMe` devuelve `can_manage_bots` (paso 4);
@@ -795,6 +954,12 @@ Puntos que la documentación no aclara y que esos pasos resuelven:
   vivo, el enlace abrió una página web y no la ventana; por eso el botón de teclado es ahora la vía
   principal (paso 5);
 - el contenido de `managed_bot` en un cambio de token (paso 11);
+- si `denyWrite` gana a la escritura que el sandbox concede por defecto a los `additionalDirectories`, y si
+  `disableAllHooks` en `--settings` apaga también los hooks de plugins (pasos 15 a 17);
+- si el nombre de la carpeta de Claude Code de cada agente coincide con el que calcula
+  `bots.claude_project_dir` (cada carácter que no es letra ni número pasa a `-`; las rutas muy largas
+  pueden acortarse con un hash, y entonces la regla no casaría). Compruébalo con `ls ~/.claude/projects`
+  tras el paso 6;
 - si este Claude Code (2.1.322) acepta todas las claves del fichero `--settings` y aplica
   `--setting-sources` y `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD` como dice su documentación
   (pasos 6, 7 y 10).

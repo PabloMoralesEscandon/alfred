@@ -102,15 +102,24 @@ def _mark(on: bool) -> str:
     return "✅" if on else "⬜"
 
 
-def permission_warnings(record: BotRecord) -> List[str]:
+def permission_warnings(record: BotRecord, backend: str = "claude") -> List[str]:
     """Plain warnings for the risky choices, shown on the permissions and summary screens."""
     warnings = []
+    if record.cross_agent:
+        warnings.append("⚠️ CROSS-AGENT ACCESS: it reads the memory of the other bots and of Alfred and uses their tools.")
     if record.permission("mode") == "bypassPermissions":
         warnings.append("⚠️ bypassPermissions: no checks at all except the deny rules. Use it only in a container or VM.")
-    if record.permission("shell") == "full" and not record.allows("sandbox"):
-        warnings.append("⚠️ Full shell without the sandbox: it can do anything your user can, whatever the other switches say.")
+    if bots.shell_is_open(record) and not record.allows("sandbox"):
+        warnings.append("⚠️ Open shell without the sandbox: it can do anything your user can, whatever the other switches "
+                        "say, including reading other agents' memory and running their tools. The blacklist then "
+                        "only binds Claude Code's file tools and the commands it recognizes.")
     elif record.permission("shell") == "full":
         warnings.append("⚠️ Full shell: any command, inside Claude Code's sandbox (writes only in its folders).")
+    elif bots.shell_is_open(record):
+        warnings.append("ℹ️ This mode runs shell commands without an allow rule, so they run in the sandbox.")
+    if backend == "codex":
+        warnings.append("⚠️ Codex: its sandbox can read every file of your user, so the blacklist on other agents' "
+                        "memory and tools is not enforced; only the manual asks it to stay out.")
     if record.allows("browser"):
         warnings.append("⚠️ Browser: it uses the sessions you are logged in to there.")
     if record.allows("contact"):
@@ -207,6 +216,16 @@ class Menus:
             return await self._pick(session, argument if verb == "pick" else session.pending, confirmed=verb == "pickok")
         if verb == "custom":
             return self.go(session, "bot_perms_custom" if session.screen.startswith("bot_") else "new_perms_custom")
+        if verb == "cross":
+            return self.go(session, "bot_cross")
+        if verb in ("crossgrant", "crossrevoke"):
+            record = self._record(session)
+            if verb == "crossgrant" and session.screen != "bot_cross":
+                return self.go(session, "bot_cross")  # granting always goes through the warning
+            updated = await self.pool.set_cross_agent(record, verb == "crossgrant", session.user_id, "menu")
+            session.notice = ("Cross-agent access granted. It applies from its next message; withdraw it here any time."
+                              if updated.cross_agent else "Cross-agent access withdrawn. It applies from its next message.")
+            return self.go(session, "bot_perms")
         if verb == "create":
             if not session.name:
                 session.notice = "⚠️ Give it a name first."
@@ -367,6 +386,8 @@ class Menus:
         if screen in WIZARD:
             index = WIZARD.index(screen)
             return WIZARD[index - 1] if index else "home"
+        if screen == "bot_cross":
+            return "bot_perms"
         if screen.startswith("bot_"):
             return "bot"
         if screen == "bot":
@@ -406,6 +427,9 @@ class Menus:
             "What a bot may do is a security preset: %s, %s, %s or %s, from least to most. Customize turns "
             "single permissions on and off; the bot then shows as Custom. Claude Code enforces the permissions; "
             "with a full shell and no sandbox a bot can do anything your user can.\n\n"
+            "At every level a bot is kept out of other agents' memory and tools (other bots', Alfred's). "
+            "Cross-agent access, above full access, lifts that: grant it in My bots → Permissions, after a "
+            "warning. Every grant and withdrawal is logged (/bot audit).\n\n"
             "Text shortcuts still work: /bot help lists them." % tuple(presets.title(key) for key in presets.keys()),
             [[("⬅️ Back", "back")]],
         )
@@ -466,21 +490,30 @@ class Menus:
             self._effort_rows(session.settings, self._backend(session.settings)) + [self._nav(("Next ➡️", "next"))],
         )
 
-    def _permission_rows(self, record: BotRecord) -> List[Row]:
+    def _permission_rows(self, record: BotRecord, editing: bool = False) -> List[Row]:
         rows: List[Row] = [[("✅ Its own folder (always)", "noop")]]
         for name, label in SWITCH_LABELS:
             rows.append([("%s %s" % (_mark(record.allows(name)), label), "perm:%s" % name)])
         full = record.permission("shell") == "full"
         rows.append([("%s Shell: %s" % ("⚠️" if full else "🐚", "any command" if full else "only alfred"), "shell")])
-        if full:
+        if bots.shell_is_open(record):
             rows.append([("%s Sandbox for the shell" % (_mark(record.allows("sandbox")) if record.allows("sandbox") else "⚠️ ⬜"), "perm:sandbox")])
         mode = record.permission("mode")
         rows.append([("%s Mode: %s" % ("⚠️" if mode == "bypassPermissions" else "🔐", mode), "mode")])
+        if editing:  # never at creation: only for a bot that exists, and always through the warning
+            rows.append(self._cross_row(record))
         return rows
+
+    @staticmethod
+    def _cross_row(record: BotRecord) -> Row:
+        """Cross-agent access, the level above Full access: its own button, never a preset or a switch."""
+        if record.cross_agent:
+            return [("⚠️ CROSS-AGENT ACCESS ON · withdraw", "crossrevoke")]
+        return [("🔒 Cross-agent access: off (above full access)", "cross")]
 
     def _permission_text(self, record: BotRecord) -> str:
         lines = [bots.permission_summary(record, for_owner=True)]
-        warnings = permission_warnings(record)
+        warnings = permission_warnings(record, self._backend(record.settings))
         if warnings:
             lines += [""] + warnings
         return "\n".join(lines)
@@ -499,7 +532,9 @@ class Menus:
 
     def _screen_new_perms(self, session: Session) -> Screen:
         return Screen(
-            "%s\n\nWhat may %s do? Pick a preset, or Customize to set each permission yourself.\n\n%s\n\nNow: %s"
+            "%s\n\nWhat may %s do? Pick a preset, or Customize to set each permission yourself. At every level, "
+            "even Full access, it can't read other agents' memory or use their tools; cross-agent access, above "
+            "Full access, is granted only to a bot that exists (My bots → Permissions).\n\n%s\n\nNow: %s"
             % (STEP_TITLES["new_perms"], session.name, self._preset_cards(),
                presets.name_of(session.permissions, session.preset)),
             self._preset_rows(session.permissions) + [self._nav()],
@@ -537,7 +572,8 @@ class Menus:
             state = "" if record.enabled else " (paused)"
             if record.enabled and not self.pool.is_running(record.bot_id):
                 state = " (not connected)"
-            rows.append([("%s %s%s" % (record.name, record.handle, state), "bot:%d" % record.bot_id)])
+            flag = " ⚠️ CROSS-AGENT" if record.cross_agent else ""
+            rows.append([("%s %s%s%s" % (record.name, record.handle, state, flag), "bot:%d" % record.bot_id)])
         text = "Your bots. Tap one to change it." if records else "No bots yet."
         return Screen(text, rows + [[("➕ Create bot", "go:new_name"), ("⬅️ Back", "back")]])
 
@@ -546,10 +582,12 @@ class Menus:
         if record is None:
             return self._screen_list(session)
         lines = ["%s (%s), %s" % (record.name, record.handle, "on" if record.enabled else "paused"), record.link, ""]
+        if record.cross_agent:
+            lines += [bots.cross_agent_line(record), ""]
         lines += self._settings_lines(record.settings)
         if record.settings.get("workdir"):
             lines.append("Works in: %s" % record.settings["workdir"])
-        lines += ["Permissions: %s" % presets.name_of(record.permissions), "", self._permission_text(record)]
+        lines += ["Permissions: %s" % presets.level_name(record), "", self._permission_text(record)]
         rows: List[Row] = [
             [("🧠 Model", "go:bot_model"), ("⚙️ Effort", "go:bot_effort")],
             [("📝 Task", "edittask"), ("🔐 Permissions", "go:bot_perms")],
@@ -594,9 +632,10 @@ class Menus:
             return self._screen_list(session)
         return Screen(
             "Permissions of %s\nNow: %s\n\nPick a preset, or Customize to change single permissions. "
-            "A change applies from its next message.\n\n%s"
-            % (record.handle, presets.name_of(record.permissions), self._preset_cards()),
-            self._preset_rows(record.permissions) + [[("⬅️ Back", "back")]],
+            "A change applies from its next message.\n\n%s\n\n%s\n\n%s"
+            % (record.handle, presets.level_name(record), self._preset_cards(), presets.card("cross"),
+               bots.cross_agent_line(record)),
+            self._preset_rows(record.permissions) + [self._cross_row(record), [("⬅️ Back", "back")]],
         )
 
     def _screen_bot_perms_custom(self, session: Session) -> Screen:
@@ -605,8 +644,8 @@ class Menus:
             return self._screen_list(session)
         return Screen(
             "Permissions of %s, customized. Each tap applies from its next message.\nNow: %s\n\n%s"
-            % (record.handle, presets.name_of(record.permissions), self._permission_text(record)),
-            self._permission_rows(record) + [[("⬅️ Back", "back")]],
+            % (record.handle, presets.level_name(record), self._permission_text(record)),
+            self._permission_rows(record, editing=True) + [[("⬅️ Back", "back")]],
         )
 
     def _screen_bot_perms_confirm(self, session: Session) -> Screen:
@@ -620,6 +659,15 @@ class Menus:
             % (record.handle, presets.name_of(record.permissions), presets.title(key), ", ".join(gained), presets.card(key)),
             [[("✅ Yes, switch to %s" % presets.PRESET_INFO[key].label, "pickok")], [("⬅️ No, back", "back")]],
         )
+
+    def _screen_bot_cross(self, session: Session) -> Screen:
+        record = self._safe_record(session)
+        if record is None:
+            return self._screen_list(session)
+        if record.cross_agent:
+            return Screen(bots.cross_agent_line(record), [[("🔒 Withdraw it", "crossrevoke")], [("⬅️ Back", "back")]])
+        text = bots.CROSS_AGENT_WARNING.format(name=record.name, handle=record.handle, username=record.username)
+        return Screen(text, [[("⚠️ Yes, grant cross-agent access", "crossgrant")], [("⬅️ No, back", "back")]])
 
     def _screen_bot_destroy(self, session: Session) -> Screen:
         record = self._safe_record(session)

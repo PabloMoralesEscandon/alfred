@@ -29,6 +29,11 @@ PRESET_PERMISSIONS: Dict[str, Dict[str, str]] = {
              "shell": "full", "sandbox": "off", "mode": "bypassPermissions"},
 }
 RECOMMENDED = "assistant"  # what the creation assistant starts with
+# Levels above Full access that are not a set of permissions: level -> the BotRecord flag that holds it.
+# Cross-agent access is one: it lives beside the permissions (BotRecord.cross_agent), is granted only to a
+# bot that exists, from the control panel, after a warning, and is audited (BotPool.set_cross_agent). So
+# choosing a preset never changes it, it can sit on top of any preset, and `find` never names it.
+SPECIAL_LEVELS: Dict[str, str] = {"cross": "cross_agent"}
 FREEFORM = ("folders", "allow", "deny")
 
 
@@ -67,6 +72,15 @@ PRESET_INFO: Dict[str, PresetInfo] = {
         warning="⚠️⚠️ No checks at all. It can delete files, spend from your accounts and write to anyone. "
                 "Only for a bot you trust completely, ideally on a separate machine.",
     ),
+    "cross": PresetInfo(
+        "⚠️", "Cross-agent access",
+        can="on top of its preset, read the memory of the other bots and of Alfred and use their tools "
+            "(skills, extensions, scripts)",
+        cannot="change other agents' memory or tools, or open their tokens, conversations and inboxes. Below "
+               "this level, even with Full access, no bot can read other agents' memory or use their tools",
+        warning="⚠️⚠️ Above Full access. Only for a bot that already exists and that you trust with everything; "
+                "granted from My bots → Permissions after a warning, and logged (/bot audit).",
+    ),
 }
 
 # Other words `/bot perm <bot> <preset>` accepts, including the names the presets had before.
@@ -92,7 +106,18 @@ CUSTOM_ICON, CUSTOM_LABEL = "🎛", "Custom"
 
 
 def keys() -> List[str]:
+    """The presets that are sets of permissions, from least to most."""
     return list(PRESET_PERMISSIONS)
+
+
+def levels() -> List[str]:
+    """Every level, from least to most: the presets, then the special levels above them."""
+    return keys() + list(SPECIAL_LEVELS)
+
+
+def special_levels(record: object) -> List[str]:
+    """The special levels a bot holds."""
+    return [key for key, flag in SPECIAL_LEVELS.items() if getattr(record, flag, False) is True]
 
 
 def managed() -> List[str]:
@@ -119,8 +144,8 @@ def find(text: str) -> Optional[str]:
     word = (text or "").strip().lower()
     if word in PRESET_PERMISSIONS:
         return word
-    for key, info in PRESET_INFO.items():
-        if word == info.label.lower():
+    for key in keys():  # never a special level: those are granted their own way
+        if word == PRESET_INFO[key].label.lower():
             return key
     return ALIASES.get(word)
 
@@ -206,3 +231,9 @@ def name_of(permissions: Mapping[str, str], base: Optional[str] = None) -> str:
     base = base if base in PRESET_PERMISSIONS else closest
     changes = differences(base, permissions)
     return "%s %s (from %s: %s)" % (CUSTOM_ICON, CUSTOM_LABEL, title(base), ", ".join(changes))
+
+
+def level_name(record: object) -> str:
+    """A bot's whole level: its preset (or Custom), plus any special level it holds on top."""
+    name = name_of(getattr(record, "permissions", {}) or {})
+    return " + ".join([name] + [title(key) for key in special_levels(record)])

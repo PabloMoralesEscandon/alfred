@@ -89,6 +89,8 @@ Text shortcuts:
 /bot set <bot> <setting> <value> - change a setting; `default` clears it
 /bot perm <bot> <permission> <value> - change a permission
 /bot perm <bot> <preset> - switch to a preset: %s
+/bot perm <bot> cross on|off - cross-agent access: read other agents' memory and use their tools (asks first)
+/bot audit - the last grants and withdrawals of cross-agent access
 /bot pause <bot>, /bot resume <bot> - disconnect or reconnect it
 /bot destroy <bot> - delete it, its schedule and its state (asks first)
 
@@ -96,6 +98,7 @@ Settings: %s.
 Permissions: %s.
 Options for /bot new: +web +browser +shell +edit +mcp +contact +bots +bypass, -schedule, -sandbox, and setting=value or permission=value (for example model=sonnet folders=~/notes).
 A new bot starts with the least: its own directory, the alfred command, reminders, nothing else.
+At every level, even full access, a bot can't read other agents' memory (other bots', Alfred's) or use their tools. Only cross-agent access lifts that, and only you can grant it here.
 <bot> is its @username, its name or its id.""" % (", ".join(presets.keys()), ", ".join(bots.SETTING_NAMES), ", ".join(bots.PERMISSION_NAMES))
 
 
@@ -629,7 +632,8 @@ class ControlPanel:
             state = "" if record.enabled else " (paused)"
             if record.enabled and not self.pool.is_running(record.bot_id):
                 state = " (not connected)"
-            lines.append("• %s %s%s\n%s" % (record.name, record.handle, state, task.splitlines()[0][:120]))
+            flag = " ⚠️ CROSS-AGENT ACCESS" if record.cross_agent else ""
+            lines.append("• %s %s%s%s\n%s" % (record.name, record.handle, state, flag, task.splitlines()[0][:120]))
         await self._send(context.bot, chat_of(update), "\n\n".join(lines))
 
     async def _cmd_bot(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -650,6 +654,8 @@ class ControlPanel:
         try:
             if action == "new":
                 await self._bot_new(update, rest)
+            elif action == "audit":
+                await reply(self._audit_text())
             elif action in ("show", "set", "perm", "pause", "resume", "destroy"):
                 target, _, rest = rest.strip().partition(" ")
                 record = self.pool.registry.find(target) if target else None
@@ -658,7 +664,7 @@ class ControlPanel:
                     return
                 if action == "show":
                     await reply("%s\n\nPreset: %s" % (bots.describe(record, self.pool.is_running(record.bot_id)),
-                                                      presets.name_of(record.permissions)))
+                                                      presets.level_name(record)))
                 elif action == "set":
                     await self._bot_set(update, record, rest)
                 elif action == "perm":
@@ -734,20 +740,25 @@ class ControlPanel:
         name, _, value = rest.strip().partition(" ")
         if not name:
             await update.effective_message.reply_text(
-                "Which permission? One of: %s. Or a preset: %s."
+                "Which permission? One of: %s, or cross (cross-agent access). Or a preset: %s."
                 % (", ".join(bots.PERMISSION_NAMES), ", ".join(presets.keys())))
             return
+        if name.lower() in bots.CROSS_AGENT_WORDS:
+            await self._bot_cross(update, record, value)
+            return
         # A preset as a shortcut: `/bot perm <bot> assistant` or `/bot perm <bot> preset assistant`.
+        # It sets the permissions only; cross-agent access is kept as it is (it has its own command above).
         key = presets.find(value) if name.lower() == "preset" else (presets.find(name) if not value.strip() else None)
         if name.lower() == "preset" and key is None:
             await update.effective_message.reply_text("Which preset? One of: %s." % ", ".join(presets.keys()))
             return
         if key is not None:
             updated = await self.pool.set_permissions(record, presets.apply(key, record.permissions))
-            warnings = menus.permission_warnings(updated)
+            backend = updated.settings.get("backend") or self.config.default_backend
+            warnings = menus.permission_warnings(updated, backend)
             await update.effective_message.reply_text(
                 "Permissions of %s: %s. It applies from its next message.\n\n%s%s" % (
-                    record.handle, presets.name_of(updated.permissions), bots.permission_summary(updated, for_owner=True),
+                    record.handle, presets.level_name(updated), bots.permission_summary(updated, for_owner=True),
                     "".join("\n" + warning for warning in warnings))
             )
             return
@@ -758,8 +769,45 @@ class ControlPanel:
                 bots.permission_summary(updated, for_owner=True))
         )
 
+    async def _bot_cross(self, update: Update, record: BotRecord, value: str) -> None:
+        """Cross-agent access: on asks first, with a warning; off applies at once. Both are audited."""
+        reply = update.effective_message.reply_text
+        value = value.strip().lower()
+        if value in bots.OFF_WORDS or value in bots.CLEAR_WORDS:
+            if not record.cross_agent:
+                await reply("%s has no cross-agent access. %s" % (record.handle, bots.cross_agent_line(record)))
+                return
+            updated = await self.pool.set_cross_agent(record, False, update.effective_user.id, "command")
+            await reply("Cross-agent access withdrawn from %s. It applies from its next message.\n\n%s"
+                        % (record.handle, bots.cross_agent_line(updated)))
+            return
+        if value not in bots.ON_WORDS:
+            await reply("cross is on or off. %s" % bots.cross_agent_line(record))
+            return
+        if record.cross_agent:
+            await reply(bots.cross_agent_line(record))
+            return
+        nonce = self.pool.ask_confirmation(record.bot_id, update.effective_user.id, "crossgrant")
+        markup = InlineKeyboardMarkup([[
+            InlineKeyboardButton("⚠️ Grant cross-agent access", callback_data="bot:crossgrant:%s" % nonce),
+            InlineKeyboardButton("Cancel", callback_data="bot:cancel:%s" % nonce),
+        ]])
+        await reply(bots.CROSS_AGENT_WARNING.format(name=record.name, handle=record.handle, username=record.username),
+                    reply_markup=markup)
+
+    def _audit_text(self) -> str:
+        entries = bots.read_audit(self.config)
+        if not entries:
+            return "The audit log is empty: cross-agent access has never been granted."
+        words = {"cross_agent_granted": "granted", "cross_agent_revoked": "withdrawn"}
+        lines = ["Cross-agent access, latest last (%s):" % (self.config.state_dir / bots.AUDIT_FILE)]
+        for entry in entries:
+            lines.append("%s %s %s by %s (%s)" % (entry.get("time"), words.get(entry.get("event"), entry.get("event")),
+                                                   entry.get("bot"), entry.get("by"), entry.get("via")))
+        return "\n".join(lines)
+
     async def _bot_destroy_ask(self, update: Update, record: BotRecord) -> None:
-        nonce = self.pool.ask_confirmation(record.bot_id, update.effective_user.id)
+        nonce = self.pool.ask_confirmation(record.bot_id, update.effective_user.id, "destroy")
         scheduled = self.store.count_for_bot(record.bot_id)
         markup = InlineKeyboardMarkup([[
             InlineKeyboardButton("Destroy %s" % record.handle, callback_data="bot:destroy:%s" % nonce),
@@ -834,14 +882,24 @@ class ControlPanel:
             await query.answer()
             return
         _, action, nonce = (query.data.split(":", 2) + ["", ""])[:3]
-        bot_id = self.pool.take_confirmation(nonce, update.effective_user.id)
+        taken = self.pool.take_confirmation(nonce, update.effective_user.id, None if action == "cancel" else action)
         await query.answer()
-        if action == "cancel" or bot_id is None:
-            await query.edit_message_text("Nothing was destroyed." if action == "cancel" else "That button has expired. Ask again with /bot destroy.")
+        if taken is None:
+            ask = "/bot perm <bot> cross on" if action == "crossgrant" else "/bot destroy"
+            await query.edit_message_text("That button has expired. Ask again with %s." % ask)
+            return
+        bot_id, asked = taken
+        if action == "cancel":
+            await query.edit_message_text("Nothing was granted." if asked == "crossgrant" else "Nothing was destroyed.")
             return
         record = self.pool.registry.get(bot_id)
         if record is None:
             await query.edit_message_text("That bot is already gone.")
+            return
+        if action == "crossgrant":
+            updated = await self.pool.set_cross_agent(record, True, update.effective_user.id, "command")
+            await query.edit_message_text("Cross-agent access granted to %s. It applies from its next message.\n\n%s"
+                                          % (record.handle, bots.cross_agent_line(updated)))
             return
         await query.edit_message_text("Destroying %s…" % record.handle)
         await self._send(context.bot, chat_of(update), await self.pool.destroy(record))
@@ -868,7 +926,7 @@ class BotPool:
         self.applications: Dict[int, Application] = {}
         self.manager_username = ""
         self.can_manage: Optional[bool] = None
-        self._confirmations: Dict[str, Tuple[int, int, float]] = {}
+        self._confirmations: Dict[str, Tuple[int, int, float, str]] = {}  # nonce -> bot, user, expiry, action
         self._scheduler: Optional["asyncio.Future[None]"] = None
         self._lock_object: Optional[asyncio.Lock] = None
 
@@ -1030,6 +1088,7 @@ class BotPool:
                 log.warning("%s now belongs to unauthorized user id=%s; disconnecting it", existing.handle, creator_id)
                 await self.pause(existing)
                 self.registry.delete_token(bot_id)
+                await self.set_cross_agent(existing, False, None, "ownership moved to user %s" % creator_id)
                 await self._notify(existing.notify_chat_id or existing.owner_id,
                                    "%s now belongs to someone else, so I disconnected it and forgot its token. "
                                    "/bot destroy %s removes what is left of it here." % (existing.handle, existing.username))
@@ -1173,24 +1232,49 @@ class BotPool:
 
     # -- destroying -----------------------------------------------------------
 
-    def ask_confirmation(self, bot_id: int, user_id: int) -> str:
+    def ask_confirmation(self, bot_id: int, user_id: int, action: str = "destroy") -> str:
         now = time.time()
         self._confirmations = {key: value for key, value in self._confirmations.items() if value[2] > now}
         nonce = secrets.token_urlsafe(9)
-        self._confirmations[nonce] = (int(bot_id), int(user_id), now + CONFIRM_SECONDS)
+        self._confirmations[nonce] = (int(bot_id), int(user_id), now + CONFIRM_SECONDS, action)
         return nonce
 
-    def take_confirmation(self, nonce: str, user_id: int) -> Optional[int]:
-        """The bot a confirmation button is for, if it is fresh and pressed by the person who asked."""
+    def take_confirmation(self, nonce: str, user_id: int, action: Optional[str] = None) -> Optional[Tuple[int, str]]:
+        """(bot, action) of a confirmation button, if it is fresh, pressed by the person who asked, and (when
+        `action` is given) for that action: a destroy button never grants, a grant button never destroys."""
         entry = self._confirmations.get(nonce)
         if entry is None or entry[2] < time.time() or entry[1] != int(user_id):
             return None
+        if action is not None and entry[3] != action:
+            return None
         del self._confirmations[nonce]
-        return entry[0]
+        return entry[0], entry[3]
+
+    # -- cross-agent access ---------------------------------------------------
+
+    async def set_cross_agent(self, record: BotRecord, on: bool, by: Optional[int], via: str) -> BotRecord:
+        """Grant or withdraw cross-agent access. The control panel is the only caller: a bot reaches neither
+        the panel's buttons nor this process. Every change is written to the audit log."""
+        record = self.registry.get(record.bot_id) or record
+        if record.cross_agent == bool(on):
+            return record
+        record.cross_agent = bool(on)
+        record.cross_agent_since = bots.utc_now_text() if on else ""
+        self.registry.save(record)
+        bots.audit(self.config, "cross_agent_granted" if on else "cross_agent_revoked", record, by, via)
+        log.warning("cross-agent access %s %s (by %s, %s)", "granted to" if on else "withdrawn from", record.handle, by, via)
+        record = self.registry.get(record.bot_id) or record
+        frontend = self.frontends.get(record.bot_id)
+        if frontend is not None:
+            frontend.record = record  # new rules and manual from its next message, in a new process
+        return record
 
     async def destroy(self, record: BotRecord) -> str:
         """Stop a bot, delete its schedule and state, and revoke its token. Returns what to tell the user."""
         await self.shutdown_bot(record.bot_id)
+        current = self.registry.get(record.bot_id)
+        if current is not None and current.cross_agent:
+            bots.audit(self.config, "cross_agent_revoked", current, None, "destroy")
         deleted = self.store.delete_for_bot(record.bot_id)
         revoked = False
         if self.main.bot is not None:
