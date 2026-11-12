@@ -9,7 +9,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from typing import Any, Dict, List, Tuple
 from unittest import mock
 
-from alfred import bots, cli, home, menus
+from alfred import bots, cli, home, presets
 from alfred.bots import BotRecord, BotRegistry
 from fakes import Sandbox
 
@@ -44,10 +44,8 @@ class PermissionTests(unittest.TestCase):
         self.assertEqual(bots.DEFAULT_PERMISSIONS["usage"], "off")
         self.assertIn("usage", bots.SWITCHES)
         self.assertFalse(self.bot().allows("usage"))
-        for name, preset in menus.PRESETS.items():
-            applied = dict(bots.DEFAULT_PERMISSIONS)
-            applied.update(preset)
-            self.assertEqual(applied["usage"], "off", name)
+        for key in presets.keys():  # the security presets (alfred/presets.py), Full access included
+            self.assertEqual(presets.resolve(key)["usage"], "off", key)
 
     def test_values_and_options(self) -> None:
         config = self.sandbox.config
@@ -161,7 +159,8 @@ class PanelTests(PanelHarness):  # type: ignore[misc,valid-type]
             panel_menus = self.pool.main.menus
             session, _ = panel_menus.open(OWNER, OWNER)
             await panel_menus.press(session, "bot:%d" % RESEARCH)
-            screen = await panel_menus.press(session, "go:bot_perms")
+            await panel_menus.press(session, "go:bot_perms")
+            screen = await panel_menus.press(session, "custom")  # the switches are behind Customize
             labels = [label for row in screen.rows for label, _ in row]
             self.assertIn("⬜ 📊 Plan usage and alerts", labels)
             screen = await panel_menus.press(session, "perm:usage")
@@ -169,13 +168,34 @@ class PanelTests(PanelHarness):  # type: ignore[misc,valid-type]
             labels = [label for row in screen.rows for label, _ in row]
             self.assertIn("✅ 📊 Plan usage and alerts", labels)
             self.assertIn("usage monitor is off", screen.text)
+            self.assertIn("Custom (from 🔒 Basic: + plan usage)", screen.text)
 
-            # The creation wizard has it too, off until tapped.
+            # Its page keeps the warning; picking a preset turns the permission off again.
+            screen = await panel_menus.press(session, "back")
+            screen = await panel_menus.press(session, "back")
+            self.assertIn("usage monitor is off", screen.text)
+            await panel_menus.press(session, "go:bot_perms")
+            await panel_menus.press(session, "pick:basic")
+            self.assertEqual(self.pool.registry.get(RESEARCH).permission("usage"), "off")
+
+            # The creation assistant has the switch under Customize too, off until tapped, and no preset sets it.
             session, _ = panel_menus.open(OWNER, OWNER)
-            screen = await panel_menus.press(session, "go:new_perms")
+            await panel_menus.press(session, "go:new_perms")
+            screen = await panel_menus.press(session, "custom")
             self.assertIn("⬜ 📊 Plan usage and alerts", [label for row in screen.rows for label, _ in row])
-            screen = await panel_menus.press(session, "preset:broad")
+            await panel_menus.press(session, "back")
+            await panel_menus.press(session, "pick:full")
             self.assertEqual(session.permissions.get("usage", "off"), "off")
+
+        self.play(scenario)
+
+    def test_show_names_the_preset_and_keeps_the_warning(self) -> None:
+        async def scenario() -> None:
+            await self.create(RESEARCH, "research_bot", "Research", "/bot new Research")
+            await self.perm("on")
+            text = (await self.command("/bot show research_bot"))[-1]["text"]
+            self.assertIn("Preset: 🎛 Custom (from 🔒 Basic: + plan usage)", text)
+            self.assertIn("usage monitor is off", text)
 
         self.play(scenario)
 

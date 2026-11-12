@@ -12,7 +12,7 @@ try:
 except ImportError:  # pragma: no cover
     PanelHarness = None  # type: ignore
 
-from alfred import menus
+from alfred import menus, presets
 
 
 @unittest.skipIf(PanelHarness is None, "python-telegram-bot is not installed")
@@ -74,7 +74,7 @@ class MenuTests(PanelHarness):  # type: ignore[misc,valid-type]
         await self.type("Keep my calendar tidy and remind me of events.")
         await self.tap("Sonnet")
         await self.tap("high")
-        await self.tap("Standard")
+        await self.tap("Customize")  # starts from the recommended preset, Assistant
         await self.tap("Browser")
         await self.tap("Next")
 
@@ -94,8 +94,8 @@ class MenuTests(PanelHarness):  # type: ignore[misc,valid-type]
             self.assertIn("Step 4 of 6: effort", self.text)
             await self.tap("high")
             self.assertIn("Step 5 of 6: permissions", self.text)
-            self.assertIn("⬜ 🌐 Web", self.labels()[3] + "".join(self.labels()))
-            await self.tap("Standard")
+            self.assertIn("● ⭐ Assistant (recommended)", self.labels())
+            await self.tap("Customize")
             self.assertIn("✅ 🌐 Web search and pages", self.labels())
             self.assertIn("✅ 📁 Edit its working folder", self.labels())
             await self.tap("Browser")
@@ -106,6 +106,7 @@ class MenuTests(PanelHarness):  # type: ignore[misc,valid-type]
             self.assertIn("Username: @alfredpanel_gestor_de_calend_bot", self.text)
             self.assertIn("Model: sonnet", self.text)
             self.assertIn("Effort: high", self.text)
+            self.assertIn("Permissions: 🎛 Custom (from ⭐ Assistant: + browser)", self.text)
             self.assertIn("It can", self.text)
 
             await self.tap("Create")
@@ -252,6 +253,7 @@ class MenuTests(PanelHarness):  # type: ignore[misc,valid-type]
             await self.tap("Skip")
             await self.tap("Next")
             await self.tap("Next")
+            await self.tap("Customize")
             await self.tap("Shell")
             self.assertIn("⚠️ Full shell: any command, inside Claude Code's sandbox", self.text)
             await self.tap("Sandbox")
@@ -260,7 +262,11 @@ class MenuTests(PanelHarness):  # type: ignore[misc,valid-type]
                 await self.tap("Mode")
             self.assertIn("⚠️ Mode: bypassPermissions", self.labels())
             self.assertIn("bypassPermissions: no checks", self.text)
-            await self.tap("Minimal")
+            await self.tap("Back")
+            await self.tap("Basic")
+            self.assertIn("Permissions: 🔒 Basic", self.text)
+            await self.tap("Back")
+            await self.tap("Customize")  # now from Basic
             self.assertIn("🔐 Mode: dontAsk", self.labels())
             self.assertIn("🐚 Shell: only alfred", self.labels())
 
@@ -308,15 +314,143 @@ class MenuTests(PanelHarness):  # type: ignore[misc,valid-type]
             self.assertIn("Task changed", self.text)
             self.assertEqual(self.pool.registry.get(RESEARCH).settings["task"], "Read arXiv every morning")
             await self.tap("Permissions")
+            await self.tap("Customize")
             await self.tap("Web")
             self.assertEqual(self.pool.registry.get(RESEARCH).permission("web"), "on")
             self.assertIn("✅ 🌐 Web search and pages", self.labels())
+            await self.tap("Back")
             await self.tap("Back")
             await self.tap("Pause")
             self.assertFalse(self.pool.registry.get(RESEARCH).enabled)
             self.assertNotIn(RESEARCH, self.pool.frontends)
             await self.tap("Resume")
             self.assertIn(RESEARCH, self.pool.frontends)
+
+        self.play(scenario)
+
+    # -- security presets --
+
+    async def walk_to_permissions(self, name: str = "Research") -> None:
+        await self.open()
+        await self.tap("Create bot")
+        await self.type(name)
+        await self.tap("Skip")
+        await self.tap("Next")
+        await self.tap("Next")
+        self.assertIn("Step 5 of 6: permissions", self.text)
+
+    def test_menu_presets_are_offered_with_what_each_can_do(self) -> None:
+        async def scenario() -> None:
+            await self.walk_to_permissions()
+            self.assertEqual(self.labels(), ["🔒 Basic", "● ⭐ Assistant (recommended)", "🛠 Power", "🔓 Full access",
+                                             "🎛 Customize", "⬅️ Back", "✖️ Cancel"])
+            for key in presets.keys():
+                self.assertIn(presets.card(key), self.text)
+            self.assertIn("Now: ⭐ Assistant", self.text)
+            self.assertNotIn("Web search and pages", " ".join(self.labels()))  # no switches here
+
+            await self.tap("Power")  # choosing one moves on
+            self.assertIn("Step 6 of 6", self.text)
+            self.assertIn("Permissions: 🛠 Power", self.text)
+            self.assertIn("⚠️ Browser", self.text)
+            await self.tap("Create")
+            self.panel_bot.tokens[RESEARCH] = "%d:%s" % (RESEARCH, "A" * 35)
+            record = await self.pool.on_managed_bot({"id": OWNER}, {"id": RESEARCH, "username": "alfredpanel_research_bot"})
+            self.assertEqual(record.permissions, presets.apply("power", {}))
+
+        self.play(scenario)
+
+    def test_menu_customize_starts_from_the_preset_and_back_returns_to_the_presets(self) -> None:
+        async def scenario() -> None:
+            await self.walk_to_permissions()
+            await self.tap("Basic")
+            self.assertIn("Permissions: 🔒 Basic", self.text)
+            await self.tap("Back")
+            self.assertIn("● 🔒 Basic", self.labels())
+            await self.tap("Customize")
+            self.assertIn("Starting point: 🔒 Basic", self.text)
+            self.assertIn("⬜ 🌐 Web search and pages", self.labels())
+            await self.tap("Web")
+            self.assertIn("Now: 🎛 Custom (from 🔒 Basic: + web)", self.text)
+            await self.tap("Back")
+            self.assertIn("Step 5 of 6: permissions", self.text)
+            self.assertIn("Now: 🎛 Custom (from 🔒 Basic: + web)", self.text)
+            self.assertNotIn("● ", " ".join(self.labels()))  # no preset is current
+            await self.tap("Customize")
+            self.assertIn("✅ 🌐 Web search and pages", self.labels())  # the change was kept
+            await self.tap("Next")
+            self.assertIn("Permissions: 🎛 Custom (from 🔒 Basic: + web)", self.text)
+            await self.tap("Back")
+            await self.tap("Assistant")  # a preset replaces the custom set
+            self.assertIn("Permissions: ⭐ Assistant", self.text)
+
+        self.play(scenario)
+
+    def test_menu_an_existing_bot_shows_its_preset_and_asks_before_granting_more(self) -> None:
+        async def scenario() -> None:
+            await self.create(RESEARCH, "alfredpanel_research_bot", "Research", "/bot new Research")
+            await self.open()
+            await self.tap("My bots")
+            await self.tap("Research")
+            self.assertIn("Permissions: 🔒 Basic", self.text)
+            await self.tap("Permissions")
+            self.assertIn("Now: 🔒 Basic", self.text)
+            self.assertIn("● 🔒 Basic", self.labels())
+            self.assertIn("🎛 Customize", self.labels())
+
+            await self.tap("Power")
+            self.assertIn("Give @alfredpanel_research_bot more permissions?", self.text)
+            self.assertIn("It gains: + file edits, + web, + browser, mode: acceptEdits, shell: any command", self.text)
+            await self.tap("No, back")
+            self.assertEqual(self.pool.registry.get(RESEARCH).permissions, {})
+            self.assertIn("Now: 🔒 Basic", self.text)
+
+            await self.tap("Power")
+            await self.tap("Yes, switch to Power")
+            self.assertEqual(self.pool.registry.get(RESEARCH).permissions, presets.apply("power", {}))
+            self.assertIn("now has 🛠 Power", self.text)
+            self.assertIn("● 🛠 Power", self.labels())
+
+            await self.tap("Assistant")  # fewer permissions: no question
+            self.assertIn("now has ⭐ Assistant", self.text)
+            self.assertEqual(self.pool.registry.get(RESEARCH).permissions, {"web": "on", "edit": "on"})
+            await self.tap("Assistant")
+            self.assertIn("already has ⭐ Assistant", self.text)
+
+            await self.tap("Customize")
+            await self.tap("Browser")
+            self.assertIn("Now: 🎛 Custom (from ⭐ Assistant: + browser)", self.text)
+            await self.tap("Back")
+            self.assertIn("Now: 🎛 Custom (from ⭐ Assistant: + browser)", self.text)
+            await self.tap("Back")
+            self.assertIn("Permissions: 🎛 Custom (from ⭐ Assistant: + browser)", self.text)
+
+        self.play(scenario)
+
+    def test_menu_bots_made_before_presets_keep_their_permissions(self) -> None:
+        async def scenario() -> None:
+            await self.create(RESEARCH, "alfredpanel_research_bot", "Research", "/bot new Research")
+            record = self.pool.registry.get(RESEARCH)
+            # What the old Broad button stored, plus an extra folder of its own.
+            old = {"web": "on", "edit": "on", "browser": "on", "shell": "full", "mode": "acceptEdits", "folders": str(self.work)}
+            record.permissions = dict(old)
+            self.pool.registry.save(record)
+            await self.open()
+            await self.tap("My bots")
+            await self.tap("Research")
+            self.assertIn("Permissions: 🛠 Power", self.text)
+            await self.tap("Permissions")
+            self.assertIn("● 🛠 Power", self.labels())
+            self.assertEqual(self.pool.registry.get(RESEARCH).permissions, old)  # reading it changed nothing
+
+            await self.tap("Basic")  # a preset keeps the bot's own folders
+            self.assertEqual(self.pool.registry.get(RESEARCH).permissions, {"folders": str(self.work)})
+
+            record = self.pool.registry.get(RESEARCH)
+            record.permissions = {"contact": "on", "mode": "auto"}  # matches no preset
+            self.pool.registry.save(record)
+            await self.tap("Back")
+            self.assertIn("Permissions: 🎛 Custom (from 🔒 Basic: + other chats, mode: auto)", self.text)
 
         self.play(scenario)
 
@@ -336,6 +470,100 @@ class MenuTests(PanelHarness):  # type: ignore[misc,valid-type]
             self.assertNotIn(RESEARCH, self.pool.frontends)
             self.assertIn("Destroyed @alfredpanel_research_bot", self.text)
             self.assertIn("No bots yet.", self.text)
+
+        self.play(scenario)
+
+    # -- cross-agent access --
+
+    def test_menu_cross_agent_access_needs_a_warning_is_audited_and_stands_out(self) -> None:
+        async def scenario() -> None:
+            from alfred import bots
+
+            # Never offered at creation, whatever the preset.
+            await self.walk_to_summary()
+            await self.tap("Back")
+            self.assertIn("granted only to a bot that exists", self.text)
+            for preset in ("Basic", "Assistant", "Power", "Full access"):
+                self.assertFalse([label for label in self.labels() if "ross-agent" in label], preset)
+                await self.tap(preset)
+                self.assertNotIn("ross-agent access", self.text.split("Permissions:")[1].split("\n")[0], preset)
+                await self.tap("Back")
+            await self.tap("Customize")
+            self.assertFalse([label for label in self.labels() if "ross-agent" in label])
+
+            await self.create(RESEARCH, "alfredpanel_research_bot", "Research", "/bot new Research")
+            await self.open()
+            await self.tap("My bots")
+            await self.tap("Research")
+            await self.tap("Permissions")
+            self.assertIn("🔒 Cross-agent access: off (above full access)", self.labels())
+            self.assertIn("Other agents' memory and tools: blocked", self.text)
+            self.assertIn("⚠️ Cross-agent access\nCan: on top of its preset", self.text)  # its card, after the presets
+            await self.tap("Customize")
+            self.assertIn("🔒 Cross-agent access: off (above full access)", self.labels())
+            self.assertIn("cannot read the memory of other agents", self.text)
+            await self.tap("Back")
+            await self.tap("Cross-agent access")
+            self.assertIn("⚠️ Cross-agent access for Research", self.text)
+            self.assertIn("audit log", self.text)
+            await self.tap("No, back")
+            self.assertIn("Permissions of", self.text)
+            self.assertFalse(self.pool.registry.get(RESEARCH).cross_agent)
+            self.assertEqual(bots.read_audit(self.config), [])
+
+            # The presets and switches never touch it, before or after it is granted.
+            await self.tap("Power")
+            await self.tap("Yes, switch to Power")
+            self.assertFalse(self.pool.registry.get(RESEARCH).cross_agent)
+            await self.tap("Cross-agent access")
+            await self.tap("Yes, grant cross-agent access")
+            self.assertTrue(self.pool.registry.get(RESEARCH).cross_agent)
+            self.assertIn("Cross-agent access granted", self.text)
+            self.assertIn("⚠️ CROSS-AGENT ACCESS ON · withdraw", self.labels())
+            self.assertIn("Now: 🛠 Power + ⚠️ Cross-agent access", self.text)
+            await self.tap("Customize")
+            self.assertIn("⚠️ CROSS-AGENT ACCESS: it reads the memory", self.text)
+            await self.tap("Shell")
+            self.assertTrue(self.pool.registry.get(RESEARCH).cross_agent)
+            await self.tap("Back")
+            await self.tap("Basic")  # fewer permissions: applied at once, and cross-agent access stays
+            self.assertEqual(self.pool.registry.get(RESEARCH).permissions, {})
+            self.assertTrue(self.pool.registry.get(RESEARCH).cross_agent)
+            self.assertIn("Now: 🔒 Basic + ⚠️ Cross-agent access", self.text)
+
+            await self.tap("Back")
+            self.assertIn("CROSS-AGENT ACCESS ON since", self.text)  # the bot's own screen
+            self.assertIn("Permissions: 🔒 Basic + ⚠️ Cross-agent access", self.text)
+            await self.tap("Back")
+            self.assertIn("Research @alfredpanel_research_bot ⚠️ CROSS-AGENT", self.labels())  # the list
+            await self.tap("Research")
+            await self.tap("Permissions")
+            await self.tap("withdraw")
+            self.assertFalse(self.pool.registry.get(RESEARCH).cross_agent)
+            self.assertIn("withdrawn", self.text)
+            entries = bots.read_audit(self.config)
+            self.assertEqual([(entry["event"], entry["via"], entry["by"], entry["bot_id"]) for entry in entries],
+                             [("cross_agent_granted", "menu", OWNER, RESEARCH), ("cross_agent_revoked", "menu", OWNER, RESEARCH)])
+
+        self.play(scenario)
+
+    def test_menu_cross_agent_buttons_fit_and_a_stranger_cannot_grant(self) -> None:
+        async def scenario() -> None:
+            await self.create(RESEARCH, "alfredpanel_research_bot", "Research", "/bot new Research")
+            await self.open()
+            for label in ("My bots", "Research", "Permissions", "Cross-agent access"):
+                await self.tap(label)
+            for row in self.rows:
+                for _, data in row:
+                    self.assertLessEqual(len(data.encode("utf-8")), 64, data)
+            grant = self.data("Yes, grant cross-agent access")
+            await self.tap("", user_id=STRANGER, data=grant)
+            self.assertFalse(self.pool.registry.get(RESEARCH).cross_agent)
+            # Granting goes through the warning screen: the action from another screen only shows it.
+            await self.tap("No, back")
+            await self.tap("", data=grant)
+            self.assertFalse(self.pool.registry.get(RESEARCH).cross_agent)
+            self.assertIn("⚠️ Cross-agent access for Research", self.text)
 
         self.play(scenario)
 

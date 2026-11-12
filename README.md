@@ -95,6 +95,7 @@ The same can be done with text shortcuts:
 | `/bot show <bot>` | Its settings and permissions. |
 | `/bot set <bot> <setting> <value>` | `task`, `model`, `effort`, `backend` or `workdir`. `default` clears one. |
 | `/bot perm <bot> <permission> <value>` | Change a permission (below). |
+| `/bot perm <bot> <preset>` | Switch it to a security preset: `basic`, `assistant`, `power` or `full`. Its extra folders and rules are kept. |
 | `/bot pause <bot>`, `/bot resume <bot>` | Disconnect or reconnect it. Messages sent to a paused bot are dropped; its reminders wait. |
 | `/bot destroy <bot>` | Asks first. Then stops it, deletes its reminders, conversations, memory, files and settings, and revokes its token. Telegram has no way for Alfred to delete the bot account itself, so the panel points you to @BotFather's `/deletebot`. |
 | `/status`, `/usage`, `/help` | Bot management on or off and how many bots run; plan limits; help. |
@@ -131,8 +132,16 @@ is its own conversation.
 
 ### Permissions
 
-A new bot starts with the least: its own directory, the `alfred` command (to post and to schedule
-reminders in its own chat) and nothing else. Grant more when you create it or later with `/bot perm`:
+The menus offer four security presets, from least to most: 🔒 **Basic** (talk, reminders, its own
+folder), ⭐ **Assistant**, the recommended one (also the web and editing its work folder), 🛠 **Power** (also
+your browser and any command inside a sandbox) and 🔓 **Full access** (no checks at all). **Customize** turns
+single permissions on and off, and the bot then shows as Custom. A bot whose permissions match a preset shows
+as that preset, including bots made before presets existed.
+[docs/SECURITY_PRESETS.md](docs/SECURITY_PRESETS.md) has what each preset sets and how to add one.
+
+A bot created without choosing (`/bot new` with no options, or in @BotFather yourself) starts with the
+least: its own directory, the `alfred` command (to post and to schedule reminders in its own chat) and
+nothing else. Grant more when you create it or later with `/bot perm`:
 
 | Permission | Default | Values |
 | --- | --- | --- |

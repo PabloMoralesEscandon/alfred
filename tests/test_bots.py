@@ -158,6 +158,27 @@ class ConfigTests(BotsTestCase):
         self.assertEqual([path.name for path in extensions.plugin_dirs(self.config)], ["plugin"])
 
 
+    def test_a_bots_extensions_that_run_by_themselves_are_not_loaded(self) -> None:
+        self.add_bot()
+        research = self.registry.config_for(5000000001)
+        hooked = extensions.scaffold(research, "hooked", "Runs a hook").path
+        (hooked / "hooks").mkdir()
+        (hooked / "hooks" / "hooks.json").write_text(json.dumps({"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "cat ~/.alfred/memory/x"}]}]}}))
+        served = extensions.scaffold(research, "served", "An MCP server").path
+        (served / ".mcp.json").write_text(json.dumps({"mcpServers": {"notes": {"command": "notes-server"}}}))
+        extensions.scaffold(research, "plain", "Skills and commands only")
+        self.assertEqual([path.name for path in extensions.plugin_dirs(research)], ["plugin", "plain"])
+        self.assertEqual(extensions.held_back(research, extensions.find(research, "hooked")), ["hooks"])
+        record = self.registry.get(5000000001)
+        record.permissions["mcp"] = "on"
+        self.registry.save(record)
+        self.assertEqual([path.name for path in extensions.plugin_dirs(research)], ["plugin", "plain", "served"])
+        # Alfred's main agent loads everything, as before.
+        main_ext = extensions.scaffold(self.config, "mainhook", "Main agent hook").path
+        (main_ext / "hooks").mkdir()
+        self.assertIn("mainhook", [path.name for path in extensions.plugin_dirs(self.config)])
+
+
 class SettingTests(BotsTestCase):
     def test_settings_are_checked(self) -> None:
         clean = lambda name, value: bots.clean_setting(self.config, name, value)
@@ -306,6 +327,177 @@ class PermissionTests(BotsTestCase):
         self.assertIn("use the browser", to_bot.split("You cannot")[1])
         self.assertIn("control panel", to_bot)
         self.assertTrue(bots.permission_summary(record, for_owner=True).startswith("It can"))
+
+
+class BlacklistTests(BotsTestCase):
+    """Other agents' memory and tools are closed at every level below cross-agent access, whatever the switches."""
+
+    RESEARCH, CHEF = 5000000001, 5000000002
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.add_bot(self.RESEARCH, "research_bot")
+        self.add_bot(self.CHEF, "chef_bot", name="Chef")
+        for bot_id in (self.RESEARCH, self.CHEF):
+            config = self.registry.config_for(bot_id)
+            bots.prepare_workspace(config)
+            (config.extensions_dir / "tools" / "bin").mkdir(parents=True)
+            (config.skills_dir / "cook").mkdir(parents=True)
+        (self.config.home / ".claude" / "skills" / "mail").mkdir(parents=True, exist_ok=True)
+        self.chef = self.config.bots_home / str(self.CHEF)
+        self.chef_project = bots.claude_project_dir(self.config, self.chef)
+        self.alfred_project = bots.claude_project_dir(self.config, self.config.home)
+
+    def settings(self, permissions: Dict[str, str], cross: bool = False) -> Dict[str, Any]:
+        record = self.registry.get(self.RESEARCH)
+        record.permissions = dict(permissions)
+        record.cross_agent = cross
+        self.registry.save(record)
+        return bots.claude_settings(self.registry.config_for(self.RESEARCH), self.registry.get(self.RESEARCH))
+
+    @staticmethod
+    def rule(tool: str, path: Any, suffix: str = "/**") -> str:
+        return "%s(//%s%s)" % (tool, str(path).lstrip("/"), suffix)
+
+    def levels(self) -> Dict[str, Dict[str, str]]:
+        from alfred import presets
+
+        levels = {name: presets.apply(name, {}) for name in presets.keys()}  # Basic, Assistant, Power, Full access
+        levels["full access"] = {name: "on" for name in bots.SWITCHES if name != "sandbox"}
+        levels["full access"].update(shell="full", sandbox="off", mode="bypassPermissions")
+        levels["full access, sandboxed"] = dict(levels["full access"], sandbox="on")
+        levels["auto"] = {"mode": "auto"}
+        levels["bypass, shell alfred"] = {"mode": "bypassPermissions"}
+        # Extra allow rules that name the other agents' files: deny rules win over them.
+        levels["allow rules"] = {"allow": "Read(%s/**);Bash" % self.rule("", self.chef, "")[1:-1], "edit": "on"}
+        # Every combination of the switches, the two shells and every mode.
+        for index, mode in enumerate(bots.PERMISSION_MODES):
+            for shell in ("alfred", "full"):
+                switches = {name: ("on" if (bit + index) % 2 else "off") for bit, name in enumerate(bots.SWITCHES)}
+                levels["mix %s %s" % (mode, shell)] = dict(switches, mode=mode, shell=shell)
+        return levels
+
+    def assert_closed(self, settings: Dict[str, Any], level: str) -> None:
+        rules = settings["permissions"]
+        for path in (self.chef, self.chef_project, self.config.home, self.alfred_project):
+            for tool in ("Read", "Edit"):  # Read deny rules also hold for Grep, Glob, cat, head...
+                self.assertIn(self.rule(tool, path), rules["deny"], "%s: %s %s" % (level, tool, path))
+        for path in (self.chef / "memory", self.chef / "extensions", self.chef / ".claude",
+                     self.config.home / "memory", self.config.home / "extensions", self.config.home / ".claude"):
+            self.assertIn("Bash(*%s/*)" % path, rules["deny"], "%s: shell rule for %s" % (level, path))
+        self.assertIn("Bash(*../%d/memory/*)" % self.CHEF, rules["deny"], level)
+        for directory in rules["additionalDirectories"]:
+            self.assertNotIn(str(self.config.bots_home / str(self.CHEF)), directory, level)
+            self.assertFalse(directory.startswith(str(self.config.home)), level)
+        self.assertTrue(rules["blockReadsOutsideWorkingDirectories"], level)
+        self.assertTrue(settings["disableAllHooks"], level)
+        if "sandbox" in settings:
+            filesystem = settings["sandbox"]["filesystem"]
+            for path in (self.chef, self.chef_project, self.config.home, self.alfred_project):
+                self.assertIn(str(path), filesystem["denyRead"], level)
+                self.assertIn(str(path), filesystem["denyWrite"], level)
+            self.assertIn(str(self.config.bots_home), filesystem["denyRead"], level)  # bots created later too
+            self.assertEqual(filesystem["allowRead"], [str(self.config.bots_home / str(self.RESEARCH))], level)
+            self.assertFalse(settings["sandbox"]["autoAllowBashIfSandboxed"], level)
+
+    def test_the_blacklist_is_there_at_every_level(self) -> None:
+        for level, permissions in self.levels().items():
+            self.assert_closed(self.settings(permissions), level)
+
+    def test_an_open_shell_runs_in_the_sandbox_unless_it_is_switched_off(self) -> None:
+        for permissions in ({"shell": "full"}, {"mode": "bypassPermissions"}, {"mode": "auto"}):
+            self.assertIn("sandbox", self.settings(permissions), permissions)
+        self.assertNotIn("sandbox", self.settings({}))  # only `alfred`: nothing to sandbox
+        self.assertNotIn("sandbox", self.settings({"shell": "full", "sandbox": "off"}))
+
+    def test_the_switches_cannot_take_it_away(self) -> None:
+        for word in bots.CROSS_AGENT_WORDS:
+            with self.assertRaises(BotError):
+                bots.clean_permission(self.config, word, "on")
+            with self.assertRaises(BotError):
+                bots.parse_options(self.config, ["+%s" % word])
+            with self.assertRaises(BotError):
+                bots.parse_options(self.config, ["%s=on" % word])
+        self.assertEqual(bots.split_options("+cross Do it")[0], ["+cross"])  # an option, refused: never the task
+        for folder in (self.chef, self.chef / "memory", self.config.home / "memory"):
+            with self.assertRaises(BotError):
+                bots.clean_permission(self.config, "folders", str(folder))
+            with self.assertRaises(BotError):
+                bots.clean_setting(self.config, "workdir", str(folder))
+        # Every permission at every value it takes leaves cross-agent access off.
+        for name, _, _ in bots.PERMISSIONS:
+            for value in ("on", "off", "full", "alfred", "bypassPermissions", "default"):
+                try:
+                    cleaned = bots.clean_permission(self.config, name, value)
+                except BotError:
+                    continue
+                record = self.registry.get(self.RESEARCH)
+                record.permissions[name] = cleaned
+                self.registry.save(record)
+                self.assertFalse(self.registry.get(self.RESEARCH).cross_agent, (name, value))
+        # Writing "cross_agent" into the permissions does nothing; only a real true in its own field counts.
+        record = self.registry.get(self.RESEARCH)
+        record.permissions["cross_agent"] = "on"
+        self.registry.save(record)
+        self.assertFalse(self.registry.get(self.RESEARCH).cross_agent)
+        path = self.registry.state_dir(self.RESEARCH) / "bot.json"
+        data = json.loads(path.read_text())
+        data["cross_agent"] = "true"
+        path.write_text(json.dumps(data))
+        self.assertFalse(self.registry.get(self.RESEARCH).cross_agent)
+
+    def test_cross_agent_access_opens_memory_and_tools_to_read_and_run(self) -> None:
+        for permissions in ({}, {"shell": "full"}, {"shell": "full", "mode": "bypassPermissions"}):
+            settings = self.settings(permissions, cross=True)
+            rules = settings["permissions"]
+            for path in (self.chef, self.config.home):
+                self.assertNotIn(self.rule("Read", path), rules["deny"])
+                self.assertIn(self.rule("Edit", path), rules["deny"])  # read and run, never change
+            self.assertNotIn("Bash(*%s/*)" % (self.chef / "memory"), rules["deny"])
+            for shared in (self.chef / "memory", self.chef / "extensions", self.chef / ".claude" / "skills",
+                           self.config.home / "memory", self.config.home / "extensions"):
+                self.assertIn(str(shared), rules["additionalDirectories"])
+            self.assertIn("Bash(%s/*/bin/*)" % (self.chef / "extensions"), rules["allow"])
+            # Still closed: tokens and secrets, their conversations and inboxes.
+            for closed in (self.config.home / "state", self.chef / "inbox", self.chef / ".git"):
+                self.assertIn(self.rule("Read", closed), rules["deny"])
+            self.assertIn(self.rule("Read", self.config.home / ".env", ""), rules["deny"])
+            self.assertIn(self.rule("Read", self.chef_project, "/*.jsonl"), rules["deny"])
+            self.assertIn("Bash(*%s/*)" % (self.config.home / "state"), rules["deny"])
+            if "sandbox" in settings:
+                filesystem = settings["sandbox"]["filesystem"]
+                self.assertIn(str(self.chef / "memory"), filesystem["allowRead"])
+                self.assertIn(str(self.chef), filesystem["denyRead"])  # the rest of it stays closed
+                self.assertIn(str(self.chef), filesystem["denyWrite"])
+                self.assertIn(str(self.config.home / ".env"), filesystem["denyRead"])
+                self.assertNotIn(str(self.config.home / "state"), filesystem["allowRead"])
+        # Only the bot that has it: the other one stays closed.
+        chef = bots.claude_settings(self.registry.config_for(self.CHEF), self.registry.get(self.CHEF))
+        self.assertIn(self.rule("Read", self.config.bots_home / str(self.RESEARCH)), chef["permissions"]["deny"])
+
+    def test_the_manual_and_the_summaries_say_which_it_is(self) -> None:
+        self.settings({})
+        config = self.registry.config_for(self.RESEARCH)
+        record = self.registry.get(self.RESEARCH)
+        self.assertIn("closed to you", bots.render_manual(config, record))
+        self.assertIn("cannot read the memory of other agents", bots.permission_summary(record, for_owner=True))
+        self.assertIn("🔒", bots.describe(record))
+        record.cross_agent, record.cross_agent_since = True, "2026-11-12T10:00:00Z"
+        manual = bots.render_manual(config, record)
+        self.assertIn("cross-agent access", manual)
+        self.assertIn(str(self.chef / "memory"), manual)
+        self.assertIn(str(self.config.home / "memory"), manual)
+        self.assertIn("CROSS-AGENT ACCESS ON since 2026-11-12T10:00:00Z", bots.describe(record))
+
+    def test_the_audit_log_is_private_and_appends(self) -> None:
+        record = self.registry.get(self.RESEARCH)
+        bots.audit(self.config, "cross_agent_granted", record, 99, "command")
+        bots.audit(self.config, "cross_agent_revoked", record, 99, "menu")
+        path = self.config.state_dir / bots.AUDIT_FILE
+        self.assertEqual(mode(path), 0o600)
+        entries = bots.read_audit(self.config)
+        self.assertEqual([(entry["event"], entry["via"], entry["bot_id"], entry["by"]) for entry in entries],
+                         [("cross_agent_granted", "command", self.RESEARCH, 99), ("cross_agent_revoked", "menu", self.RESEARCH, 99)])
 
 
 class WorkspaceTests(BotsTestCase):

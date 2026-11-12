@@ -674,15 +674,17 @@ tramo da la proporción real (pendiente, punto 4 de la sección 9).
 
 ### Qué es
 
-Un permiso más de cada bot, `usage`, **desactivado por defecto y en todos los preajustes**. Ninguno de
-`minimal`, `standard` ni `broad` lo incluye, y aplicar un preajuste lo vuelve a apagar. Permite leer
+Un permiso más de cada bot, `usage`, **desactivado por defecto y en todos los presets de seguridad**
+(`alfred/presets.py`, ver [SECURITY_PRESETS.md](SECURITY_PRESETS.md)). Ninguno de Basic, Assistant,
+Power ni Full access lo incluye, así que en todos vale `off`, y elegir un preset lo vuelve a apagar. Un
+bot con `usage on` aparece como `🎛 Custom (from <preset>: + plan usage)`. Permite leer
 el uso del plan (`alfred usage`) y registrar avisos (`alfred usage-alert`).
 
 | Dónde | Cómo |
 | --- | --- |
 | `/bot perm <bot> usage on\|off` | Como cualquier interruptor |
 | `/bot new ... +usage` | Opción al crear |
-| `/bot` (menús) | Interruptor "📊 Plan usage and alerts" en el paso de permisos del asistente y en el editor de cada bot |
+| `/bot` (menús) | Interruptor "📊 Plan usage and alerts" bajo **🎛 Customize**, en el paso de permisos del asistente y en "My bots → Permissions". Los botones de preset no lo activan nunca. |
 | Resumen de permisos | En el manual del bot ("You can/cannot read the Claude plan usage...") y en lo que ve el dueño, también en `/bot show` |
 
 ### Cómo se hace respetar
@@ -712,10 +714,11 @@ Como se recomendó, **el permiso no tiene efecto mientras el interruptor global 
 | encendido | encendido | sí | sí | sí | sí |
 
 El panel lo avisa con una nota, cuando el permiso está activado y el global apagado, en la respuesta
-de `/bot perm`, en `/bot show` y en las pantallas de permisos de los menús. Dice que el permiso no
+de `/bot perm`, en `/bot show` (después de `Preset: ...`) y en las pantallas de los menús que
+muestran el resumen de permisos: Customize, el resumen del asistente y la página del bot. Dice que el permiso no
 tiene efecto hasta poner `ALFRED_USAGE_MONITOR=1` y reiniciar.
 
-### Qué se tocó del sistema de permisos (para el merge con `security-control`)
+### Qué se tocó del sistema de permisos
 
 Cambios mínimos y localizados. No se ha cambiado `BotRecord`, `BotRegistry`, `overrides()`,
 `ALWAYS_DENIED` ni el funcionamiento de ningún otro permiso.
@@ -723,15 +726,33 @@ Cambios mínimos y localizados. No se ha cambiado `BotRecord`, `BotRegistry`, `o
 | Archivo | Cambio |
 | --- | --- |
 | `alfred/bots.py` | Una fila en `PERMISSIONS` (`usage`, `off`). `"usage"` al final de `SWITCHES`. Dos constantes nuevas tras `BROWSER_RULES`: `USAGE_RULES` y `USAGE_UNSANDBOXED`. Una entrada en la lista de frases de `permission_summary()`. En `claude_settings()`, dos líneas de `deny` cuando falta el permiso y una suma en `excludedCommands`. |
-| `alfred/menus.py` | `usage_monitor` en el import, una fila en `SWITCH_LABELS` y tres líneas en `_permission_text()` para la nota. |
+| `alfred/presets.py` | `"usage": "plan usage"` en `WORDS`, para las listas de cambios. Ningún preset lo nombra. |
+| `alfred/menus.py` | `usage_monitor` en el import, una fila en `SWITCH_LABELS` (Customize) y tres líneas en `_permission_text()` para la nota. |
 | `alfred/telegram_bot.py` | `+usage` en el texto de ayuda de `/bot`, y la nota en `/bot perm` y `/bot show`. |
 | `alfred/cli.py` | Funciones nuevas (`require_usage`, `usage_alert_bot`, `cmd_usage_alert_*`) y la comprobación en `cmd_usage`. Reutiliza `require`, `calling_bot`, `own_bot_only` y `own_chat_only` sin cambiarlos. |
 
-Si `security-control` reorganiza los permisos (niveles, listas negras), basta con volver a declarar
-`usage` como interruptor apagado por defecto y mantener `USAGE_RULES` en `deny` cuando esté apagado.
-`tests/test_usage_permission.py` comprueba el comportamiento, no la posición de las líneas. Hay
-que vigilar que el nivel de seguridad superior no permita `Bash(alfred *)` sin añadir esas
-denegaciones.
+### Merge con `refactor` (security-control y security-presets, `2cf5df6`)
+
+- **Conflictos:** cinco, todos de unión.
+  - `bots.claude_settings`: el sandbox nuevo, con su `filesystem` calculado por la lista negra, más
+    la suma de `USAGE_UNSANDBOXED` en `excludedCommands`.
+  - Los imports de `menus.py` y `telegram_bot.py`.
+  - `_permission_text()`: las advertencias, que ahora dependen del backend, más la nota de uso.
+  - `/bot show`: `Preset: ...` más la nota.
+- **La lista negra** (`bots.blacklist`) sigue en `claude_settings` y se aplica igual con o sin el
+  permiso. Las denegaciones de `USAGE_RULES` se suman a las suyas: las reglas `deny` ganan siempre,
+  también con Full access.
+- **Acceso entre agentes** (`cross_agent`): no es un permiso ni un preset y no se relaciona con
+  `usage`. Con él, un bot tampoco puede leer el uso sin el permiso `usage`.
+- **Presets:** el permiso entra en todos con su valor por defecto, `off`, sin tocar
+  `PRESET_PERMISSIONS`, que es el mecanismo previsto en `SECURITY_PRESETS.md`. El test
+  `test_a_new_permission_falls_into_every_preset_at_its_default` de `tests/test_presets.py`
+  simulaba justo este permiso, `usage`. Ahora que existe, lo añadía dos veces, así que usa un
+  permiso inventado (`future`), y un test nuevo, `test_the_usage_permission_is_off_in_every_preset`,
+  comprueba el real.
+- **Tests de la combinación** (`tests/test_usage_permission.py`): el interruptor bajo Customize, la
+  nota en Customize, en la página del bot y en `/bot show` junto a `Preset: Custom (... + plan usage)`,
+  que elegir un preset lo apaga y que ningún preset del asistente lo enciende.
 
 ## 12. Avisos para agentes
 
