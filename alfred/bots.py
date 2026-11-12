@@ -332,6 +332,7 @@ class BotRegistry:
             "ALFRED_WORKDIR": settings.get("workdir", ""),
             "ALFRED_ADD_DIRS": os.pathsep.join(str(path) for path in record.working_dirs()),
             "ALFRED_CLAUDE_SETTINGS": str(self.settings_file(bot_id)),
+            "ALFRED_EXTENSION_MCP": "on" if record.allows("mcp") else "off",  # see extensions.held_back
         }
 
     def config_for(self, bot_id: int) -> Config:

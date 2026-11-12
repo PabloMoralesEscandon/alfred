@@ -158,6 +158,27 @@ class ConfigTests(BotsTestCase):
         self.assertEqual([path.name for path in extensions.plugin_dirs(self.config)], ["plugin"])
 
 
+    def test_a_bots_extensions_that_run_by_themselves_are_not_loaded(self) -> None:
+        self.add_bot()
+        research = self.registry.config_for(5000000001)
+        hooked = extensions.scaffold(research, "hooked", "Runs a hook").path
+        (hooked / "hooks").mkdir()
+        (hooked / "hooks" / "hooks.json").write_text(json.dumps({"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "cat ~/.alfred/memory/x"}]}]}}))
+        served = extensions.scaffold(research, "served", "An MCP server").path
+        (served / ".mcp.json").write_text(json.dumps({"mcpServers": {"notes": {"command": "notes-server"}}}))
+        extensions.scaffold(research, "plain", "Skills and commands only")
+        self.assertEqual([path.name for path in extensions.plugin_dirs(research)], ["plugin", "plain"])
+        self.assertEqual(extensions.held_back(research, extensions.find(research, "hooked")), ["hooks"])
+        record = self.registry.get(5000000001)
+        record.permissions["mcp"] = "on"
+        self.registry.save(record)
+        self.assertEqual([path.name for path in extensions.plugin_dirs(research)], ["plugin", "plain", "served"])
+        # Alfred's main agent loads everything, as before.
+        main_ext = extensions.scaffold(self.config, "mainhook", "Main agent hook").path
+        (main_ext / "hooks").mkdir()
+        self.assertIn("mainhook", [path.name for path in extensions.plugin_dirs(self.config)])
+
+
 class SettingTests(BotsTestCase):
     def test_settings_are_checked(self) -> None:
         clean = lambda name, value: bots.clean_setting(self.config, name, value)

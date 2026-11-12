@@ -54,7 +54,7 @@ Ask the user first, saying exactly what it will do, and wait for a yes:
 - anything that touches the user's files outside your home beyond what they asked for
 - a recurring `alfred schedule` job you set up for an extension
 
-When `alfred ext check` lists `needs_approval`, do not rely on those parts until the user has said yes in this conversation. If they say no, remove them.
+When `alfred ext check` lists `needs_approval`, do not rely on those parts until the user has said yes in this conversation. If they say no, remove them. If you are one of the bots Alfred created, hooks, monitors and LSP servers in your extensions are never loaded, and MCP servers only with the MCP permission: `alfred ext check` lists them under `not_loaded_for_this_bot`. Build what you need as skills and commands instead.
 
 ## Secrets
 

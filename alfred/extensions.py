@@ -179,9 +179,38 @@ def find(config: Config, name: str) -> Extension:
     raise ExtensionError("no extension called %r (see `alfred ext list`)" % name)
 
 
+def held_back(config: Config, extension: Extension) -> List[str]:
+    """Why one of a bot's extensions is not loaded: the parts of it that would run by themselves.
+
+    Hooks, monitors and LSP servers run as the user, outside Claude Code's permission rules and its sandbox,
+    and a bot writes its own extensions: loading them would let a bot get past every permission it has,
+    the blacklist on other agents' memory and tools included. MCP servers load only with the bot's `mcp`
+    permission. Alfred's main agent (bot 0) loads everything, as before.
+    """
+    if not config.bot_id:
+        return []
+    path = extension.path
+    manifest = _read_json(path / ".claude-plugin" / "plugin.json")
+    experimental = manifest.get("experimental") if isinstance(manifest.get("experimental"), dict) else {}
+    reasons = []
+    if extension.hooks or manifest.get("hooks") or (path / "hooks").exists():
+        reasons.append("hooks")
+    if extension.monitors or experimental.get("monitors") or (path / "monitors").exists():
+        reasons.append("monitors")
+    if manifest.get("lspServers") or (path / ".lsp.json").exists():
+        reasons.append("LSP servers")
+    has_mcp = extension.mcp_servers or manifest.get("mcpServers") or (path / ".mcp.json").exists()
+    if has_mcp and config._bot_value("ALFRED_EXTENSION_MCP") != "on":
+        reasons.append("MCP servers (needs the mcp permission)")
+    return reasons
+
+
 def plugin_dirs(config: Config) -> List[Path]:
-    """What every agent process loads: the base plugin, then each enabled extension."""
-    return [BASE_PLUGIN] + [extension.path for extension in list_extensions(config, include_disabled=False)]
+    """What every agent process loads: the base plugin, then each enabled extension (for a bot, those that
+    don't run by themselves; see held_back)."""
+    return [BASE_PLUGIN] + [
+        extension.path for extension in list_extensions(config, include_disabled=False) if not held_back(config, extension)
+    ]
 
 
 def bin_dirs(config: Config) -> List[Path]:
@@ -235,7 +264,9 @@ def changes(before: Dict[str, str], after: Dict[str, str], config: Config) -> Li
         else:
             verb = "updated"
         note = "%s %s%s: %s" % (verb, name, " " + extension.version if extension.version else "", extension.summary())
-        if extension.enabled and extension.runs_by_itself():
+        if extension.enabled and held_back(config, extension):
+            note += " ⚠️ not loaded: a bot's extension can't run by itself (%s)" % ", ".join(held_back(config, extension))
+        elif extension.enabled and extension.runs_by_itself():
             note += " ⚠️ runs by itself"
         notes.append(note)
     return notes
@@ -400,6 +431,7 @@ def check(config: Config, name: str, run_tests: bool = True) -> Dict[str, Any]:
         "warnings": warnings,
         "tests": tests,
         "needs_approval": extension.runs_by_itself(),
+        "not_loaded_for_this_bot": held_back(config, extension),
         "extension": extension.to_json(),
     }
 
