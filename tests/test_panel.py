@@ -42,6 +42,7 @@ class FakeBot:
         self.token = token
         self.username = username
         self.sent: List[Dict[str, Any]] = []
+        self.edits: List[Dict[str, Any]] = []
         self.api: List[Any] = []
         self.profile: Dict[str, str] = {}
         self.tokens: Dict[int, str] = {}
@@ -53,7 +54,10 @@ class FakeBot:
 
     async def send_message(self, chat_id: int, text: str, **kwargs: Any) -> Any:
         self.sent.append(dict(kwargs, chat_id=chat_id, text=text))
-        return SimpleNamespace(edit_text=self._noop, delete=self._noop)
+        return SimpleNamespace(edit_text=self._noop, delete=self._noop, message_id=len(self.sent))
+
+    async def edit_message_text(self, chat_id: int, message_id: int, text: str, reply_markup: Any = None) -> None:
+        self.edits.append({"chat_id": chat_id, "message_id": message_id, "text": text, "reply_markup": reply_markup})
 
     async def _noop(self, *args: Any, **kwargs: Any) -> None:
         return None
@@ -109,8 +113,9 @@ class Message:
         self.document = self.voice = self.audio = self.video = self.video_note = None
         self._sent = sent
 
-    async def reply_text(self, text: str, reply_markup: Any = None) -> None:
+    async def reply_text(self, text: str, reply_markup: Any = None) -> Any:
         self._sent.append({"chat_id": self.chat_id, "text": text, "reply_markup": reply_markup})
+        return SimpleNamespace(message_id=1000 + len(self._sent))
 
 
 def update_for(sent: List[Dict[str, Any]], text: str, user_id: int = OWNER, chat_id: int = OWNER) -> Any:
@@ -122,9 +127,12 @@ def update_for(sent: List[Dict[str, Any]], text: str, user_id: int = OWNER, chat
     )
 
 
-@unittest.skipIf(BotPool is None, "python-telegram-bot is not installed")
-class PanelTests(unittest.TestCase):
+class PanelHarness(unittest.TestCase):
+    """The pool, the panel and helpers to drive them. No tests of its own."""
+
     def setUp(self) -> None:
+        if BotPool is None:  # pragma: no cover
+            self.skipTest("python-telegram-bot is not installed")
         self.sandbox = Sandbox()
         self.addCleanup(self.sandbox.cleanup)
         self.sandbox.environ["ALFRED_ALLOWED_USERS"] = str(OWNER)
@@ -173,25 +181,31 @@ class PanelTests(unittest.TestCase):
         await frontend.agent.wait_idle(chat_id)
         return frontend.bot
 
+
+
+@unittest.skipIf(BotPool is None, "python-telegram-bot is not installed")
+class PanelTests(PanelHarness):
     # -- creating -------------------------------------------------------------
 
     def test_a_bot_is_created_connected_and_answers_without_a_restart(self) -> None:
         async def scenario() -> None:
-            replies = await self.command("/bot new Research +web model=sonnet Summarize new papers\non protein folding.")
+            await self.command("/bot new Research +web model=sonnet Summarize new papers\non protein folding.")
+            replies = self.panel_bot.sent[-2:]
             # First the keyboard button, which does not depend on Telegram opening a deep link.
-            self.assertIn('tap "Create @research_bot" on the keyboard below', replies[0]["text"])
+            self.assertIn('tap "Create @alfredpanel_research_bot" on the keyboard below', replies[0]["text"])
             self.assertIn("It can", replies[0]["text"])
             keyboard = replies[0]["reply_markup"].to_dict()
             self.assertTrue(keyboard["one_time_keyboard"])
             create, cancel = keyboard["keyboard"][0][0], keyboard["keyboard"][1][0]
             request = create["request_managed_bot"]
-            self.assertEqual((request["suggested_name"], request["suggested_username"]), ("Research", "research_bot"))
+            self.assertEqual((request["suggested_name"], request["suggested_username"]), ("Research", "alfredpanel_research_bot"))
             self.assertTrue(0 < request["request_id"] < 2 ** 31)
             self.assertEqual(cancel, {"text": "Cancel"})
             # Then the link, as the second option.
-            self.assertIn("Second option, the link: https://t.me/newbot/AlfredPanelBot/research_bot?name=Research", replies[1]["text"])
+            link = "https://t.me/newbot/AlfredPanelBot/alfredpanel_research_bot?name=Research"
+            self.assertIn("Second option, the link: %s" % link, replies[1]["text"])
             button = replies[1]["reply_markup"].inline_keyboard[0][0]
-            self.assertEqual(button.url, "https://t.me/newbot/AlfredPanelBot/research_bot?name=Research")
+            self.assertEqual(button.url, link)
             self.assertEqual(self.pool.frontends, {})
 
             # Telegram also posts a "you created a bot" service message in the panel's chat: no reply to it.

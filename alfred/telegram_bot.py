@@ -35,7 +35,7 @@ from telegram.ext import (
     filters,
 )
 
-from . import bots, home, orca, usage
+from . import bots, home, menus, orca, usage
 from .agent import Agent, Chat, Listener
 from .backends import BACKENDS, BackendError, RunResult
 from .bots import BotError, BotRecord, BotRegistry
@@ -62,7 +62,7 @@ COMMANDS = [
 PANEL_COMMANDS = [
     ("help", "What this control panel does"),
     ("bots", "List your bots"),
-    ("bot", "Create, configure or destroy a bot: /bot new|show|set|perm|pause|resume|destroy"),
+    ("bot", "Menu to create and manage bots; /bot help for the text shortcuts"),
     ("status", "Whether bot management is on, and how many bots run"),
     ("usage", "How much of the Claude plan limits is used"),
 ]
@@ -80,6 +80,9 @@ CONFIRM_SECONDS = 300
 CANCEL_CREATION = "Cancel"  # the second key of the creation keyboard
 BOT_USAGE = """I am Alfred's control panel. I have no agent of my own: I create and run bots, each with its own chat, task, model, permissions, memory, tools and Claude session.
 
+/bot - the menu: create a bot step by step, or change one of yours, with buttons
+
+Text shortcuts:
 /bots - list them
 /bot new <name> [options] [task] - create one (Telegram asks you to confirm)
 /bot show <bot> - its settings and permissions
@@ -505,6 +508,8 @@ class ControlPanel:
         self.pool = pool
         self.bot: Any = None
         self.store = SchedulerStore(config.db_path)
+        # The /bot menus: sessions in memory only, so a restart closes them all (their buttons then say so).
+        self.menus = menus.Menus(pool, self.send_creation_request) if pool is not None else None
 
     @property
     def commands(self) -> List[Tuple[str, str]]:
@@ -558,6 +563,10 @@ class ControlPanel:
             return  # "you created a bot": the managed_bot update that comes with it does the work
         text = (getattr(message, "text", None) or "").strip()
         if not text:
+            return
+        session = self.menus.waiting_for_text(update.effective_user.id) if self.menus is not None else None
+        if session is not None and text != CANCEL_CREATION:
+            await self._show(session, await self.menus.text(session, text))
             return
         if text == CANCEL_CREATION:
             if self.pool is not None:
@@ -632,6 +641,11 @@ class ControlPanel:
         words = command_text(update.effective_message).split(None, 1)
         action = words[0].lower() if words else ""
         rest = words[1] if len(words) > 1 else ""
+        if not action and self.menus is not None:
+            session, screen = self.menus.open(update.effective_user.id, update.effective_chat.id)
+            sent = await update.effective_message.reply_text(screen.text, reply_markup=self._markup(screen))
+            session.message_id = getattr(sent, "message_id", None)
+            return
         try:
             if action == "new":
                 await self._bot_new(update, rest)
@@ -670,9 +684,13 @@ class ControlPanel:
         settings, permissions, _ = bots.parse_options(self.config, option_words)
         if task:
             settings["task"] = bots.clean_setting(self.config, "task", task)
-        link, username = await self.pool.request_creation(
-            update.effective_user.id, update.effective_chat.id, name, settings, permissions
-        )
+        await self.send_creation_request(update.effective_user.id, update.effective_chat.id, name, settings, permissions)
+
+    async def send_creation_request(
+        self, user_id: int, chat_id: int, name: str, settings: Dict[str, str], permissions: Dict[str, str]
+    ) -> str:
+        """Ask Telegram to create a bot: a keyboard button, then the link. Returns the suggested username."""
+        link, username = await self.pool.request_creation(user_id, chat_id, name, settings, permissions)
         draft = bots.BotRecord(bot_id=0, username=username, name=name, owner_id=0, settings=settings, permissions=permissions)
         # First way: a keyboard button that asks Telegram to create the bot (KeyboardButtonRequestManagedBot).
         # python-telegram-bot 22.5 has no class for it, so the button carries the Bot API's own JSON.
@@ -682,8 +700,9 @@ class ControlPanel:
              [KeyboardButton(CANCEL_CREATION)]],
             resize_keyboard=True, one_time_keyboard=True,
         )
-        await update.effective_message.reply_text(
-            "To create it, tap \"Create @%s\" on the keyboard below and confirm in the window Telegram opens. "
+        await self.bot.send_message(
+            chat_id=chat_id,
+            text="To create it, tap \"Create @%s\" on the keyboard below and confirm in the window Telegram opens. "
             "You can change the name and username there. When it exists I connect to it and tell you here.\n\n"
             "If the keyboard doesn't show or the button does nothing (an older Telegram app), use the link in the "
             "next message instead.\n\nIt will start with these permissions (change them any time with /bot perm):\n%s"
@@ -691,10 +710,12 @@ class ControlPanel:
             reply_markup=keyboard,
         )
         # Second way: the creation link. It works where the Telegram app opens t.me/newbot links itself.
-        await update.effective_message.reply_text(
-            "Second option, the link: %s" % link,
+        await self.bot.send_message(
+            chat_id=chat_id,
+            text="Second option, the link: %s" % link,
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Create @%s by link" % username, url=link)]]),
         )
+        return username
 
     async def _bot_set(self, update: Update, record: BotRecord, rest: str) -> None:
         setting, _, value = rest.strip().partition(" ")
@@ -733,11 +754,66 @@ class ControlPanel:
             reply_markup=markup,
         )
 
+    @staticmethod
+    def _markup(screen: "menus.Screen") -> Optional[InlineKeyboardMarkup]:
+        if not screen.rows:
+            return None
+        return InlineKeyboardMarkup([[InlineKeyboardButton(label, callback_data=data) for label, data in row]
+                                     for row in screen.rows])
+
+    async def _show(self, session: "menus.Session", screen: "menus.Screen") -> None:
+        """Put a screen in the menu's own message; if that message can't be edited, send a new one."""
+        if session.message_id is not None and self.bot is not None:
+            try:
+                await self.bot.edit_message_text(
+                    chat_id=session.chat_id, message_id=session.message_id, text=screen.text, reply_markup=self._markup(screen)
+                )
+                return
+            except Exception as exc:  # deleted, too old, or "message is not modified"
+                if "not modified" in str(exc).lower():
+                    return
+                log.info("could not edit the menu message: %s", exc)
+        if self.bot is not None:
+            sent = await self.bot.send_message(chat_id=session.chat_id, text=screen.text, reply_markup=self._markup(screen))
+            session.message_id = getattr(sent, "message_id", None)
+
+    async def _on_menu_button(self, update: Update, token: str, action: str) -> None:
+        query = update.callback_query
+        session = self.menus.find(token, update.effective_user.id) if self.menus is not None else None
+        if session is None:
+            await query.answer("This menu has expired.")
+            try:
+                await query.edit_message_text(
+                    "This menu has expired: it timed out, was replaced by a newer one, or Alfred restarted. "
+                    "Nothing from it was kept. Send /bot to open a new one."
+                )
+            except Exception:
+                pass
+            return
+        await query.answer()
+        session.message_id = getattr(getattr(query, "message", None), "message_id", None) or session.message_id
+        screen = await self.menus.press(session, action)
+        if screen is None:
+            screen = menus.Screen("Menu closed. Send /bot to open it again.")
+        try:
+            await query.edit_message_text(screen.text, reply_markup=self._markup(screen))
+        except Exception as exc:
+            if "not modified" not in str(exc).lower():
+                log.info("could not edit the menu message: %s", exc)
+                await self._show(session, screen)
+
     async def _on_button(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
-        if query is None or not (query.data or "").startswith("bot:"):
+        if query is None:
             return
         if not self._authorized(update) or self.pool is None:
+            await query.answer()  # someone else's tap does nothing
+            return
+        parsed = menus.parse_callback(query.data or "")
+        if parsed is not None:
+            await self._on_menu_button(update, *parsed)
+            return
+        if not (query.data or "").startswith("bot:"):
             await query.answer()
             return
         _, action, nonce = (query.data.split(":", 2) + ["", ""])[:3]
@@ -917,9 +993,13 @@ class BotPool:
             )
         if not self.manager_username:
             raise BotError("I don't know my own username yet; try again in a moment.")
-        username = bots.suggest_username(name)
+        username = self.suggest_username(name, settings.get("task", ""))
         self.registry.add_pending(owner_id, chat_id, name, username, settings, permissions)
         return bots.creation_link(self.manager_username, username, name), username
+
+    def suggest_username(self, name: str, task: str = "") -> str:
+        """The panel's username, extended: manolito_bot -> manolito_<what the bot does>_bot."""
+        return bots.suggest_username(name, self.manager_username, task, self.registry.known_usernames())
 
     async def on_managed_bot(self, creator: Dict[str, Any], bot: Dict[str, Any]) -> Optional[BotRecord]:
         """Telegram says a bot managed by Alfred was created, or its token or owner changed."""
