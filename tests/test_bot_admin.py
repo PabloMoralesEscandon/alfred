@@ -276,6 +276,18 @@ class AdminPermissionTests(unittest.TestCase):
         plain, _ = self.sandbox.add_bot(bot_id=424243, username="other_bot")
         self.assertIn("create and set up bots", bots.permission_summary(plain).split("cannot", 1)[1])
 
+    def test_only_a_bot_admin_s_manual_points_to_the_skill(self) -> None:
+        from alfred import extensions
+
+        admin, config = self.sandbox.add_bot(permissions={"admin": "on"})
+        self.assertIn("alfred:bot-admin", (config.workspace / "CLAUDE.md").read_text())
+        plain, plain_config = self.sandbox.add_bot(bot_id=424243, username="other_bot")
+        self.assertNotIn("alfred:bot-admin", (plain_config.workspace / "CLAUDE.md").read_text())
+        skill = (extensions.BASE_PLUGIN / "skills" / "bot-admin" / "SKILL.md").read_text()
+        self.assertTrue(skill.startswith("---\nname: bot-admin\ndescription: "))
+        for command in ("alfred bots spec", "alfred bots create", "alfred bots status", "alfred bots configure"):
+            self.assertIn(command, skill)
+
     def test_each_bot_gets_a_key_no_other_bot_can_work_out(self) -> None:
         config = self.sandbox.config
         self.assertEqual(bots.bot_key(config, 1), "")  # the command never creates the secret

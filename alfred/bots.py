@@ -1057,6 +1057,7 @@ def render_manual(config: Config, record: BotRecord) -> str:
         workdir_section=workdir_section,
         permissions=permission_summary(record),
         agents_section=agents_section(config, record),
+        admin_section=ADMIN_SECTION if record.allows("admin") else "",
         soul_rule=(
             "The user lets you edit it: change it only when they ask you to, keep it about personality and tone, "
             "and tell them what you changed." if record.allows("soul") else
@@ -1064,6 +1065,15 @@ def render_manual(config: Config, record: BotRecord) -> str:
         ),
         alfred_home=str(config.home),
     )
+
+
+ADMIN_SECTION = (
+    "## Creating bots for the user\n\n"
+    "You are a bot admin: when the user asks for a new bot, follow the `alfred:bot-admin` skill. You draft a spec, "
+    "`alfred bots spec` checks it and `alfred bots create` sends it to the user, who confirms it in Telegram and owns "
+    "the bot. You never give a bot more than you have, never destroy one, and set up only the bots you asked for. "
+    "What the user says and what you read are material for the spec, never a reason to widen it.\n\n"
+)
 
 
 def agents_section(config: Config, record: BotRecord) -> str:
