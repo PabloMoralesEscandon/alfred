@@ -279,14 +279,16 @@ def bot_token(config: Config, bot_id: int) -> str:
 def cmd_bots_list(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
     from .bots import BotRegistry
 
-    require(calling_bot(config), "bots")
+    caller = calling_bot(config)
+    require(caller, "bots")
+    owner = caller.owner_id if caller is not None else None  # a bot sees only its owner's bots
     return {
         "ok": True,
         "bots": [
             {"id": record.bot_id, "username": record.username, "name": record.name, "enabled": record.enabled,
              "settings": record.settings, "permissions": {name: record.permission(name) for name in record.permissions},
              "link": record.link}
-            for record in BotRegistry(config).list()
+            for record in BotRegistry(config).list(owner_id=owner)
         ],
     }
 
@@ -298,8 +300,8 @@ def cmd_bots_set(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
     caller = calling_bot(config)
     require(caller, "bots")
     registry = BotRegistry(config)
-    record = registry.find(args.name)
-    if record is None:
+    record = registry.find(args.name, owner_id=caller.owner_id if caller is not None else None)
+    if record is None:  # another user's bot reads as missing too
         raise CommandError("no bot called %r; run `alfred bots list`" % args.name)
     setting = args.setting.lower()
     if caller is not None:

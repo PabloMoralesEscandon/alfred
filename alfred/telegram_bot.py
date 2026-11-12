@@ -240,8 +240,14 @@ class TelegramBot(Listener):
     # -- helpers ------------------------------------------------------------
 
     def _authorized(self, update: Update) -> bool:
+        """The allow-list, and for a bot also its owner: an allowed user never uses someone else's bot.
+        Shared by the panel, whose `record` is None (there every allowed user is served, each with their own bots)."""
         user = update.effective_user
         if user is None or update.effective_chat is None or update.effective_message is None:
+            return False
+        record = getattr(self, "record", None)
+        if record is not None and int(user.id) != int(record.owner_id):
+            log.warning("ignored message from user id=%s to %s, which belongs to someone else", user.id, self.title)
             return False
         if self.config.is_allowed(user.id, user.username):
             # No message content in the log; just enough to see that an update arrived.
@@ -363,6 +369,9 @@ class TelegramBot(Listener):
         if user is not None and update.effective_message is not None and not self.config.is_allowed(user.id, user.username):
             # The id is what the owner needs to put in ALFRED_ALLOWED_USERS.
             await update.effective_message.reply_text("This is a private bot. Your Telegram user id is %s." % user.id)
+            return
+        if user is not None and update.effective_message is not None and int(user.id) != int(self.record.owner_id):
+            await update.effective_message.reply_text("This bot belongs to someone else. Create your own from the control panel.")
             return
         if self.pool is not None:
             self.pool.link_chat(self.record.bot_id, update.effective_chat.id)
@@ -598,11 +607,11 @@ class ControlPanel:
         if self.pool is None:
             await update.effective_message.reply_text("Not running under `alfred run`.")
             return
-        records = self.pool.registry.list()
+        records = self.pool.registry.list(owner_id=update.effective_user.id)
         running = sum(1 for record in records if self.pool.is_running(record.bot_id))
         lines = [
             "Control panel @%s: %s" % (self.pool.manager_username or "?", self.pool.manager_state()),
-            "Bots: %d, %d connected" % (len(records), running),
+            "Your bots: %d, %d connected" % (len(records), running),
             "Their directories: %s" % self.config.bots_home,
         ]
         await update.effective_message.reply_text("\n".join(lines))
@@ -615,7 +624,7 @@ class ControlPanel:
         if self.pool is None:
             await update.effective_message.reply_text("Bots are managed by `alfred run`, which is not what is running.")
             return
-        records = self.pool.registry.list()
+        records = self.pool.registry.list(owner_id=update.effective_user.id)  # only yours
         if not records:
             await update.effective_message.reply_text("No bots yet. Create one with /bot new <name> [task].")
             return
@@ -648,10 +657,11 @@ class ControlPanel:
             if action == "new":
                 await self._bot_new(update, rest)
             elif action == "audit":
-                await reply(self._audit_text())
+                await reply(self._audit_text(update.effective_user.id))
             elif action in ("show", "set", "perm", "pause", "resume", "destroy"):
                 target, _, rest = rest.strip().partition(" ")
-                record = self.pool.registry.find(target) if target else None
+                # Only the user's own bots: someone else's reads as "no such bot", so it is not even confirmed to exist.
+                record = self.pool.registry.find(target, owner_id=update.effective_user.id) if target else None
                 if record is None:
                     await reply("Which bot? Give its @username, name or id. /bots lists them.")
                     return
@@ -790,10 +800,12 @@ class ControlPanel:
         await reply(bots.CROSS_AGENT_WARNING.format(name=record.name, handle=record.handle, username=record.username),
                     reply_markup=markup)
 
-    def _audit_text(self) -> str:
-        entries = bots.read_audit(self.config)
+    def _audit_text(self, user_id: int) -> str:
+        """The audit lines about the user's own bots (see docs/PANEL_ONLY.md for the open question of a global view)."""
+        mine = {record.bot_id for record in self.pool.registry.list(owner_id=user_id)} if self.pool is not None else set()
+        entries = [entry for entry in bots.read_audit(self.config, limit=500) if bots.audit_entry_is_for(entry, user_id, mine)][-20:]
         if not entries:
-            return "The audit log is empty: cross-agent access has never been granted."
+            return "The audit log has nothing about your bots: cross-agent access has never been granted to one."
         words = {"cross_agent_granted": "granted", "cross_agent_revoked": "withdrawn"}
         lines = ["Cross-agent access, latest last (%s):" % (self.config.state_dir / bots.AUDIT_FILE)]
         for entry in entries:
@@ -890,6 +902,9 @@ class ControlPanel:
         record = self.pool.registry.get(bot_id)
         if record is None:
             await query.edit_message_text("That bot is already gone.")
+            return
+        if int(record.owner_id) != int(update.effective_user.id):  # the nonce is the asker's; this is the second lock
+            await query.edit_message_text("That bot is not yours.")
             return
         if action == "crossgrant":
             updated = await self.pool.set_cross_agent(record, True, update.effective_user.id, "command")

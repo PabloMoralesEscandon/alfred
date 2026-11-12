@@ -259,6 +259,11 @@ class Menus:
                 % (session.name, username, username)
             )
         if verb == "bot":
+            # A button carries only the bot's id: whose bot it is is checked here, not trusted from the button.
+            if not argument.isdigit() or self.pool.registry.get_owned(int(argument), session.user_id) is None:
+                session.bot_id = 0
+                session.notice = "⚠️ That bot is not one of yours."
+                return self.go(session, "list")
             session.bot_id = int(argument)
             return self.go(session, "bot")
         if verb == "edittask":
@@ -398,7 +403,8 @@ class Menus:
         return self.go(session, "bot_perms")
 
     def _record(self, session: Session) -> BotRecord:
-        record = self.pool.registry.get(session.bot_id) if session.bot_id else None
+        """The bot being edited, only if it is still there and belongs to whoever has this menu open."""
+        record = self.pool.registry.get_owned(session.bot_id, session.user_id) if session.bot_id else None
         if record is None:
             session.bot_id = 0
             raise BotError("that bot no longer exists")
@@ -605,7 +611,7 @@ class Menus:
         return Screen("\n".join(lines), [[("✅ Create", "create")], self._nav()])
 
     def _screen_list(self, session: Session) -> Screen:
-        records = self.pool.registry.list()
+        records = self.pool.registry.list(owner_id=session.user_id)  # only yours
         rows: List[Row] = []
         for record in records:
             state = "" if record.enabled else " (paused)"
