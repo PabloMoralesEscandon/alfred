@@ -544,6 +544,10 @@ Telegram ─► ControlPanel (TELEGRAM_BOT_TOKEN)  /bots /bot …   sin agente
 En el panel:
 
 - `/bot new <nombre> [opciones] [tarea]`: las opciones van antes de la tarea, por ejemplo `+web`, `+shell`, `-schedule` o `model=sonnet`.
+  - **Vía principal:** un botón de teclado `KeyboardButton.request_managed_bot` con `request_id`, `suggested_name` y `suggested_username`. La 22.5 no tiene la clase, así que el botón lleva el JSON de la Bot API en `api_kwargs`. No depende de que la app abra un deep link.
+  - **Segunda opción:** el enlace `t.me/newbot/<panel>/<username>`.
+  - El teclado tiene también una tecla "Cancel", que descarta la petición. Se quita con `ReplyKeyboardRemove` cuando el bot ya existe o al cancelar.
+  - El mensaje de servicio `managed_bot_created`, que llega al chat del panel, se ignora: el update `managed_bot` hace el trabajo.
 - `/bots` y `/bot show <bot>`: listar y ver ajustes y permisos.
 - `/bot set <bot> <ajuste> <valor>`: `task`, `model`, `effort`, `backend` o `workdir`.
 - `/bot perm <bot> <permiso> <valor>`.
@@ -635,8 +639,8 @@ real en esos casos, Alfred debería correr con un usuario propio o en una VM.
 
 ### 6.6 Qué se probó
 
-`PYTHONPATH=tests venv/bin/python -m unittest discover -s tests` pasa **169 tests**: los 125 que había y
-44 nuevos. Se ejecutaron en un venv con Python 3.9.6 y python-telegram-bot 22.5, con stand-ins para
+`PYTHONPATH=tests venv/bin/python -m unittest discover -s tests` pasa **170 tests**: los 125 que había y
+45 nuevos. Se ejecutaron en un venv con Python 3.9.6 y python-telegram-bot 22.5, con stand-ins para
 `claude`, `codex`, `orca` y Telegram.
 
 Uno de los 125 (`test_a_turn_with_no_sign_of_life_is_stopped`) ya fallaba antes de estos cambios en esta
@@ -659,8 +663,9 @@ límite de 0,4 s del test. Se subió a 1,5 s en un commit aparte.
   - `event`;
   - `bots list|set|new` con sus límites;
   - extensiones por bot.
-- **`tests/test_panel.py` (14):**
-  - creación completa sin reiniciar: el bot nuevo contesta con su propio token y su modelo;
+- **`tests/test_panel.py` (15):**
+  - creación completa sin reiniciar: el botón de teclado con su JSON, el enlace como segunda opción, el teclado retirado al terminar, el mensaje de servicio ignorado; el bot nuevo contesta con su propio token y su modelo;
+  - la tecla "Cancel" descarta la petición y quita el teclado;
   - un bot creado por un desconocido se ignora sin pedir su token;
   - un bot no solicitado queda con permisos mínimos;
   - reconexión por cambio de token;
@@ -684,13 +689,26 @@ pruebas y un home aparte, para no tocar `~/.alfred` ni el servicio en marcha:
    elige ese bot y activa **Bot Management Mode**.
 2. Crea `~/.alfred-test.env` con `TELEGRAM_BOT_TOKEN=<token del bot de pruebas>` y
    `ALFRED_ALLOWED_USERS=<tu id de Telegram>`.
-3. Desde este worktree:
-   `ALFRED_HOME=~/.alfred-test ALFRED_ENV_FILE=~/.alfred-test.env venv/bin/alfred run`.
-   Los bots irán a `~/.alfred-test-bots`.
+3. Arranca desde este worktree con su propio código. Un `venv/bin/alfred` instalado en modo editable desde
+   otra copia (por ejemplo el worktree `refactor`) ejecuta el código de esa copia. Para saber a cuál
+   apunta: `venv/bin/python -c "import alfred; print(alfred.__file__)"`. Hay dos formas:
+   - sin instalar nada, con el código de esta carpeta delante:
+     `ALFRED_HOME=~/.alfred-test ALFRED_ENV_FILE=~/.alfred-test.env PYTHONPATH=$PWD venv/bin/python -m alfred run`
+   - o reinstalando aquí en modo editable y usando `venv/bin/alfred`:
+     `venv/bin/pip install --upgrade pip setuptools && venv/bin/pip install -e .`, y después
+     `ALFRED_HOME=~/.alfred-test ALFRED_ENV_FILE=~/.alfred-test.env venv/bin/alfred run`.
+     Hace falta actualizar pip antes: el pip 21.2 que trae el venv de Python 3.9 rechaza la instalación
+     editable con `pyproject.toml` ("editable mode currently requires a setuptools-based build").
+
+   Comprobado el 12 de noviembre de 2026: tras reinstalar, `venv/bin/alfred bots list` ejecutado desde
+   `/` sin `PYTHONPATH` carga `refactor-2/alfred/telegram_bot.py`, con `ControlPanel`. Los bots irán a
+   `~/.alfred-test-bots`.
 4. En el chat del panel, `/status`. Debe decir "bot management on". Si dice "unknown", el `getMe` real
    no trae `can_manage_bots` como se espera.
-5. `/bot new Prueba Responde siempre en español y en una frase.` Pulsa el botón, confirma en Telegram y
-   espera el mensaje "@… is ready". Comprueba que el update `managed_bot` llegó y que el token se guardó:
+5. `/bot new Prueba Responde siempre en español y en una frase.` El panel envía dos mensajes. El primero
+   trae un teclado con "Create @prueba_bot" (`KeyboardButtonRequestManagedBot`) y "Cancel". Pulsa
+   "Create", confirma en la ventana que abre Telegram y espera el mensaje "@… is ready", que también
+   quita el teclado. El segundo mensaje trae el enlace `t.me/newbot/…` como alternativa. Comprueba que el update `managed_bot` llegó y que el token se guardó:
    `ls -l ~/.alfred-test/state/bots/*/` debe mostrar `token` con `-rw-------`.
 6. Abre el bot nuevo, pulsa *Start* y escríbele. Debe contestar él, no el panel. En su `/status` debe
    aparecer su directorio en `~/.alfred-test-bots/<id>`.
@@ -714,7 +732,9 @@ pruebas y un home aparte, para no tocar `~/.alfred` ni el servicio en marcha:
 Puntos que la documentación no aclara y que esos pasos resuelven:
 
 - si `getMe` devuelve `can_manage_bots` (paso 4);
-- si el update llega con el enlace `t.me/newbot` además de con el botón de teclado (paso 5);
+- qué apps de Telegram abren la ventana de creación con el enlace `t.me/newbot`. En la primera prueba en
+  vivo, el enlace abrió una página web y no la ventana; por eso el botón de teclado es ahora la vía
+  principal (paso 5);
 - el contenido de `managed_bot` en un cambio de token (paso 11);
 - si este Claude Code (2.1.322) acepta todas las claves del fichero `--settings` y aplica
   `--setting-sources` y `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD` como dice su documentación

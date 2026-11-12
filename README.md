@@ -82,7 +82,7 @@ Mode**. That is what lets the panel create bots. `/status` in the panel says whe
 
 | Command | What it does |
 | --- | --- |
-| `/bot new <name> [options] [task]` | Create a bot. You get a button; tap it and confirm in Telegram, where you can still change the name and username. The panel connects to the new bot at once, no restart. |
+| `/bot new <name> [options] [task]` | Create a bot. The panel shows a "Create @…" keyboard button: tap it and confirm in the window Telegram opens, where you can still change the name and username. A `t.me/newbot/…` link follows as a second option, for apps where the button does not show. The panel connects to the new bot at once, no restart, and removes the keyboard. |
 | `/bots` | List your bots. |
 | `/bot show <bot>` | Its settings and permissions. |
 | `/bot set <bot> <setting> <value>` | `task`, `model`, `effort`, `backend` or `workdir`. `default` clears one. |

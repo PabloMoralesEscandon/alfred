@@ -178,12 +178,29 @@ class PanelTests(unittest.TestCase):
     def test_a_bot_is_created_connected_and_answers_without_a_restart(self) -> None:
         async def scenario() -> None:
             replies = await self.command("/bot new Research +web model=sonnet Summarize new papers\non protein folding.")
-            text = replies[0]["text"]
-            self.assertIn("https://t.me/newbot/AlfredPanelBot/research_bot?name=Research", text)
-            self.assertIn("It can", text)
-            button = replies[0]["reply_markup"].inline_keyboard[0][0]
+            # First the keyboard button, which does not depend on Telegram opening a deep link.
+            self.assertIn('tap "Create @research_bot" on the keyboard below', replies[0]["text"])
+            self.assertIn("It can", replies[0]["text"])
+            keyboard = replies[0]["reply_markup"].to_dict()
+            self.assertTrue(keyboard["one_time_keyboard"])
+            create, cancel = keyboard["keyboard"][0][0], keyboard["keyboard"][1][0]
+            request = create["request_managed_bot"]
+            self.assertEqual((request["suggested_name"], request["suggested_username"]), ("Research", "research_bot"))
+            self.assertTrue(0 < request["request_id"] < 2 ** 31)
+            self.assertEqual(cancel, {"text": "Cancel"})
+            # Then the link, as the second option.
+            self.assertIn("Second option, the link: https://t.me/newbot/AlfredPanelBot/research_bot?name=Research", replies[1]["text"])
+            button = replies[1]["reply_markup"].inline_keyboard[0][0]
             self.assertEqual(button.url, "https://t.me/newbot/AlfredPanelBot/research_bot?name=Research")
             self.assertEqual(self.pool.frontends, {})
+
+            # Telegram also posts a "you created a bot" service message in the panel's chat: no reply to it.
+            service: List[Dict[str, Any]] = []
+            created = update_for(service, "")
+            created.effective_message.text = None
+            created.effective_message.api_kwargs = {"managed_bot_created": {"bot": {"id": RESEARCH, "is_bot": True}}}
+            await self.pool.main._on_message(created, SimpleNamespace(bot=self.panel_bot, args=[]))
+            self.assertEqual(service, [])
 
             record = await self.create(RESEARCH, "research_bot", "Research")
             self.assertEqual(record.settings, {"model": "sonnet", "task": "Summarize new papers\non protein folding."})
@@ -191,6 +208,7 @@ class PanelTests(unittest.TestCase):
             self.assertEqual(self.pool.registry.token(RESEARCH), token_for(RESEARCH))
             self.assertIn(("setManagedBotAccessSettings", {"user_id": RESEARCH, "is_access_restricted": True}), self.panel_bot.api)
             self.assertIn("@research_bot is ready: https://t.me/research_bot", self.panel_bot.texts[-1])
+            self.assertEqual(self.panel_bot.sent[-1]["reply_markup"].to_dict(), {"remove_keyboard": True})
             self.assertIn(RESEARCH, self.pool.frontends)  # connected on the spot
             research = self.pool.frontends[RESEARCH].bot
             self.assertEqual(research.profile["short"], "Summarize new papers\non protein folding.")
@@ -245,6 +263,16 @@ class PanelTests(unittest.TestCase):
             self.assertIsNone(self.pool.registry.token(RESEARCH))
             self.assertFalse(self.pool.registry.get(RESEARCH).enabled)
             self.assertIn("belongs to someone else", self.panel_bot.texts[-1])
+
+        self.play(scenario)
+
+    def test_the_cancel_key_drops_the_request_and_the_keyboard(self) -> None:
+        async def scenario() -> None:
+            await self.command("/bot new Research")
+            replies = await self.command("Cancel")
+            self.assertEqual(replies[0]["text"], "Cancelled; no bot was created.")
+            self.assertEqual(replies[0]["reply_markup"].to_dict(), {"remove_keyboard": True})
+            self.assertIsNone(self.pool.registry.take_pending(OWNER, "research_bot"))
 
         self.play(scenario)
 

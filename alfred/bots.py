@@ -31,6 +31,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import secrets
 import shutil
 import time
 from dataclasses import asdict, dataclass, field
@@ -711,6 +712,21 @@ def _as_dict(value: Any) -> Dict[str, Any]:
         return value
     to_dict = getattr(value, "to_dict", None)
     return to_dict() if callable(to_dict) else {}
+
+
+def new_request_id() -> int:
+    """A request_id for KeyboardButtonRequestManagedBot: a signed 32-bit integer, unique within the message."""
+    return secrets.randbelow(2 ** 31 - 1) + 1
+
+
+def managed_bot_created(message: Any) -> Optional[Dict[str, Any]]:
+    """The bot of a `managed_bot_created` service message, or None. Older libraries keep it in api_kwargs."""
+    if message is None:
+        return None
+    value = _as_dict(getattr(message, "managed_bot_created", None)) or _as_dict(
+        (getattr(message, "api_kwargs", None) or {}).get("managed_bot_created")
+    )
+    return _as_dict(value.get("bot")) or None if value else None
 
 
 def managed_bot_payload(update: Any) -> Optional[Tuple[Dict[str, Any], Dict[str, Any]]]:

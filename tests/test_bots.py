@@ -388,6 +388,9 @@ class TelegramShapesTests(unittest.TestCase):
         self.assertEqual((creator["id"], bot["username"]), (99, "research_bot"))
         self.assertIsNone(bots.managed_bot_payload(type("U", (), {"api_kwargs": {}})()))
 
+        message = type("M", (), {"api_kwargs": {"managed_bot_created": {"bot": {"id": 7, "is_bot": True}}}})()
+        self.assertEqual(bots.managed_bot_created(message)["id"], 7)
+        self.assertIsNone(bots.managed_bot_created(type("M", (), {"api_kwargs": {}})()))
         self.assertTrue(bots.can_manage_bots(type("Me", (), {"api_kwargs": {"can_manage_bots": True}})()))
         self.assertIsNone(bots.can_manage_bots(type("Me", (), {"api_kwargs": {}})()))
 

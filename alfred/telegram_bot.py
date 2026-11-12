@@ -25,7 +25,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
+from telegram import (
+    BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, Message, ReplyKeyboardMarkup,
+    ReplyKeyboardRemove, Update,
+)
 from telegram.constants import ChatAction
 from telegram.ext import (
     Application, ApplicationBuilder, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, TypeHandler,
@@ -74,6 +77,7 @@ ATTACHMENT_KINDS = (("document", ""), ("voice", ".ogg"), ("audio", ".mp3"), ("vi
 MAIN_UPDATES = ["message", "callback_query", "managed_bot"]
 BOT_UPDATES = ["message", "callback_query"]
 CONFIRM_SECONDS = 300
+CANCEL_CREATION = "Cancel"  # the second key of the creation keyboard
 BOT_USAGE = """I am Alfred's control panel. I have no agent of my own: I create and run bots, each with its own chat, task, model, permissions, memory, tools and Claude session.
 
 /bots - list them
@@ -549,7 +553,18 @@ class ControlPanel:
     async def _on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not self._authorized(update):
             return
-        await update.effective_message.reply_text(
+        message = update.effective_message
+        if bots.managed_bot_created(message) is not None:
+            return  # "you created a bot": the managed_bot update that comes with it does the work
+        text = (getattr(message, "text", None) or "").strip()
+        if not text:
+            return
+        if text == CANCEL_CREATION:
+            if self.pool is not None:
+                self.pool.registry.take_pending(update.effective_user.id, "")
+            await message.reply_text("Cancelled; no bot was created.", reply_markup=ReplyKeyboardRemove())
+            return
+        await message.reply_text(
             "I'm the control panel: I don't run an agent. Talk to one of your bots (/bots), or create one with "
             "/bot new <name> <task>. /help explains the rest."
         )
@@ -659,12 +674,26 @@ class ControlPanel:
             update.effective_user.id, update.effective_chat.id, name, settings, permissions
         )
         draft = bots.BotRecord(bot_id=0, username=username, name=name, owner_id=0, settings=settings, permissions=permissions)
-        markup = InlineKeyboardMarkup([[InlineKeyboardButton("Create @%s" % username, url=link)]])
+        # First way: a keyboard button that asks Telegram to create the bot (KeyboardButtonRequestManagedBot).
+        # python-telegram-bot 22.5 has no class for it, so the button carries the Bot API's own JSON.
+        request = {"request_id": bots.new_request_id(), "suggested_name": name[:64], "suggested_username": username}
+        keyboard = ReplyKeyboardMarkup(
+            [[KeyboardButton("Create @%s" % username, api_kwargs={"request_managed_bot": request})],
+             [KeyboardButton(CANCEL_CREATION)]],
+            resize_keyboard=True, one_time_keyboard=True,
+        )
         await update.effective_message.reply_text(
-            "Tap the button and confirm in Telegram; you can change the name and username there. When it exists I "
-            "connect to it and tell you here.\n\nIt will start with these permissions (change them any time with "
-            "/bot perm):\n%s\n\n%s" % (bots.permission_summary(draft, for_owner=True), link),
-            reply_markup=markup,
+            "To create it, tap \"Create @%s\" on the keyboard below and confirm in the window Telegram opens. "
+            "You can change the name and username there. When it exists I connect to it and tell you here.\n\n"
+            "If the keyboard doesn't show or the button does nothing (an older Telegram app), use the link in the "
+            "next message instead.\n\nIt will start with these permissions (change them any time with /bot perm):\n%s"
+            % (username, bots.permission_summary(draft, for_owner=True)),
+            reply_markup=keyboard,
+        )
+        # Second way: the creation link. It works where the Telegram app opens t.me/newbot links itself.
+        await update.effective_message.reply_text(
+            "Second option, the link: %s" % link,
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Create @%s by link" % username, url=link)]]),
         )
 
     async def _bot_set(self, update: Update, record: BotRecord, rest: str) -> None:
@@ -945,7 +974,8 @@ class BotPool:
             lines.append("Give it a job with /bot set %s task <what it should do>." % record.username)
         if not running:
             lines = ["%s was created, but I could not connect to it. Try /bot resume %s." % (record.handle, record.username)]
-        await self._notify(record.notify_chat_id, "\n".join(lines))
+        # This message also takes the creation keyboard away.
+        await self._notify(record.notify_chat_id, "\n".join(lines), reply_markup=ReplyKeyboardRemove())
         return record
 
     async def _token_changed(self, record: BotRecord, creator_id: int) -> BotRecord:
@@ -973,10 +1003,10 @@ class BotPool:
         except Exception as exc:
             log.warning("could not update the description of %s: %s", record.handle, exc)
 
-    async def _notify(self, chat_id: int, text: str) -> None:
+    async def _notify(self, chat_id: int, text: str, **extra: Any) -> None:
         if self.main.bot is not None and chat_id:
             try:
-                await TelegramBot._send(self.main.bot, chat_id, text)
+                await TelegramBot._send(self.main.bot, chat_id, text, **extra)
             except Exception as exc:
                 log.warning("could not tell chat %s: %s", chat_id, exc)
 
