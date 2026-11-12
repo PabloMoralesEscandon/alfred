@@ -83,9 +83,11 @@ class TestPool(BotPool):  # type: ignore[misc,valid-type]
     def __init__(self, config: Any) -> None:
         super().__init__(config)
         self.connections: List[str] = []
+        self.dropped: List[bool] = []
         self.refuse: set = set()
 
-    async def _connect(self, frontend: Any, token: str, updates: List[str]) -> Any:
+    async def _connect(self, frontend: Any, token: str, updates: List[str], drop_pending: bool = False) -> Any:
+        self.dropped.append(drop_pending)
         if token in self.refuse:
             raise RuntimeError("Unauthorized")
         username = getattr(getattr(frontend, "record", None), "username", "") or "AlfredPanelBot"
@@ -325,6 +327,7 @@ class PanelTests(unittest.TestCase):
             self.assertEqual(store.get(item["id"])["status"], "delivering")
             await self.pool.resume(self.pool.registry.get(CHEF))
             self.assertIn(CHEF, self.pool.frontends)
+            self.assertTrue(self.pool.dropped[-1])  # what it was sent while paused is not answered now
 
         self.play(scenario)
 

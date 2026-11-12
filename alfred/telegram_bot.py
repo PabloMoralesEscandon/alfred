@@ -634,7 +634,7 @@ class ControlPanel:
                     await self._bot_perm(update, record, rest)
                 elif action == "pause":
                     await self.pool.pause(record)
-                    await reply("Paused %s. It ignores messages and its scheduled items wait until /bot resume." % record.handle)
+                    await reply("Paused %s. Messages sent to it meanwhile are dropped; its scheduled items wait until /bot resume." % record.handle)
                 elif action == "resume":
                     await reply(await self.pool.resume(record))
                 else:
@@ -759,11 +759,11 @@ class BotPool:
 
     # -- connecting to Telegram (tests replace these two) -----------------------
 
-    async def _connect(self, frontend: Any, token: str, updates: List[str]) -> Application:
+    async def _connect(self, frontend: Any, token: str, updates: List[str], drop_pending: bool = False) -> Application:
         application = frontend.build(token)
         await application.initialize()  # also checks the token with getMe
         await frontend.started(application)
-        await application.updater.start_polling(allowed_updates=updates)
+        await application.updater.start_polling(allowed_updates=updates, drop_pending_updates=drop_pending)
         await application.start()
         return application
 
@@ -810,8 +810,11 @@ class BotPool:
 
     # -- one bot -------------------------------------------------------------
 
-    async def launch(self, record: BotRecord) -> bool:
-        """Connect a created bot and start answering in its chats. True if it is running afterwards."""
+    async def launch(self, record: BotRecord, drop_pending: bool = False) -> bool:
+        """Connect a created bot and start answering in its chats. True if it is running afterwards.
+
+        `drop_pending` discards what was sent to it while it was disconnected (a paused bot ignores messages).
+        """
         async with self._lock:
             if record.bot_id in self.frontends:
                 return True
@@ -823,7 +826,7 @@ class BotPool:
             bots.prepare_workspace(config)
             frontend = TelegramBot(config, record=record, pool=self)
             try:
-                application = await self._connect(frontend, token, BOT_UPDATES)
+                application = await self._connect(frontend, token, BOT_UPDATES, drop_pending)
             except Exception as exc:
                 log.warning("could not connect %s: %s", record.handle, exc)
                 await frontend.agent.shutdown()
@@ -1015,7 +1018,7 @@ class BotPool:
         self.registry.save(record)
         if not self.registry.token(record.bot_id) and self.main.bot is not None:
             self.registry.set_token(record.bot_id, await bots.fetch_token(self.main.bot, record.bot_id))
-        if await self.launch(record):
+        if await self.launch(record, drop_pending=True):
             return "%s is connected again: %s" % (record.handle, record.link)
         return "I could not connect to %s. If you deleted it in @BotFather, destroy it here with /bot destroy %s." % (
             record.handle, record.username)
