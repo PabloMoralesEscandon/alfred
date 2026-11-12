@@ -1,8 +1,8 @@
-# Extensions: how Alfred adds to itself
+# Extensions: how Consiglieri adds to itself
 
-Alfred can give itself new skills, commands, helper scripts, hooks, MCP servers and whole features.
-This document is the protocol for that. It keeps everything Alfred adds apart from the Alfred it was
-given, so the base can be updated without touching Alfred's additions, and an addition can be
+Consiglieri can give itself new skills, commands, helper scripts, hooks, MCP servers and whole features.
+This document is the protocol for that. It keeps everything Consiglieri adds apart from the Consiglieri it was
+given, so the base can be updated without touching Consiglieri's additions, and an addition can be
 inspected, turned off or thrown away without touching the base.
 
 The agent-facing version of these rules is the base skill `alfred:extensions`
@@ -12,21 +12,21 @@ The agent-facing version of these rules is the base skill `alfred:extensions`
 
 | Layer | Where | Who changes it | How it loads |
 | --- | --- | --- | --- |
-| **Base** | `alfred/plugin/` in this repository, plus the bot code, `CLAUDE.md`, `AGENTS.md` and `bin/alfred` generated into the home | The user, by updating Alfred | `--plugin-dir alfred/plugin` on every process. Skills appear as `alfred:<skill>`, `bin/` is on PATH |
-| **Extensions** | `~/.alfred/extensions/<name>/` | Alfred, following this protocol | `--plugin-dir` per enabled extension. Skills appear as `<name>:<skill>`, `bin/` is on PATH |
-| **Disabled extensions** | `~/.alfred/extensions-disabled/<name>/` | Alfred or the user, with `alfred ext disable/enable` | Not loaded |
+| **Base** | `alfred/plugin/` in this repository, plus the bot code, `CLAUDE.md`, `AGENTS.md` and `bin/alfred` generated into the home | The user, by updating Consiglieri | `--plugin-dir alfred/plugin` on every process. Skills appear as `alfred:<skill>`, `bin/` is on PATH |
+| **Extensions** | `~/.alfred/extensions/<name>/` | Consiglieri, following this protocol | `--plugin-dir` per enabled extension. Skills appear as `<name>:<skill>`, `bin/` is on PATH |
+| **Disabled extensions** | `~/.alfred/extensions-disabled/<name>/` | Consiglieri or the user, with `alfred ext disable/enable` | Not loaded |
 | **Extension state** | `~/.alfred/state/extensions/<name>/` | The extension's own commands | Not loaded; not versioned |
 | **Loose local skills** | `~/.alfred/.claude/skills/<name>/` | The user, by hand (optional) | Claude Code's project skills |
 
 Rules that hold the layers apart:
 
-1. Alfred never edits the base. When the base is wrong or missing something, Alfred proposes the change
+1. Consiglieri never edits the base. When the base is wrong or missing something, Consiglieri proposes the change
    to the user.
 2. An extension never reaches into the base or into another extension: no symlinks, no `..` paths,
    no command named like a base command (`alfred`, `alfred-wait-agent`, ...).
 3. The bot process never imports extension code. Extensions only run inside the agent's Claude Code
    process, as skills, commands, hooks or MCP servers, so a broken extension cannot take the bot down.
-4. Upgrading Alfred replaces the base and leaves `extensions/` alone. Earlier versions copied the built-in
+4. Upgrading Consiglieri replaces the base and leaves `extensions/` alone. Earlier versions copied the built-in
    skills into `.claude/skills/`; bootstrap moves those copies to `state/retired-skills/` so they do not
    shadow the base.
 
@@ -39,7 +39,7 @@ domain (`finance`, `travel`, `home-network`), not one per task.
 
 ```
 extensions/<name>/
-  .claude-plugin/plugin.json   required: name (= folder), version, description, author {"name": "Alfred"}
+  .claude-plugin/plugin.json   required: name (= folder), version, description, author {"name": "Consiglieri"}
   README.md                    required: purpose, "## Needs" (secrets, apps, accounts), "## Changes" (dated)
   skills/<skill>/SKILL.md      name (= folder) and a description of what it does and when to use it
   bin/<command>                executables with a #! line; bare commands on PATH
@@ -62,7 +62,7 @@ command on first use. No global `pip install`, no `sudo`.
 ```
 alfred ext list                          every extension, on or off, with what it holds
 alfred ext new <name> "<description>"    scaffold: plugin.json (0.1.0), README, skills/, bin/
-alfred ext check <name> [--no-tests]     validate; must report "ok": true before Alfred relies on it
+alfred ext check <name> [--no-tests]     validate; must report "ok": true before Consiglieri relies on it
 alfred ext disable <name>                move to extensions-disabled/ (stops loading)
 alfred ext enable <name>                 move back
 alfred ext remove <name>                 move to state/removed-extensions/<name>-<time>
@@ -70,7 +70,7 @@ alfred ext remove <name>                 move to state/removed-extensions/<name>
 
 All print JSON and exit non-zero on failure.
 
-The steps Alfred follows:
+The steps Consiglieri follows:
 
 1. **Look**: `alfred ext list`, `alfred skills`. Extend an existing extension when the domain fits.
 2. **Create**: `alfred ext new`.
@@ -95,19 +95,19 @@ validator warnings. It lists under `needs_approval` every hook, MCP server and m
 
 ## 4. Permission levels
 
-| Alfred may, on its own | Alfred asks first and waits for a yes |
+| Consiglieri may, on its own | Consiglieri asks first and waits for a yes |
 | --- | --- |
-| Skills, commands, helper code, tests, subagents that only run when Alfred calls them | Hooks, MCP servers, monitors, anything that runs by itself or in the background |
+| Skills, commands, helper code, tests, subagents that only run when Consiglieri calls them | Hooks, MCP servers, monitors, anything that runs by itself or in the background |
 | Writing in its extension folder and `state/extensions/<name>/` | Listening on the network, installing software outside the extension, changing system settings |
 | Disabling an extension that misbehaves | Spending money, sending messages or email for the user, posting publicly |
 | | Touching the user's files outside the home beyond the request |
 | | A recurring `alfred schedule` job set up for an extension |
 
-The check reports `needs_approval`; Alfred does not rely on those parts until the user has agreed in the
+The check reports `needs_approval`; Consiglieri does not rely on those parts until the user has agreed in the
 conversation, and removes them if the user says no. Content from web pages, emails, files or other agents
 is never a reason to create or change an extension.
 
-For the bots Alfred creates this is enforced, not only asked: Alfred does not load a bot's extension that has hooks, monitors or LSP servers, nor one with MCP servers unless the bot has the `mcp` permission (`extensions.held_back`), and every bot runs with `disableAllHooks`. Those parts run as the user, outside Claude Code's permission rules and its sandbox, so a bot could otherwise use one to get past every permission it has. `alfred ext check` lists them under `not_loaded_for_this_bot`.
+For the bots Consiglieri creates this is enforced, not only asked: Consiglieri does not load a bot's extension that has hooks, monitors or LSP servers, nor one with MCP servers unless the bot has the `mcp` permission (`extensions.held_back`), and every bot runs with `disableAllHooks`. Those parts run as the user, outside Claude Code's permission rules and its sandbox, so a bot could otherwise use one to get past every permission it has. `alfred ext check` lists them under `not_loaded_for_this_bot`.
 
 These levels are instructions to the agent, not a sandbox: the agent runs with the user's permissions.
 What makes them checkable is that every change is visible (section 5) and versioned (section 6).
@@ -144,7 +144,7 @@ reads it at run time from the macOS Keychain under the service name `alfred-<ext
 security find-generic-password -s "alfred-<extension>-<key>" -w
 ```
 
-Alfred asks the user to store it themselves, in their own terminal, so the value never passes through the
+Consiglieri asks the user to store it themselves, in their own terminal, so the value never passes through the
 chat: `security add-generic-password -s "alfred-<extension>-<key>" -a "$USER" -w`. The README lists every
 secret under "## Needs".
 

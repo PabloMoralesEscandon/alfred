@@ -17,7 +17,7 @@ does not name keeps its default.
 | 🔓 **Full access** ⚠️⚠️ | Anything your user can do on this Mac, without asking | Almost nothing: an unsandboxed shell gets around the remaining rules | everything `on`, `shell full`, `sandbox off`, `mode bypassPermissions` |
 
 Above the four presets is ⚠️ **Cross-agent access** (from the security-control work): on top of its
-preset, the bot may read the memory of the other bots and of Alfred and use their tools. It is not a set of
+preset, the bot may read the memory of the other bots and of the main agent (Alfred) and use their tools. It is not a set of
 permissions. It is a flag on the bot (`BotRecord.cross_agent`), granted only to a bot that exists, only from
 the control panel, after a warning, and every grant and withdrawal goes to the audit log (`/bot audit`). It can
 sit on top of any preset, and choosing a preset never changes it.
@@ -87,7 +87,7 @@ A preset is applied in one write by `BotPool.set_permissions` (`alfred/telegram_
 Every agent reads the shared memory (`~/.alfred-shared/memory`), whatever its preset and with or without
 cross-agent access. Its index is loaded into each conversation through the agent's copy,
 `SHARED_MEMORY.md`, and the folder is an extra working directory and in the sandbox's `allowRead`. It sits
-outside Alfred's home and the bots' directories, so no blacklist rule covers it. No preset lets a bot write
+outside Consiglieri's home and the bots' directories, so no blacklist rule covers it. No preset lets a bot write
 it. Writing needs the `shared` switch under Customize. A bot with an unsandboxed shell (Full access) can
 still write it with shell commands, as it can anything else. `docs/AGENT_CHATS_RESEARCH.md` §6.4, "Memoria
 compartida", has the details and the remaining ways around.
