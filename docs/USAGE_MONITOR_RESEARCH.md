@@ -1,7 +1,10 @@
 # Monitor de uso de la suscripción de Claude: investigación y diseño
 
-Estado: investigación terminada; esqueleto del monitor implementado y desactivado por defecto (ver
-[sección 9](#9-estado-de-la-implementación)). Fecha: 2026-11-12. Claude Code probado: v2.1.322.
+Estado: monitor implementado en parte y **desactivado por defecto** (`ALFRED_USAGE_MONITOR=0`). Hay un
+permiso `usage` por bot (sección 11), avisos para agentes con condiciones sobre el uso (sección 12) y una
+estimación de cuánto del semanal consume una ventana de 5 h (sección 10). Los avisos al usuario
+(R1-R6) siguen sin lógica. Estado detallado y pendientes: [sección 9](#9-estado-de-la-implementación).
+Fecha: 2026-11-12. Claude Code probado: v2.1.322.
 
 Objetivo: que Alfred (1) avise antes de que se agoten los límites del plan (ventana de 5 horas y
 límites semanales) y (2) detecte cuota sin usar antes de que se reinicie, para avisar al usuario o
@@ -513,37 +516,30 @@ Cada paso se puede integrar por separado y deja las pruebas en verde.
 
 ## 9. Estado de la implementación
 
-### Lo que hay (esqueleto, sin funcionalidad)
+### Lo que hay
 
-`alfred/usage_monitor.py` contiene las piezas del diseño de la sección 7 con nombres definitivos.
-Ninguna actúa todavía.
+| Pieza | Qué hace hoy |
+| --- | --- |
+| `Window`, `Reading` (`usage_monitor.py`) | Modelo de una lectura: tipo de medidor (`session`, `weekly_all`, `weekly_scoped` u otro), etiqueta, porcentaje, `resets_at` (UTC), `reset_text`, `severity` y `scope`. `Reading.from_usage_report()` lee el `usage_report` estructurado (sección 2.1) y `Reading.from_report()`, el texto, como respaldo y sin hora de reinicio exacta. |
+| `ClaudeUsageSource` | Pide `/usage` con `stream-json --verbose --no-session-persistence --setting-sources project --strict-mcp-config` desde `state/usage-probe/`, con `run_json_lines`, `INHERITED_SESSION_VARS` y `USAGE_TIMEOUT` de `usage.py`. Toma `usage_report` y, si no llega, analiza el texto. Un "rate limited" sin datos es una lectura fallida. Si alguna vez `total_cost_usd` no es 0, lo registra como aviso. `/usage` y `alfred usage` siguen usando `usage.fetch()` sin cambios. |
+| `Rule` y las seis reglas | Declaradas, sin lógica (`evaluate()` devuelve `[]`). `SpareWeeklyRule.estimate()` ya calcula, con `window_share_percent`, cuántas ventanas de 5 h haría falta para gastar el semanal sobrante y cuántas caben antes del reinicio. La regla aún no actúa. |
+| `UsageHistory` | `state/usage.json`: cada lectura del monitor, con poda a 24 h y escritura atómica. |
+| `MonitorSettings` | Interruptor y ajustes. Tienen efecto `ALFRED_USAGE_MONITOR`, `ALFRED_USAGE_POLL` (15 min) y `ALFRED_USAGE_WAKE_INTERVAL` (1 h); `ALFRED_USAGE_WINDOW_SHARE` (8) solo lo usa la estimación. Los demás siguen reservados. |
+| `UsageMonitor`, `start()` | `BotPool.start` lo arranca una vez por proceso y `BotPool.stop` lo para. Su bucle revisa los avisos de los agentes cada `poll_seconds` con una sola lectura (sección 12). |
+| `usage_alerts.py` | Condiciones, almacén por bot, decisión de qué se dispara y texto del evento (sección 12). |
+| Permiso `usage` (`bots.py`, `menus.py`, `telegram_bot.py`, `cli.py`) | Sección 11. |
+| `alfred usage-alert add\|list\|remove` (`cli.py`) | Sección 12. |
 
-| Pieza | Qué es hoy | Nombre en la sección 7 |
-| --- | --- | --- |
-| `Window`, `Reading` | Modelo de datos de una lectura: tipo de medidor (`session`, `weekly_all`, `weekly_scoped` u otro), etiqueta, porcentaje, `resets_at` (UTC, opcional), `reset_text`, `severity` y `scope`. Se serializa a dict. `Reading.from_report()` lee el texto de `/usage` con la misma `usage.LIMIT_LINE`, así que `resets_at` queda vacío y solo se guarda `reset_text`. | `Limit`, `Snapshot` |
-| `UsageSource`, `ClaudeUsageSource` | Interfaz de la fuente (`async read() -> Reading`) y la implementación que reutiliza `usage.py`. | `probe()` |
-| `Rule`, `RuleContext`, `Alert`, `default_rules()` | Interfaz de reglas y las seis declaradas: `ThresholdRule` (R1), `ProjectionRule` (R2), `LimitReachedRule` (R3), `ResetRule` (R4), `SpareSessionRule` (R5) y `SpareWeeklyRule` (R6). Todas tienen `implemented = False` y `evaluate()` devuelve `[]`. | `evaluate()` |
-| `UsageHistory` | Historial en `state/usage.json`: `append()` con escritura atómica y poda a 24 h, `readings()` y `latest()`. Tolera archivos y entradas dañados. No toca el disco hasta que se le llama. | `UsageStore` (aún sin las claves de avisos enviados) |
-| `MonitorSettings`, `is_enabled()` | Configuración: `ALFRED_USAGE_MONITOR` (interruptor, desactivado por defecto) y los ajustes de la sección 7 (`_CHAT_ID`, `_POLL` con mínimo de 5 min, `_WARN`, `_CAP`, `ALFRED_QUIET_HOURS`, `_SPARE` y `_AUTORUN`). Un valor inválido conserva su valor por defecto y deja un aviso en el log. Vive en el propio módulo, no en `config.py`. Solo el interruptor tiene efecto. | Variables de `config.py` |
-| `UsageMonitor`, `start()` | Punto de entrada. `BotPool.start` llama a `usage_monitor.start(config)` con la configuración de Alfred, una vez por proceso, justo después de arrancar el planificador. Con la configuración de un bot creado (`config.bot_id` distinto de 0) devuelve `None` sin leer nada. | `run_usage_monitor` |
+Garantías comprobadas por los tests (`tests/test_usage_monitor.py`, `test_usage_permission.py`,
+`test_usage_alerts.py`; Telegram y Claude Code simulados):
 
-Comportamiento garantizado por los tests (`tests/test_usage_monitor.py`):
-
-- **Desactivado (por defecto):** `start()` lee solo el interruptor y devuelve `None`. No lee otros
-  ajustes, no construye nada, no ejecuta `claude`, no escribe archivos y no registra nada en el log.
-- **Activado:** construye las piezas y registra una sola línea (`usage monitor is on but not
-  implemented yet ...`). No lee el uso, no escribe el historial, no manda mensajes y no programa
-  tareas.
-- Cada pieza se puede construir y usar por separado.
-
-Únicos cambios fuera del módulo nuevo:
-
-- `usage.py`: `fetch()` se ha dividido en `fetch_report()`, que devuelve el texto bruto o lanza
-  `UsageUnavailable`, y `fetch()`, que lo resume. La orden y los mensajes de error son los mismos y
-  `/usage` responde igual: los tests anteriores pasan sin cambios.
-- `telegram_bot.py`: el import, el atributo `BotPool.usage_monitor` y la llamada a `start()` en
-  `BotPool.start`. `TelegramBot` no tiene nada del monitor.
-- `.env.example`: `ALFRED_USAGE_MONITOR=0`, documentado como esqueleto.
+- **Con el interruptor apagado (por defecto)** no se ejecuta nada: `start()` lee solo el
+  interruptor y devuelve `None`. No hay bucle, ni lecturas, ni despertares. El permiso `usage` no
+  tiene efecto y el panel lo advierte.
+- **Encendido**, solo se lee el uso cuando algún bot activo con el permiso tiene un aviso
+  pendiente, y entonces una vez por ciclo para todos. Al usuario no se le manda nada todavía.
+- Un aviso despierta solo al bot que lo registró, se dispara una sola vez (o una por ventana con
+  `--repeat`) aunque se reinicie el proceso, y un bot no se despierta más de una vez por intervalo.
 
 ### Bots creados (tras el merge de `refactor` / agent-chats)
 
@@ -555,56 +551,292 @@ plan son de esa cuenta, así que:
 - **El monitor corre una sola vez por proceso, en `BotPool.start`, con la configuración de Alfred.**
   No va en `TelegramBot`: un monitor por bot repetiría las consultas al endpoint de uso, que tiene
   límite de frecuencia, y duplicaría los avisos. `TelegramBot._post_init` ya no es la ruta de
-  arranque (el pool llama a `started()`), así que con el enganche anterior el monitor no se habría
-  activado nunca.
+  arranque (el pool llama a `started()`).
 - `start()` devuelve `None` con la configuración de un bot creado (`config.bot_id`), aunque sus
-  ajustes propios (`overrides`) activen el interruptor. Lo comprueban los tests
-  (`CreatedBotTests` y `PoolWiringTests`).
-- El historial va en `state/usage.json` de Alfred, no en el estado de cada bot.
+  ajustes propios (`overrides`) activen el interruptor.
+- Una sola lectura por ciclo sirve para los avisos de todos los bots (sección 12).
+- El historial va en `state/usage.json` de Alfred. Los avisos de cada bot van en
+  `state/bots/<id>/usage-alerts.json`.
 - `/usage` sigue en cada bot como en `refactor`: todos muestran los mismos límites, los de la
   cuenta.
 
-Pendiente por esta razón, cuando haya lógica:
-
-- Los avisos deben salir del **panel**, no de un bot concreto. El chat por defecto es el del dueño
-  con el panel (`ALFRED_USAGE_CHAT_ID`, o el único id numérico de `ALFRED_ALLOWED_USERS`).
-- El tope de gasto (paso 7) afecta a las tareas programadas de **todos** los bots: va en
-  `BotPool.deliver`, que es el planificador compartido, no en cada `TelegramBot`.
-- La captura pasiva de `rate_limit_event` (paso 2) llega por el `Agent` de cada bot: todos deben
-  escribir en el mismo historial del proceso (a través del pool), no en uno por bot.
-- La proyección (R2) mezcla el consumo de todos los bots y del uso fuera de Alfred. El mensaje no
-  debe atribuirlo a un bot. Saber qué bot consumió más necesitaría otra fuente (`total_cost_usd`
-  por turno), y queda fuera del alcance.
-- Las propuestas de cuota sobrante (`/spare`, paso 8) deberán decir **a qué bot** se encarga cada
-  tarea pendiente, o guardarlas por bot (`bot_id` en la tabla `backlog`, igual que en el
-  planificador).
+Pendiente por esta razón, cuando haya avisos para el usuario: deben salir del **panel**; el tope de
+gasto va en `BotPool.deliver`, compartido por todos los bots; la captura pasiva de
+`rate_limit_event` debe escribir en el historial del proceso; la proyección (R2) no debe atribuir el
+consumo a un bot, y las propuestas de cuota sobrante deben decir a qué bot va cada tarea.
 
 ### Lo que falta
 
-Por orden, siguiendo los pasos de la sección 7:
+1. **Captura pasiva**: `rate_limit_event` de los turnos de los bots (sección 2.2) hacia el
+   historial, para leer menos `/usage`.
+2. **Avisos al usuario (R1-R6)** desde el panel, con deduplicación persistente y horas de silencio.
+3. **Consulta adaptativa**: hoy el intervalo es fijo. Falta acortarlo cerca de los reinicios y
+   respetar `rate limited until HH:MM`; ahora una lectura fallida solo se registra y no dispara
+   nada.
+4. **Regla de semanal sobrante (R6)** con `SpareWeeklyRule.estimate()`, y medir
+   `window_share_percent` con el historial propio (sección 10).
+5. **Tope de gasto** en `BotPool.deliver`, con `cap_percent` y `Postpone`.
+6. **Backlog** y `/spare N`.
+7. **Skill base para agentes** sobre `alfred usage-alert`. Hoy lo explican `--help` y una línea en
+   el resumen de permisos del manual del bot.
+8. **Más valores en las condiciones**: el semanal por modelo (`fable.used`) y si la ventana de 5 h
+   está en marcha (`session.active`).
+9. **Pruebas en vivo**: ver la lista al final de la sección 12.
 
-1. **Fuente estructurada.** `ClaudeUsageSource` debería pedir `stream-json --verbose` con
-   `--setting-sources project --strict-mcp-config` y `cwd` en `state/usage-probe/`, leer
-   `usage_report.rate_limits` (con `resets_at` y `severity` reales) y dejar el texto como respaldo.
-   Hace falta una `Reading.from_usage_report()`, detectar `rate limited until` y una fixture real
-   para los tests. Puede hacerse en `usage_monitor.py` sin tocar `fetch()`, o pasando `/usage`
-   también al formato estructurado.
-2. **Captura pasiva.** `Listener.rate_limit()`, el manejo de `rate_limit_event` en `live.py` y
-   `claude.py`, y `Reading.from_rate_limit_event()`.
-3. **Historial completo.** Claves de avisos enviados en `UsageHistory`, para la deduplicación entre
-   reinicios, y `alfred usage --json`.
-4. **Lógica de R1, R3 y R4**, deduplicación y horas de silencio, con tests con reloj fijo.
-5. **Bucle de consulta.** Sustituir `announce()` por una tarea de asyncio con intervalo
-   adaptativo y espera exponencial, cancelada en `BotPool.stop`, que envíe desde el panel
-   (`BotPool.main`) a `settings.chat_id`. Test de que nunca llama a `agent.submit` de ningún bot.
-6. **Lógica de R2, R5 y R6** (proyección y cuota sobrante), con mensajes simples.
-7. **Tope en `BotPool.deliver`** (el planificador compartido por todos los bots), usando
-   `cap_percent`. `refactor` ya trae `Postpone` en el planificador; ver si sirve en lugar de un
-   `SchedulerStore.defer()` nuevo.
-8. **Backlog**: tabla, `alfred backlog`, skill base, `/spare N`, y `autorun` como opción explícita.
-9. **Documentación de usuario**: README (`/spare`, la sección de configuración), `.env.example`
-   con los ajustes restantes cuando tengan efecto, y `docs/PLAN.md`.
-10. **Prueba real** de un día (sección 7, paso 10).
+## 10. Cuánto del semanal consume una ventana de 5 h llena
+
+Pregunta: si se agota una ventana de 5 h, ¿qué porcentaje del límite semanal se ha gastado? Solo se
+ha investigado en internet, sin pruebas propias ni gasto de cuota, como se pidió. Consultado el
+2026-11-12.
+
+### Lo oficial
+
+| Fuente | Qué dice |
+| --- | --- |
+| [Precios](https://claude.com/pricing) | Pro: "More usage than Free, every 5 hours and every week". Max ($100): "5x Pro usage every 5 hours and every week", y Fable "up to half your weekly limit". Ultra ($200): "No 5-hour limit" (cuentas verificadas) y "10x Pro usage every week". Nota: "Usage limits vary with the model, chat length, and file size". |
+| [¿Qué es el plan Max?](https://support.claude.com/en/articles/11049741-what-is-the-max-plan) | "five times the Pro plan's usage every five hours and every week". Límite semanal de todos los modelos más "a separate weekly limit for Fable". El semanal se reinicia "at a fixed time each week that is assigned to your account". |
+| [Claude Code con Pro/Max](https://support.claude.com/en/articles/11145838-using-claude-code-with-your-pro-or-max-plan) | Pro y Max: límite de sesión de 5 h y semanal. Ultra: semanal; las cuentas verificadas no tienen límite de 5 h. |
+| [Anuncio del 6 de mayo de 2026](https://www.anthropic.com/news/higher-limits-spacex) | "we're doubling Claude Code's five-hour rate limits for Pro, Max, Team, and seat-based Enterprise plans". No menciona el semanal. |
+| Anuncio de julio de 2025 (recogido por [TechCrunch](https://techcrunch.com/2025/07/28/anthropic-unveils-new-rate-limits-to-curb-claude-code-power-users/)) | Semanales desde el 28 de agosto de 2025: Pro, "40 to 80 hours of Sonnet 4". Max $100: 140-280 h de Sonnet 4 y 15-35 h de Opus 4. Max $200: 240-480 h de Sonnet 4 y 24-40 h de Opus 4. Son "horas de uso" típicas, no horas de ventana llena, y son anteriores a la duplicación de mayo de 2026 y a los modelos actuales. |
+
+**Anthropic no publica la proporción entre la ventana de 5 h y el semanal**, ni cantidades absolutas
+(tokens, mensajes) para ninguno de los dos.
+
+### Lo que se deduce de lo oficial
+
+- **Pro y Max tienen la misma proporción.** Max es 5 veces Pro en la ventana y en el semanal, así
+  que una ventana llena se lleva el mismo porcentaje del semanal en los dos planes.
+- **Ultra verificado no tiene ventana de 5 h**, así que la pregunta no aplica. Para Ultra sin
+  verificar no hay cifra oficial de la ventana.
+- **El antiguo Max 20x**, hoy Ultra, era 20 veces Pro por sesión. Según las horas de 2025 su semanal
+  era unas 6 veces el de Pro (240-480 h frente a 40-80 h de Sonnet 4). Por tanto, una ventana llena
+  pesaba en su semanal unas 3 veces más que en Pro. Es una deducción a partir de cifras de 2025.
+- **La duplicación del 6 de mayo de 2026** duplicó la ventana sin cambiar el semanal, según el
+  anuncio. Eso **dobló el peso de una ventana llena** respecto a lo anterior. Fuentes no oficiales
+  hablan de un +50 % temporal del semanal en Claude Code entre julio y septiembre de 2026 y de un
+  +25 % permanente desde el 14 de septiembre
+  ([cronología de explainx.ai](https://www.explainx.ai/blog/claude-usage-limits-2026-timeline-explained),
+  sin enlace a Anthropic). Si fuera cierto, el peso actual sería unas 1,6 veces el anterior a mayo
+  (2 / 1,25), no el doble.
+
+### Mediciones de la comunidad
+
+La única medición sistemática encontrada es la de [wokey.ai](https://wokey.ai/claude-usage-limits).
+Es un tercero que mide cuentas reales a través de su pasarela y vuelve a medir cada lunes. Datos del
+2 al 9 de noviembre de 2026:
+
+| Plan | Ventanas de 5 h llenas por semana | Porcentaje del semanal por ventana | Muestra y dispersión |
+| --- | --- | --- | --- |
+| Pro | ≈ 13 | ≈ 7,7 % | 296 cuentas; la mitad central, ±4 % de la mediana |
+| Max (5x) | sin publicar ("collecting") | — | 2 cuentas |
+| Ultra (antes Max 20x), cuentas con ventana | ≈ 5,5 | ≈ 18 % | 21 cuentas; ±20 % |
+| Team Standard / Premium | ≈ 9,3 / ≈ 9,5 | ≈ 11 % | 283 / 146 cuentas |
+
+Método, según la página: cuando el semanal de una cuenta sube al menos 10 puntos, las peticiones de
+ese tramo divididas por la subida dan una semana completa. Usa medianas por cuenta y luego entre
+cuentas. Advierte que el proveedor puede hacer pruebas A/B de límites y que el uso fuera de la
+pasarela distorsiona la medida. Otras guías citan la misma idea sin medir. Ninguna da cifras para
+Max 5x.
+
+### Por modelo
+
+- La ventana y el semanal general miden el mismo consumo, así que el modelo cambia **cuánto
+  trabajo cabe** en una ventana (Opus o Fable gastan más por petición que Sonnet o Haiku), pero no,
+  en principio, la proporción entre las dos. Es una deducción: Anthropic no dice si pondera igual
+  los dos medidores.
+- **Fable** tiene en Max y Ultra un medidor semanal propio de "hasta la mitad" del semanal. Una
+  ventana dedicada solo a Fable llenaría ese medidor unas dos veces más rápido que el general: del
+  orden del **15-16 % del semanal de Fable** por ventana en Max. Es una deducción sin medición.
+- Las cifras de modelos de 2025 (Sonnet 4 y Opus 4 por horas) no sirven para los modelos de 2026.
+
+### Resultado y uso en Alfred
+
+| Plan | Porcentaje del semanal por ventana de 5 h llena | Confianza |
+| --- | --- | --- |
+| Pro | **≈ 8 %** (7-9 %) | Media: una medición amplia de noviembre de 2026; no oficial |
+| Max | **≈ 8 %** (6-10 %) | Baja-media: deducido de la proporción oficial 5x/5x, sin medir |
+| Ultra verificado | No aplica (no hay ventana de 5 h) | Oficial |
+| Ultra sin verificar / antiguo Max 20x | ≈ 18 % (14-22 %) | Baja: 21 cuentas |
+| Semanal de Fable en Max, ventana solo con Fable | ≈ 15 % | Baja: deducción |
+
+Incertidumbre: Anthropic cambia los límites sin publicar cifras (mayo y septiembre de 2026) y se
+reserva limitar "at our discretion". La medición es de un solo tercero y casi toda de Pro. Si los
+semanales subieron un 25 %, el dato ya lo incluye, porque se midió después.
+
+**Parámetro**: `ALFRED_USAGE_WINDOW_SHARE`, por defecto `8` (`MonitorSettings.window_share_percent`),
+con la fuente en el código y en `.env.example`. Lo usa `SpareWeeklyRule.estimate()`: con un 60 %
+del semanal usado y 20 h hasta el reinicio, el 40 % sobrante pide 5 ventanas llenas y solo caben 4.
+La regla aún no actúa sobre ese cálculo. Mejor que el valor por defecto sería medirlo en la propia
+cuenta: con el historial de lecturas, la subida del semanal dividida por la de la ventana en un mismo
+tramo da la proporción real (pendiente, punto 4 de la sección 9).
+
+## 11. Permiso `usage` por bot
+
+### Qué es
+
+Un permiso más de cada bot, `usage`, **desactivado por defecto y en todos los preajustes**. Ninguno de
+`minimal`, `standard` ni `broad` lo incluye, y aplicar un preajuste lo vuelve a apagar. Permite leer
+el uso del plan (`alfred usage`) y registrar avisos (`alfred usage-alert`).
+
+| Dónde | Cómo |
+| --- | --- |
+| `/bot perm <bot> usage on\|off` | Como cualquier interruptor |
+| `/bot new ... +usage` | Opción al crear |
+| `/bot` (menús) | Interruptor "📊 Plan usage and alerts" en el paso de permisos del asistente y en el editor de cada bot |
+| Resumen de permisos | En el manual del bot ("You can/cannot read the Claude plan usage...") y en lo que ve el dueño, también en `/bot show` |
+
+### Cómo se hace respetar
+
+1. **Claude Code**: sin el permiso, los ajustes del bot deniegan `Bash(alfred usage)`,
+   `Bash(alfred usage *)`, `Bash(alfred usage-alert)` y `Bash(alfred usage-alert *)`. Las reglas
+   de denegación valen en todos los modos.
+2. **La orden `alfred`**: `alfred usage` y `alfred usage-alert add|list|remove` rechazan a un bot sin
+   el permiso. Es el segundo candado, como `require()` en el resto de órdenes.
+3. **El monitor**: en cada ciclo solo revisa los bots activos que tienen el permiso. Si se lo
+   quitan, sus avisos se conservan pero no se evalúan ni lo despiertan.
+4. **Sandbox**: con `shell full` y sandbox, las dos órdenes salen del sandbox
+   (`excludedCommands`) solo si el bot tiene el permiso, porque necesitan el estado de Alfred y el
+   login de Claude Code.
+
+No afecta a la orden `/usage` del chat de cada bot: esa la usa el dueño, no el agente, y se ha
+mantenido igual. El operador en la terminal (`alfred usage` sin `ALFRED_BOT_ID`) tampoco cambia.
+
+### Relación con el interruptor global (`ALFRED_USAGE_MONITOR`)
+
+Como se recomendó, **el permiso no tiene efecto mientras el interruptor global está apagado**:
+
+| Global | Permiso | `alfred usage` (bot) | `usage-alert add` | `list` / `remove` | Se evalúan sus avisos |
+| --- | --- | --- | --- | --- | --- |
+| apagado (defecto) | cualquiera | rechazado | rechazado | con el permiso, sí (para limpiar) | no: no hay monitor |
+| encendido | apagado | rechazado | rechazado | rechazado | no |
+| encendido | encendido | sí | sí | sí | sí |
+
+El panel lo avisa con una nota, cuando el permiso está activado y el global apagado, en la respuesta
+de `/bot perm`, en `/bot show` y en las pantallas de permisos de los menús. Dice que el permiso no
+tiene efecto hasta poner `ALFRED_USAGE_MONITOR=1` y reiniciar.
+
+### Qué se tocó del sistema de permisos (para el merge con `security-control`)
+
+Cambios mínimos y localizados. No se ha cambiado `BotRecord`, `BotRegistry`, `overrides()`,
+`ALWAYS_DENIED` ni el funcionamiento de ningún otro permiso.
+
+| Archivo | Cambio |
+| --- | --- |
+| `alfred/bots.py` | Una fila en `PERMISSIONS` (`usage`, `off`). `"usage"` al final de `SWITCHES`. Dos constantes nuevas tras `BROWSER_RULES`: `USAGE_RULES` y `USAGE_UNSANDBOXED`. Una entrada en la lista de frases de `permission_summary()`. En `claude_settings()`, dos líneas de `deny` cuando falta el permiso y una suma en `excludedCommands`. |
+| `alfred/menus.py` | `usage_monitor` en el import, una fila en `SWITCH_LABELS` y tres líneas en `_permission_text()` para la nota. |
+| `alfred/telegram_bot.py` | `+usage` en el texto de ayuda de `/bot`, y la nota en `/bot perm` y `/bot show`. |
+| `alfred/cli.py` | Funciones nuevas (`require_usage`, `usage_alert_bot`, `cmd_usage_alert_*`) y la comprobación en `cmd_usage`. Reutiliza `require`, `calling_bot`, `own_bot_only` y `own_chat_only` sin cambiarlos. |
+
+Si `security-control` reorganiza los permisos (niveles, listas negras), basta con volver a declarar
+`usage` como interruptor apagado por defecto y mantener `USAGE_RULES` en `deny` cuando esté apagado.
+`tests/test_usage_permission.py` comprueba el comportamiento, no la posición de las líneas. Hay
+que vigilar que el nivel de seguridad superior no permita `Bash(alfred *)` sin añadir esas
+denegaciones.
+
+## 12. Avisos para agentes
+
+### Para qué
+
+Un bot puede pedir que lo despierten cuando el uso cumpla una condición. Por ejemplo, el caso del
+usuario: "queda menos de 1 h de ventana y no se ha consumido nada". El aviso llega **solo al bot
+que lo registró**, como un evento que lo despierta en el chat (y tema) donde lo registró.
+
+### Órdenes
+
+```
+alfred usage-alert add --when "session.left < 1h and session.used = 0" [--repeat] [nota libre...]
+alfred usage-alert list
+alfred usage-alert remove <id o prefijo>
+```
+
+Salida en JSON, como el resto de órdenes del agente. `add` devuelve el aviso, cada cuánto se
+comprueba y el coste de despertarlo. Necesita el permiso `usage` y el interruptor global
+encendido. El operador puede gestionarlos con `--bot <@username>`. Un bot solo ve y borra los suyos,
+y solo puede registrarlos para sus propios chats (o para otros, con `contact`).
+
+### Condiciones
+
+| Valor | Significado | Ejemplo |
+| --- | --- | --- |
+| `session.used` (o `5h.used`) | % usado de la ventana de 5 h | `session.used < 10` |
+| `session.left` (o `session.reset`) | Tiempo hasta que se reinicia la ventana de 5 h | `session.left < 1h` |
+| `week.used` (o `weekly.used`) | % usado del semanal de todos los modelos | `week.used >= 80%` |
+| `week.left` (o `week.reset`) | Tiempo hasta el reinicio semanal | `week.left <= 2d` |
+
+Operadores `<`, `<=`, `>`, `>=`, `=` / `==` y `!=`. Se combinan con `and` / `&&`, `or` / `||`, `not`
+y paréntesis, y `and` tiene prioridad sobre `or`. Los porcentajes van de 0 a 100, con o sin `%`. Los
+tiempos llevan unidad (`s`, `m`, `h`, `d`, `w`). Una condición mal escrita se rechaza al registrarla,
+con el motivo.
+
+Un valor que no se pudo leer hace falsa su comparación. Pasa con una lectura fallida o cuando no hay
+ventana de 5 h en marcha. Ojo con el ejemplo del usuario: la ventana de 5 h empieza con el primer
+uso, así que si no se ha usado nada desde el último reinicio **no hay ventana ni hora de reinicio**,
+y `session.left < 1h` es falso. La condición se cumple cuando hay una ventana en marcha con un uso
+que el servidor redondea a 0 %. Para detectar que "no hay ventana" haría falta `session.active`
+(pendiente).
+
+### Cuándo se dispara
+
+- **Una sola vez** por defecto: al dispararse queda gastado (`spent`) y sigue en la lista hasta
+  que se borra. Con `--repeat`, como mucho **una vez por ventana**: la de las ventanas que nombra
+  la condición, identificada por su hora de reinicio redondeada a 5 minutos, porque el servidor la
+  devuelve con décimas de segundo de diferencia. En la ventana siguiente vuelve a armarse.
+- El disparo se escribe en disco **antes** de crear el evento, con un bloqueo de archivo (lo
+  escriben tanto `alfred usage-alert` como el monitor), así que un reinicio del proceso no lo
+  repite.
+- Se guardan en `state/bots/<id>/usage-alerts.json`, fuera del directorio del bot, que no puede
+  leer el estado de Alfred. Solo los cambia a través de la orden. Como mucho 20 avisos activos por
+  bot.
+
+### Cómo llega
+
+El monitor crea un `KIND_EVENT` en el planificador compartido con el `bot_id` del bot. `BotPool.deliver`
+lo entrega solo a ese bot: a un bot en pausa se le aplaza y uno destruido da error, como cualquier
+evento. El agente recibe, por ejemplo:
+
+```
+[Event] Usage alert met.
+
+Alert 368ae85e: session.left < 1h and session.used = 0
+Your note when you set it: use the spare window for the backlog
+It will not fire again; it stays listed until removed.
+
+Plan usage read at Thu 12 Nov 10:00 CET:
+- 5-hour window: 0% used, resets Thu 12 Nov 10:50 CET (in 50m)
+- Week (all models): 39% used, resets Sat 15 Nov 06:00 CET (in 2d 19h)
+- Week (Fable): 59% used
+
+Waking you used some plan usage. To stop an alert: alfred usage-alert remove <id>.
+```
+
+### Coste
+
+- **Comprobar no gasta cuota.** Una lectura de `/usage` por ciclo, sin modelo, para todos los
+  bots. Si ningún bot activo con permiso tiene avisos pendientes, no se lee nada.
+- **Despertar sí gasta.** Cada aviso disparado es un turno del agente con todo su contexto, igual
+  que si el usuario le escribiera. En una sesión larga puede ser una parte apreciable de la ventana.
+- Límites: un bot no se despierta más de una vez por `ALFRED_USAGE_WAKE_INTERVAL` (1 h por
+  defecto, mínimo 5 min). Los avisos que se cumplen antes esperan **sin gastarse** al primer ciclo
+  después del intervalo. Si para entonces la condición ya no se cumple, no se disparan en esa
+  ventana. Los avisos que se cumplen a la vez llegan en un solo evento. La comprobación es cada
+  `ALFRED_USAGE_POLL` (15 min): una condición de menos de 15 minutos de margen, como
+  `session.left < 10m`, puede pasar sin verse. El intervalo debe ser menor que el margen más
+  estrecho.
+
+### Qué falta probar en vivo
+
+Todo lo anterior está probado con Telegram y Claude Code simulados. Queda:
+
+1. Que el `usage_report` real de la versión instalada tenga la forma de la fixture, y qué devuelve
+   cuando la ventana de 5 h no ha empezado.
+2. Que la lectura con `--setting-sources project --strict-mcp-config` funcione desde el servicio
+   (launchd), con su `PATH` y su acceso al llavero.
+3. Que las reglas `deny` de `alfred usage*` bloqueen de verdad a un bot en Claude Code real, y que
+   con `shell full` y sandbox las dos órdenes funcionen gracias a `excludedCommands`.
+4. Un ciclo completo con Telegram real: registrar un aviso desde un bot, verlo dispararse una vez y
+   que solo conteste ese bot.
+5. El límite de frecuencia del endpoint de uso con lecturas cada 15 minutos durante un día.
+6. Cuánto gasta un despertar real: `/usage` antes y después de un evento en una sesión larga.
 
 ## Fuentes
 
@@ -625,6 +857,15 @@ Oficiales:
 - Términos de consumidor: <https://www.anthropic.com/legal/consumer-terms>
 - Política de uso: <https://www.anthropic.com/legal/aup>
 - Centro de ayuda, Claude Code con Pro/Max: <https://support.claude.com/en/articles/11145838-using-claude-code-with-your-pro-or-max-plan>
+
+Límites por plan (sección 10):
+
+- Precios: <https://claude.com/pricing>
+- ¿Qué es el plan Max?: <https://support.claude.com/en/articles/11049741-what-is-the-max-plan>
+- Anuncio del 6 de mayo de 2026: <https://www.anthropic.com/news/higher-limits-spacex>
+- Semanales de agosto de 2025 (TechCrunch): <https://techcrunch.com/2025/07/28/anthropic-unveils-new-rate-limits-to-curb-claude-code-power-users/>
+- Medición de la comunidad (no oficial): <https://wokey.ai/claude-usage-limits>
+- Cronología no oficial de cambios de 2026: <https://www.explainx.ai/blog/claude-usage-limits-2026-timeline-explained>
 
 Comunidad (no oficiales):
 

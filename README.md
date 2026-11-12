@@ -100,7 +100,7 @@ The same can be done with text shortcuts:
 | `/status`, `/usage`, `/help` | Bot management on or off and how many bots run; plan limits; help. |
 
 `<bot>` is the bot's `@username`, its name or its id. Options for `/bot new` come before the task:
-`+web`, `+browser`, `+shell`, `+edit`, `+mcp`, `+contact`, `+bots`, `+bypass`, `-schedule`, `-sandbox`,
+`+web`, `+browser`, `+shell`, `+edit`, `+mcp`, `+contact`, `+bots`, `+usage`, `+bypass`, `-schedule`, `-sandbox`,
 and `setting=value` or `permission=value`, for example:
 
 ```text
@@ -147,6 +147,7 @@ reminders in its own chat) and nothing else. Grant more when you create it or la
 | `schedule` | `on` | Reminders and timed tasks |
 | `contact` | `off` | Post or schedule messages to chats other than yours |
 | `bots` | `off` | List bots, change other bots' settings, ask you for new ones. Never destroy |
+| `usage` | `off` | Read the Claude plan usage (`alfred usage`) and set usage alerts that wake it (`alfred usage-alert`). Has no effect while `ALFRED_USAGE_MONITOR` is off; the panel says so. See [docs/USAGE_MONITOR_RESEARCH.md](docs/USAGE_MONITOR_RESEARCH.md) |
 | `allow`, `deny` | none | Extra Claude Code permission rules, separated by `;` |
 
 Most of this is enforced by Claude Code itself: each bot runs with its own `--settings` file (permission
