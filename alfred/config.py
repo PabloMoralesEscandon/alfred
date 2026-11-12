@@ -256,6 +256,22 @@ class Config:
         return self.home.parent / ("%s-bots" % self.home.name)  # ~/.alfred -> ~/.alfred-bots
 
     @property
+    def shared_dir(self) -> Path:
+        """The memory every agent reads: next to the home and the bots' directories, inside neither.
+
+        The blacklist denies the home and the bots' directories to every bot, and in Claude Code a deny
+        rule wins over an allow rule, so a shared folder inside either could never be opened again.
+        """
+        value = self.get("ALFRED_SHARED_HOME")
+        if value:
+            return Path(value).expanduser().resolve()
+        return self.home.parent / ("%s-shared" % self.home.name)  # ~/.alfred -> ~/.alfred-shared
+
+    @property
+    def shared_memory_dir(self) -> Path:
+        return self.shared_dir / "memory"
+
+    @property
     def state_dir(self) -> Path:
         return self.home / "state"
 
