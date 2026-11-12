@@ -89,6 +89,8 @@ class Sandbox:
         self.environ["ALFRED_ENV_FILE"] = str(self.root / "repo.env")
         # Tests never talk to a real Orca app; install_fake_orca() overrides this.
         self.environ["ALFRED_ORCA_BIN"] = str(self.root / "no-orca")
+        # Claude Code's own folder (transcripts, auto memory), named in the bots' rules: never the real one.
+        self.environ["CLAUDE_CONFIG_DIR"] = str(self.root / "claude-config")
         self.config = Config(home=self.home, env_files=[self.home / ".env", self.root / "repo.env"], environ=self.environ)
 
     def cleanup(self) -> None:
