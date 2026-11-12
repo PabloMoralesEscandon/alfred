@@ -291,7 +291,7 @@ def set_enabled(config: Config, name: str, enabled: bool) -> Extension:
 def remove(config: Config, name: str) -> Path:
     """Move it out of the way, into state/ where it can still be recovered. Its history stays in git."""
     extension = find(config, name)
-    trash = config.state_dir / "removed-extensions"
+    trash = config.workspace / "state" / "removed-extensions"  # the home's state/, or the bot's own
     trash.mkdir(parents=True, exist_ok=True)
     target = trash / ("%s-%s" % (name, datetime.now().strftime("%Y%m%d-%H%M%S")))
     shutil.move(str(extension.path), str(target))

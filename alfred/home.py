@@ -254,13 +254,14 @@ def _git(home: Path, *args: str) -> subprocess.CompletedProcess:
 
 
 def autosave(config: Config, message: str) -> bool:
-    """Commit whatever changed in the home directory. Returns True if a commit was made."""
-    if not config.autosave or not (config.home / ".git").exists():
+    """Commit whatever changed in the agent's directory (the home, or a bot's own). True if a commit was made."""
+    folder = config.workspace
+    if not config.autosave or not (folder / ".git").exists():
         return False
-    _git(config.home, "add", "-A")
-    if _git(config.home, "diff", "--cached", "--quiet").returncode == 0:
+    _git(folder, "add", "-A")
+    if _git(folder, "diff", "--cached", "--quiet").returncode == 0:
         return False
-    return _git(config.home, "commit", "-q", "-m", message).returncode == 0
+    return _git(folder, "commit", "-q", "-m", message).returncode == 0
 
 
 def _retire_seed_copies(config: Config) -> None:

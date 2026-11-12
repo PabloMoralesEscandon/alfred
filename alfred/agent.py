@@ -29,6 +29,50 @@ log = logging.getLogger("alfred.agent")
 Snapshot = Tuple[Set[str], Dict[str, str], Dict[str, str]]  # local skill names, memory, extensions
 
 
+class Chat(int):
+    """A conversation inside one bot: the Telegram chat id plus, in a chat with topics, the topic.
+
+    It is an int so that code and callers that only know chat ids keep working: `Chat(7) == 7`, and both
+    hash the same. A topic makes it a different conversation: `Chat(7, 3) != Chat(7)`. Which bot it
+    belongs to is not part of it, because every bot has its own `Agent` and its own session file.
+    """
+
+    thread_id: Optional[int]
+
+    def __new__(cls, chat_id: int, thread_id: Optional[int] = None) -> "Chat":
+        if isinstance(chat_id, Chat) and thread_id is None:
+            return chat_id
+        chat = int.__new__(cls, int(chat_id))
+        chat.thread_id = int(thread_id) if thread_id else None
+        return chat
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, Chat):
+            return int(self) == int(other) and self.thread_id == other.thread_id
+        if isinstance(other, int):
+            return self.thread_id is None and int(self) == other
+        return NotImplemented
+
+    def __ne__(self, other: object) -> bool:
+        equal = self.__eq__(other)
+        return equal if equal is NotImplemented else not equal
+
+    def __hash__(self) -> int:
+        return int.__hash__(self) if self.thread_id is None else hash((int(self), self.thread_id))
+
+    def __repr__(self) -> str:
+        return "Chat(%d%s)" % (int(self), ", %d" % self.thread_id if self.thread_id else "")
+
+    @property
+    def key(self) -> str:
+        """How the conversation is stored: the bare chat id, as before topics existed, or `<chat>/<topic>`."""
+        return str(int(self)) if self.thread_id is None else "%d/%d" % (int(self), self.thread_id)
+
+    def send_kwargs(self) -> Dict[str, int]:
+        """Extra arguments for Telegram's send methods, so a reply lands in the same topic."""
+        return {} if self.thread_id is None else {"message_thread_id": self.thread_id}
+
+
 class SessionStore:
     """Per-chat state on disk: the chosen backend and each backend's session id."""
 
@@ -49,12 +93,12 @@ class SessionStore:
         os.replace(temporary, self.path)
 
     def _chat(self, data: Dict[str, Any], chat_id: int) -> Dict[str, Any]:
-        chat = data.setdefault(str(chat_id), {})
+        chat = data.setdefault(Chat(chat_id).key, {})
         chat.setdefault("sessions", {})
         return chat
 
     def backend(self, chat_id: int) -> Optional[str]:
-        return self._load().get(str(chat_id), {}).get("backend")
+        return self._load().get(Chat(chat_id).key, {}).get("backend")
 
     def set_backend(self, chat_id: int, name: str) -> None:
         data = self._load()
@@ -62,7 +106,7 @@ class SessionStore:
         self._save(data)
 
     def session(self, chat_id: int, backend: str) -> Optional[str]:
-        return self._load().get(str(chat_id), {}).get("sessions", {}).get(backend)
+        return self._load().get(Chat(chat_id).key, {}).get("sessions", {}).get(backend)
 
     def set_session(self, chat_id: int, backend: str, session_id: Optional[str]) -> None:
         data = self._load()
@@ -79,11 +123,18 @@ class SessionStore:
         self._save(data)
 
 
-def context_line(source: str, chat_id: int, user_id: Optional[int], username: Optional[str]) -> str:
+def context_line(
+    source: str, chat_id: int, user_id: Optional[int], username: Optional[str], bot: Optional[str] = None
+) -> str:
     now = datetime.now().astimezone()
-    parts = [
-        'source="%s"' % source,
-        'chat_id="%s"' % chat_id,
+    chat = Chat(chat_id)
+    parts = ['source="%s"' % source]
+    if bot:
+        parts.append('bot="@%s"' % bot.lstrip("@"))
+    parts.append('chat_id="%d"' % chat)
+    if chat.thread_id:
+        parts.append('topic_id="%d"' % chat.thread_id)
+    parts += [
         'time="%s"' % now.strftime("%Y-%m-%dT%H:%M%z"),
         'weekday="%s"' % now.strftime("%A"),
     ]
@@ -159,6 +210,8 @@ class Agent:
         self._locks: Dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._live: Dict[int, _Live] = {}
         self._turns: Dict[int, Set["asyncio.Future[None]"]] = defaultdict(set)
+        # The bot's @username, for the context line of a bot Alfred created. None for the main bot.
+        self.bot_username: Optional[str] = None
 
     # -- backend selection --------------------------------------------------
 
@@ -232,7 +285,7 @@ class Agent:
     async def _autosave(self, chat_id: int, text: str) -> None:
         summary = " ".join(text.split())[:60]
         await asyncio.get_event_loop().run_in_executor(
-            None, home.autosave, self.config, "chat %s: %s" % (chat_id, summary)
+            None, home.autosave, self.config, "chat %s: %s" % (Chat(chat_id).key, summary)
         )
 
     # -- messages in, results out through the listener -----------------------
@@ -247,6 +300,7 @@ class Agent:
         source: str = "telegram",
     ) -> None:
         """Hand a message to the chat's agent and return. The listener gets what comes of it."""
+        chat_id = Chat(chat_id)
         name = self.backend_name(chat_id)
         backend = self._backend(name)
         if not (backend.supports_live and self.config.live):
@@ -257,6 +311,7 @@ class Agent:
             turn.add_done_callback(self._turns[chat_id].discard)
             return
 
+        self._prepare_workspace()
         live = self._live.get(chat_id)
         settings = backend.live_settings()  # type: ignore[attr-defined]
         if live is not None and live.settings != settings and not live.session.busy:
@@ -267,14 +322,14 @@ class Agent:
             events = _ChatEvents(self, chat_id, name)
             session = backend.open_live(  # type: ignore[attr-defined]
                 session_id=self.sessions.session(chat_id, name),
-                cwd=self.config.home,
+                cwd=self.config.workspace,
                 env=self._environment(chat_id, user_id, username),
                 events=events,
             )
             live = self._live[chat_id] = _Live(session, events, settings)
         live.events.summary = text
         try:
-            await live.session.send("\n\n".join([context_line(source, chat_id, user_id, username), text]))
+            await live.session.send("\n\n".join([self._context(source, chat_id, user_id, username), text]))
         except BackendError as exc:
             self._live.pop(chat_id, None)
             await self.listener.result(chat_id, RunResult(text="%s backend failed: %s" % (name, exc), is_error=True))
@@ -329,10 +384,31 @@ class Agent:
 
     # -- one turn -----------------------------------------------------------
 
+    def _prepare_workspace(self) -> None:
+        """A bot Alfred created gets its manual written from its current settings before a process opens."""
+        if self.config.bot_id:
+            from . import bots
+
+            bots.prepare_workspace(self.config)
+
+    def _context(self, source: str, chat_id: int, user_id: Optional[int], username: Optional[str]) -> str:
+        return context_line(source, chat_id, user_id, username, bot=self.bot_username)
+
     def _environment(self, chat_id: int, user_id: Optional[int], username: Optional[str]) -> Dict[str, str]:
-        env = orca.detached_env(os.environ)
+        chat = Chat(chat_id)
+        # Tokens stay with the runtime: `alfred send` looks them up by bot id, so the agent never needs them.
+        env = {key: value for key, value in orca.detached_env(os.environ).items() if key != "TELEGRAM_BOT_TOKEN"}
         env["ALFRED_HOME"] = str(self.config.home)
-        env["ALFRED_CHAT_ID"] = str(chat_id)
+        env["ALFRED_BOT_ID"] = str(self.config.bot_id)
+        env["ALFRED_CHAT_ID"] = str(int(chat))
+        env["ALFRED_THREAD_ID"] = str(chat.thread_id or "")
+        workdir = self.config.workdir
+        env["ALFRED_WORKDIR"] = str(workdir) if workdir else ""
+        if workdir:
+            # Claude Code then also reads the working directory's CLAUDE.md, as project instructions.
+            env["CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD"] = "1"
+        if self.config.bot_id:
+            env["ALFRED_WORKSPACE"] = str(self.config.workspace)
         env["ALFRED_USER_ID"] = "" if user_id is None else str(user_id)
         env["ALFRED_USERNAME"] = username or ""
         # Alfred's launcher, then the base plugin's and each extension's bin/ (Claude Code adds those too).
@@ -351,12 +427,14 @@ class Agent:
         on_progress: Optional[ProgressCallback] = None,
     ) -> RunResult:
         """Run one turn for a chat. Turns for the same chat are serialized."""
+        chat_id = Chat(chat_id)
         async with self._locks[chat_id]:
             name = self.backend_name(chat_id)
             backend = self._backend(name)
             session_id = self.sessions.session(chat_id, name)
 
-            parts = [context_line(source, chat_id, user_id, username)]
+            self._prepare_workspace()
+            parts = [self._context(source, chat_id, user_id, username)]
             if not backend.native_skills and not session_id:
                 index = home.skills_index(self.config)
                 if index:
@@ -368,7 +446,7 @@ class Agent:
                 result = await backend.run(
                     "\n\n".join(parts),
                     session_id=session_id,
-                    cwd=self.config.home,
+                    cwd=self.config.workspace,
                     env=self._environment(chat_id, user_id, username),
                     on_progress=on_progress,
                 )

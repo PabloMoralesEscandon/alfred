@@ -12,7 +12,7 @@ import shlex
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import Callable, Dict, List, Optional, Set
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_HOME = Path.home() / ".alfred"
@@ -65,6 +65,13 @@ class Config:
     home: Path = DEFAULT_HOME
     env_files: List[Path] = field(default_factory=list)
     environ: Dict[str, str] = field(default_factory=lambda: dict(os.environ))
+    # Set for one of the bots Alfred created (see `alfred/bots.py`); 0 is the main bot.
+    bot_id: int = 0
+    # Where this bot's agent runs and keeps its memory and inbox. None means the home itself.
+    workspace_dir: Optional[Path] = None
+    # Per-bot settings, as the same names as the environment (ALFRED_CLAUDE_MODEL, ...). Read on every lookup,
+    # so a change applies from the next message, just like an edit to .env. An unset one falls back to .env.
+    overrides: Optional[Callable[[], Dict[str, str]]] = None
 
     @classmethod
     def load(cls, environ: Optional[Dict[str, str]] = None) -> "Config":
@@ -84,6 +91,10 @@ class Config:
         return lines
 
     def get(self, name: str, default: str = "") -> str:
+        if self.overrides is not None:
+            value = str(self.overrides().get(name) or "").strip()
+            if value:
+                return value
         value = self.environ.get(name, "").strip()
         if value:
             return value
@@ -196,7 +207,53 @@ class Config:
     def show_progress(self) -> bool:
         return self.get_bool("ALFRED_PROGRESS", True)
 
+    def _bot_value(self, name: str) -> str:
+        """A setting only a created bot has. It comes from the bot's own settings, never from Alfred's .env."""
+        if not self.bot_id or self.overrides is None:
+            return ""
+        return str(self.overrides().get(name) or "").strip()
+
+    @property
+    def workdir(self) -> Optional[Path]:
+        """The directory a bot does its job in, besides its own. None: it works in its own directory."""
+        value = self._bot_value("ALFRED_WORKDIR")
+        return Path(value).expanduser() if value else None
+
+    @property
+    def add_dirs(self) -> List[Path]:
+        """Directories handed to Claude Code with --add-dir: a bot's working directory and extra folders."""
+        value = self._bot_value("ALFRED_ADD_DIRS")
+        return [Path(part) for part in value.split(os.pathsep) if part]
+
+    @property
+    def claude_settings_file(self) -> Optional[Path]:
+        """A bot's generated Claude Code settings (its permissions), passed with --settings."""
+        value = self._bot_value("ALFRED_CLAUDE_SETTINGS")
+        return Path(value) if value else None
+
     # -- paths --------------------------------------------------------------
+
+    @property
+    def workspace(self) -> Path:
+        """The agent's own directory: where it runs, remembers and receives files. The home for the main bot."""
+        return self.workspace_dir or self.home
+
+    @property
+    def bots_state_dir(self) -> Path:
+        """Settings, sessions and tokens of the bots Alfred created, one folder each. Never committed."""
+        return self.state_dir / "bots"
+
+    @property
+    def bots_home(self) -> Path:
+        """Where the bots' own directories live: next to the home, never inside it.
+
+        Claude Code loads every CLAUDE.md from its working directory up to the root, so a bot running
+        inside the home would also load Alfred's manual and Alfred's memory index.
+        """
+        value = self.get("ALFRED_BOTS_HOME")
+        if value:
+            return Path(value).expanduser().resolve()
+        return self.home.parent / ("%s-bots" % self.home.name)  # ~/.alfred -> ~/.alfred-bots
 
     @property
     def state_dir(self) -> Path:
@@ -208,24 +265,26 @@ class Config:
 
     @property
     def sessions_path(self) -> Path:
+        if self.bot_id:
+            return self.bots_state_dir / str(self.bot_id) / "sessions.json"
         return self.state_dir / "sessions.json"
 
     @property
     def skills_dir(self) -> Path:
-        return self.home / ".claude" / "skills"
+        return self.workspace / ".claude" / "skills"
 
     @property
     def extensions_dir(self) -> Path:
-        """Alfred's own additions, one Claude Code plugin per folder. Loaded into every process."""
-        return self.home / "extensions"
+        """What the agent added to itself, one Claude Code plugin per folder. Each bot has its own."""
+        return self.workspace / "extensions"
 
     @property
     def disabled_extensions_dir(self) -> Path:
-        return self.home / "extensions-disabled"
+        return self.workspace / "extensions-disabled"
 
     @property
     def memory_dir(self) -> Path:
-        return self.home / "memory"
+        return self.workspace / "memory"
 
     @property
     def memory_index(self) -> Path:
@@ -233,7 +292,7 @@ class Config:
 
     @property
     def inbox_dir(self) -> Path:
-        return self.home / "inbox"
+        return self.workspace / "inbox"
 
     # -- access control -----------------------------------------------------
 
