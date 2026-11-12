@@ -358,7 +358,9 @@ class SpareWeeklyRule(Rule):
 
         `window_share_percent` is how much of the weekly limit one fully used 5-hour window takes
         (`MonitorSettings.window_share_percent`). None when the reading has no weekly reset time.
-        The rule will compare the two numbers; it does not act on them yet.
+        A rough count: every hour counts and the window in progress is ignored. The agents' alerts and
+        questions use `usage_forecast.forecast`, which handles active hours, partial windows and the
+        window in progress; this rule should use it too once it acts.
         """
         week = reading.window(KIND_WEEKLY_ALL)
         if week is None or week.resets_at is None or window_share_percent <= 0:
@@ -450,7 +452,8 @@ def permission_note(config: Config, record: Any) -> str:
 
 @dataclass
 class MonitorSettings:
-    """Monitor settings. Only `enabled` has an effect today; the rest are for the rules to come."""
+    """Monitor settings. The switch, the poll and wake intervals, and the forecast, cache and running_low ones
+    have an effect; the chat, warning, cap, quiet-hours, spare and autorun ones are for the rules to come."""
 
     enabled: bool = False
     chat_id: Optional[int] = None  # ALFRED_USAGE_CHAT_ID, or the only numeric id in ALFRED_ALLOWED_USERS
