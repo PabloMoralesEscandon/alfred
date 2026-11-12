@@ -16,7 +16,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
-from . import bots, presets, scheduler, shared_memory, soul, usage_alerts, usage_monitor
+from . import bots, presets, scheduler, shared_memory, soul, soul_writer, usage_alerts, usage_monitor
 from .bots import BotError, BotRecord, DEFAULT_PERMISSIONS
 
 SESSION_SECONDS = 30 * 60
@@ -86,6 +86,11 @@ class Session:
     settings: Dict[str, str] = field(default_factory=dict)
     permissions: Dict[str, str] = field(default_factory=dict)
     soul: str = ""  # the draft's own personality; empty means the base
+    # A personality Claude drafted from a description, waiting for Accept: nothing is saved before that.
+    soul_target: str = ""  # "new" (the creation assistant) or "bot" (the bot being edited)
+    soul_description: str = ""
+    soul_preview: str = ""
+    soul_warning: str = ""
     bot_id: int = 0  # the bot being edited
     preset: str = ""  # the preset the draft's permissions started from
     pending: str = ""  # a preset waiting for "yes" before it is applied to a bot
@@ -167,9 +172,11 @@ class Menus:
         self,
         pool: Any,
         request_bot: Callable[[int, int, str, Dict[str, str], Dict[str, str], str], Awaitable[str]],
+        show: Optional[Callable[[Session, Screen], Awaitable[None]]] = None,
     ) -> None:
         self.pool = pool
         self.request_bot = request_bot
+        self.show = show  # puts a screen up at once, for "writing…" while a draft is made
         self.sessions: Dict[int, Session] = {}  # by user id: one open menu per person
 
     # -- sessions --
@@ -207,7 +214,7 @@ class Menus:
         verb, _, argument = action.partition(":")
         try:
             return await self._press(session, verb, argument)
-        except (BotError, shared_memory.SharedMemoryError, soul.SoulError) as exc:
+        except (BotError, shared_memory.SharedMemoryError, soul.SoulError, soul_writer.SoulWriterError) as exc:
             session.notice = "⚠️ %s" % exc
             return self.render(session)
 
@@ -234,6 +241,38 @@ class Menus:
         if verb == "soulwrite":
             session.awaiting = "soul"
             return self.render(session)
+        if verb == "souldescribe":  # Claude drafts it from a description: first, the description
+            if session.screen.startswith("bot_"):
+                self._record(session)
+            session.soul_target = "bot" if session.screen.startswith("bot_") else "new"
+            session.awaiting = "soul_describe"
+            return self.go(session, "bot_soul" if session.soul_target == "bot" else "new_soul")
+        if verb == "soulaccept":
+            if not session.soul_preview:
+                return self.go(session, "new_soul" if session.soul_target != "bot" else "bot_soul")
+            preview, target = session.soul_preview, session.soul_target
+            self._drop_preview(session)
+            if target == "bot":
+                await self.pool.set_soul(self._record(session), preview)
+                session.notice = "Personality saved. It applies from its next message, in the same conversation."
+                return self.go(session, "bot_soul")
+            session.soul = preview
+            return self.go(session, "new_model")
+        if verb == "soulagain":
+            if not session.soul_description:
+                return self.go(session, "new_soul" if session.soul_target != "bot" else "bot_soul")
+            return await self._draft(session, session.soul_description)
+        if verb == "souledit":  # by hand, starting from the draft the user sees
+            draft, target = session.soul_preview, session.soul_target
+            self._drop_preview(session)
+            session.awaiting = "bot_soul" if target == "bot" else "soul"
+            session.notice = "Send your version as a message. The draft, to copy and change:\n\n%s" % self._shown(draft)
+            return self.go(session, "bot_soul" if target == "bot" else "new_soul")
+        if verb == "soulcancel":
+            target = session.soul_target
+            self._drop_preview(session)
+            session.notice = "Draft discarded; nothing was saved."
+            return self.go(session, "bot_soul" if target == "bot" else "new_soul")
         if verb == "soulreplace":
             self._record(session)
             session.awaiting = "bot_soul"
@@ -379,6 +418,10 @@ class Menus:
             if what == "soul":
                 session.soul = soul.clean(text)
                 return self.go(session, "new_model")
+            if what == "soul_describe":
+                if session.soul_target == "bot":
+                    self._record(session)
+                return await self._draft(session, text)
             if what == "bot_soul":
                 await self.pool.set_soul(self._record(session), text)
                 session.notice = "Personality replaced. It applies from its next message, in the same conversation."
@@ -415,10 +458,46 @@ class Menus:
                     await self.pool.set_permission(record, name, text)
                 session.notice = "%s changed. It applies from its next message." % ADVANCED_FIELDS[name][0]
                 return self.go(session, "bot_advanced")
-        except (BotError, shared_memory.SharedMemoryError, soul.SoulError) as exc:
+        except (BotError, shared_memory.SharedMemoryError, soul.SoulError, soul_writer.SoulWriterError) as exc:
             session.notice = "⚠️ %s" % exc
             session.awaiting = what
         return self.render(session)
+
+    # -- personality drafts --
+
+    @staticmethod
+    def _drop_preview(session: Session) -> None:
+        session.soul_preview = session.soul_description = session.soul_warning = ""
+
+    async def _draft(self, session: Session, description: str) -> Screen:
+        """One call to Claude for a personality draft, then the preview. Only the bot's owner gets here: for a
+        bot, `_record` has checked it; in the assistant the draft is the user's own."""
+        bot_id, name = 0, session.name
+        if session.soul_target == "bot":
+            record = self._record(session)
+            bot_id, name = record.bot_id, record.name
+        if self.show is not None:
+            await self.show(session, Screen("✨ Writing a personality from your description (one call to Claude)…"))
+        try:
+            proposal = await self.pool.soul_writer.write(session.user_id, description, name, bot_id)
+        except soul_writer.SoulWriterError as exc:
+            session.notice = "⚠️ %s" % exc
+            session.awaiting = "soul_describe" if not session.soul_preview else None
+            return self.go(session, "soul_preview" if session.soul_preview else
+                           ("bot_soul" if session.soul_target == "bot" else "new_soul"))
+        session.soul_description, session.soul_preview, session.soul_warning = description, proposal.text, proposal.warning
+        session.notice = "%d draft(s) left this hour." % proposal.attempts_left
+        return self.go(session, "soul_preview")
+
+    def _screen_soul_preview(self, session: Session) -> Screen:
+        whose = session.name if session.soul_target != "bot" else (self._safe_record(session) or session.draft()).handle
+        lines = ["Draft personality for %s, written by Claude from your description. Nothing is saved until you "
+                 "tap Accept." % whose]
+        if session.soul_warning:
+            lines += ["", session.soul_warning]
+        lines += ["", self._shown(session.soul_preview)]
+        return Screen("\n".join(lines), [[("✅ Accept", "soulaccept"), ("🔁 Regenerate", "soulagain")],
+                                          [("✏️ Edit by hand", "souledit"), ("✖️ Cancel", "soulcancel")]])
 
     # -- choices --
 
@@ -521,6 +600,8 @@ class Menus:
             return "shared"
         if screen in ("audit", "old_schedule", "base_soul"):
             return "home"
+        if screen == "soul_preview":
+            return "new_soul"
         if screen == "shared_remove":
             return "shared_topic"
         if screen.startswith("bot_"):
@@ -610,13 +691,19 @@ class Menus:
             return Screen("%s\n\nSend %s's personality as a message: tone, manner, how it talks. It shapes how it "
                           "talks, never what it may do (that is the permissions, next)." % (STEP_TITLES["new_soul"], session.name),
                           [self._nav()])
+        if session.awaiting == "soul_describe":
+            return Screen("%s\n\nDescribe %s's personality in a sentence or two, as a message, for example: "
+                          "patient and encouraging, explains with examples, a bit of humour. Claude writes a draft "
+                          "from it (one small call) and you see it before anything is saved."
+                          % (STEP_TITLES["new_soul"], session.name), [self._nav()])
         if session.soul:
             current = "Now: its own personality (%d characters):\n\n%s" % (len(session.soul), self._shown(session.soul))
             rows: List[Row] = [[("Keep it ➡️", "next")], [("↩️ Use the base instead", "soulbase")],
-                               [("✍️ Write another", "soulwrite")]]
+                               [("✍️ Write another", "soulwrite"), ("✨ Describe it", "souldescribe")]]
         else:
             current = "By default it starts with the base personality:\n\n%s" % self._shown(soul.base(self.pool.config))
-            rows = [[("Use the base ➡️", "soulbase")], [("✍️ Write its own", "soulwrite")]]
+            rows = [[("Use the base ➡️", "soulbase")], [("✍️ Write its own", "soulwrite")],
+                    [("✨ Describe it, Claude writes it", "souldescribe")]]
         return Screen("%s\n\nHow should %s come across? Optional.\n\n%s" % (STEP_TITLES["new_soul"], session.name, current),
                       rows + [self._nav()])
 
@@ -629,9 +716,13 @@ class Menus:
                  "permissions." % record.handle, "", self._shown(current)]
         if session.awaiting == "bot_soul":
             lines += ["", "Send the new personality as a message. Nothing changes until you send it."]
+        if session.awaiting == "soul_describe":
+            lines += ["", "Describe the personality you want in a sentence or two, as a message. Claude writes a "
+                      "draft (one small call) and you see it before anything is saved."]
         if record.allows("soul"):
             lines += ["", "⚠️ It may edit its own personality (Permissions → Customize)."]
-        rows: List[Row] = [[("✏️ Replace", "soulreplace")], [("↩️ Reset to the base", "soulreset")], [("⬅️ Back", "back")]]
+        rows: List[Row] = [[("✏️ Replace", "soulreplace"), ("✨ Describe it", "souldescribe")],
+                           [("↩️ Reset to the base", "soulreset")], [("⬅️ Back", "back")]]
         return Screen("\n".join(lines), rows)
 
     def _screen_base_soul(self, session: Session) -> Screen:

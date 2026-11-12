@@ -38,7 +38,7 @@ from telegram.ext import (
     filters,
 )
 
-from . import bots, home, menus, orca, presets, shared_memory, soul, usage, usage_monitor
+from . import bots, home, menus, orca, presets, shared_memory, soul, soul_writer, usage, usage_monitor
 from .agent import Agent, Chat, Listener
 from .backends import BACKENDS, BackendError, RunResult
 from .bots import BotError, BotRecord, BotRegistry
@@ -509,7 +509,7 @@ class ControlPanel:
         self.bot: Any = None
         self.store = SchedulerStore(config.db_path)
         # The /bot menus: sessions in memory only, so a restart closes them all (their buttons then say so).
-        self.menus = menus.Menus(pool, self.send_creation_request) if pool is not None else None
+        self.menus = menus.Menus(pool, self.send_creation_request, show=self._show) if pool is not None else None
 
     @property
     def commands(self) -> List[Tuple[str, str]]:
@@ -976,6 +976,8 @@ class BotPool:
         self._scheduler: Optional["asyncio.Future[None]"] = None
         # One per process, not one per bot: the plan limits belong to the Claude account all the bots share.
         self.usage_monitor: Optional[usage_monitor.UsageMonitor] = None
+        # Personality drafts: one Claude call each, made here in the panel's process, never by an agent.
+        self.soul_writer = soul_writer.SoulWriter(config)
         self._lock_object: Optional[asyncio.Lock] = None
 
     @property
