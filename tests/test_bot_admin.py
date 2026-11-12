@@ -475,6 +475,15 @@ class AdminPermissionPanelTests(MenuDriver, PanelHarness):  # type: ignore[misc,
 
         self.play(scenario)
 
+    def test_a_bot_born_a_bot_admin_is_in_the_audit_log(self) -> None:
+        async def scenario() -> None:
+            record = await self.create(RESEARCH, "research_bot", "Research", "/bot new Research +admin")
+            self.assertTrue(record.allows("admin"))
+            entry = bots.read_audit(self.config)[-1]
+            self.assertEqual((entry["event"], entry["by"], entry["via"]), ("admin_permission_granted", OWNER, "creation"))
+
+        self.play(scenario)
+
     def test_becoming_a_bot_admin_from_the_menu_goes_through_the_warning(self) -> None:
         async def scenario() -> None:
             await self.create(RESEARCH, "research_bot", "Research", "/bot new Research")

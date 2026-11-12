@@ -94,7 +94,8 @@ Text shortcuts:
 /bot perm <bot> <permission> <value> - change a permission
 /bot perm <bot> <preset> - switch to a preset: %s
 /bot perm <bot> cross on|off - cross-agent access: read other agents' memory and use their tools (asks first)
-/bot audit - the last grants and withdrawals of cross-agent access
+/bot audit - cross-agent access, bot admins and their requests: who asked, granted or approved what
+/bot perm <bot> admin on - make it a bot admin, which creates bots for you from a description (asks first)
 /shared - the shared memory every agent reads (list, show, add, remove); bots only read it
 /bot pause <bot>, /bot resume <bot> - disconnect or reconnect it
 /bot destroy <bot> - delete it, its schedule and its state (asks first)
@@ -103,7 +104,7 @@ Text shortcuts:
 
 Settings: %s.
 Permissions: %s.
-Options for /bot new: +web +browser +shell +edit +mcp +contact +bots +usage +bypass, -schedule, -sandbox, and setting=value or permission=value (for example model=sonnet folders=~/notes).
+Options for /bot new: +web +browser +shell +edit +mcp +contact +bots +admin +usage +bypass, -schedule, -sandbox, and setting=value or permission=value (for example model=sonnet folders=~/notes).
 A new bot starts with the least: its own directory, the alfred command, reminders, nothing else.
 At every level, even full access, a bot can't read the memory of your other bots or use their tools. Only cross-agent access lifts that, and only you can grant it here.
 <bot> is its @username, its name or its id.""" % (", ".join(presets.keys()), ", ".join(bots.SETTING_NAMES), ", ".join(bots.PERMISSION_NAMES))
@@ -1204,6 +1205,8 @@ class BotPool:
         self.registry.set_token(bot_id, token)
         if soul_text.strip():  # its own personality from the assistant or the admin's spec; else the base
             soul.write(self.registry.workspace(bot_id), soul_text)
+        if record.allows("admin"):  # born a bot admin (the creation assistant or /bot new +admin): in the log too
+            bots.audit(self.config, "admin_permission_granted", record, creator_id, "creation")
         try:
             await bots.restrict_access(manager, bot_id)
         except Exception as exc:  # Consiglieri's own allow-list still guards the bot
