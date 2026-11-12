@@ -101,7 +101,7 @@ BROWSER_RULES = ("Bash(orca *)", "mcp__claude-in-chrome__*")
 # The usage permission: the commands it opens, as deny rules when it is off and as sandbox exclusions when on
 # (they need Alfred's state and Claude Code's own login).
 USAGE_RULES = ("Bash(alfred usage)", "Bash(alfred usage *)", "Bash(alfred usage-alert)", "Bash(alfred usage-alert *)")
-USAGE_UNSANDBOXED = ("alfred usage", "alfred usage-alert *")
+USAGE_UNSANDBOXED = ("alfred usage", "alfred usage *", "alfred usage-alert *")  # usage * covers check, running_low, forecast
 
 # Cross-agent access: the level above full access. It is not a permission like the others (no preset,
 # switch, `/bot perm` value, `/bot new` option or `alfred` command reaches it); only the control panel
@@ -593,7 +593,8 @@ def permission_summary(record: BotRecord, for_owner: bool = False) -> str:
                          ("mcp", "use MCP tools"), ("schedule", "schedule reminders and tasks"),
                          ("contact", "message chats other than %s owner's" % ("its" if for_owner else "your")),
                          ("bots", "list, configure and request bots"),
-                         ("usage", "read the Claude plan usage and set usage alerts (`alfred usage`, `alfred usage-alert`)")):
+                         ("usage", "read the Claude plan usage and set usage alerts (`alfred usage check`, "
+                                   "`alfred usage running_low`, `alfred usage-alert`; the alfred:usage skill)")):
         (can if record.allows(name) else cannot).append(phrase)
     can.append("read the shared memory every agent reads")
     (can if record.allows("shared") else cannot).append("write the shared memory")

@@ -24,7 +24,7 @@ class HomeTests(unittest.TestCase):
         self.assertFalse((self.config.home / "MEMORY.md").exists())
         self.assertEqual(home.list_memories(self.config), [])
         self.assertTrue((self.config.home / "AGENTS.md").exists())
-        self.assertEqual({skill.name for skill in home.list_skills(self.config)}, {"alfred:browser", "alfred:extensions", "alfred:orca-agents", "alfred:reminders", "alfred:web-logins"})
+        self.assertEqual({skill.name for skill in home.list_skills(self.config)}, {"alfred:browser", "alfred:extensions", "alfred:orca-agents", "alfred:reminders", "alfred:usage", "alfred:web-logins"})
         self.assertEqual({skill.source for skill in home.list_skills(self.config)}, {"base"})
         self.assertEqual(list(self.config.skills_dir.iterdir()), [])  # nothing is copied into the home any more
         self.assertTrue(self.config.extensions_dir.is_dir())
