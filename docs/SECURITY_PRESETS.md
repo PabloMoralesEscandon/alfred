@@ -101,6 +101,14 @@ it. Writing needs the `shared` switch under Customize. A bot with an unsandboxed
 still write it with shell commands, as it can anything else. `docs/AGENT_CHATS_RESEARCH.md` §6.4, "Memoria
 compartida", has the details and the remaining ways around.
 
+## Bot admins under every preset
+
+The `admin` permission (docs/BOT_ADMIN.md) lets a bot ask the panel to create bots for its owner from a spec, up to
+its own permissions. It is off in every preset, Full access included. The **🧑‍💼 Bot admin** template
+(`presets.TEMPLATES`: Assistant + `admin`) sits next to the presets on the preset screens, outside their order, and
+a bot matching it exactly reads as "🧑‍💼 Bot admin". Turning `admin` on for an existing bot, from the menu or with
+`/bot perm`, always shows `bots.ADMIN_WARNING` and asks to confirm; every grant and withdrawal is in the audit log.
+
 ## Extending it
 
 - **A new permission** (for example the usage monitor's): add it to `bots.PERMISSIONS` with its default. It
