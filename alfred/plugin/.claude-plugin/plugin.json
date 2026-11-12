@@ -1,0 +1,7 @@
+{
+  "name": "alfred",
+  "displayName": "Alfred base",
+  "version": "0.2.0",
+  "description": "Alfred's built-in skills and helpers. Shipped with Alfred's code; Alfred does not edit it.",
+  "author": {"name": "Alfred"}
+}

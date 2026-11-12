@@ -3,7 +3,9 @@
 .env.*
 !.env.example
 
-# User data and runtime state
+# Runtime state from the pre-refactor layout (now lives in ALFRED_HOME, outside this repo)
+/SOUL.md
+/SKILLS.md
 memory/
 vault/
 *.sqlite3
@@ -15,6 +17,7 @@ dispatch.json
 # Python/runtime artifacts
 __pycache__/
 *.py[cod]
+*.egg-info/
 venv/
 .venv/
 
@@ -23,9 +26,3 @@ ngrok
 *.tgz
 *.tar.gz
 *.zip
-
-# Markdown files, including notes and prompt files
-*.md
-*.MD
-!README.md
-!README.MD

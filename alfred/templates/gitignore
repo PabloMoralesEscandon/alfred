@@ -1,0 +1,6 @@
+state/
+inbox/
+outbox/
+.env
+*.log
+__pycache__/

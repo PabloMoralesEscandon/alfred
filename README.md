@@ -1,262 +1,294 @@
-# Alfred Telegram Assistant
+# Alfred
 
-Alfred is a Telegram personal assistant powered by Codex. It supports whitelisted users, per-chat memory, prompt files for personality and skills, scheduled reminders, and local CLI task workflows.
+Alfred is a personal agent you reach from anywhere through Telegram. Each message is handed to
+[Claude Code](https://claude.com/claude-code) running headless in Alfred's own home directory, with a
+resumable session per chat. Alfred ships with almost no built-in abilities: when it works out how to do
+something for you, it writes itself a skill and uses it next time.
 
-## What The Bot Does
+Codex is still supported as an alternative backend (`ALFRED_BACKEND=codex`, or `/backend codex` in a chat).
 
-- Replies to whitelisted Telegram users.
-- Keeps short-term recent memory per Telegram chat.
-- Stores persistent memory only when the user explicitly asks it to remember something.
-- Loads `SOUL.md` and `SKILLS.md` into every Codex prompt when those files exist.
-- Schedules reminders through a local SQLite database and a separate worker process.
-- Can use local command-line tools such as `tdl` when described in `SKILLS.md`.
-
-## Repository Files
-
-- `bot.py`: Telegram bot entrypoint.
-- `scheduler_tool.py`: CLI for creating, listing, showing, and cancelling reminders.
-- `scheduler_worker.py`: background worker that delivers due reminders.
-- `scheduler_store.py`: SQLite storage layer for reminders.
-- `manual_one_minute_reminder.py`: manual smoke-test helper.
-- `.env.example`: example local configuration.
-- `.gitignore`: ignores secrets, Markdown prompt files, memory, logs, databases, and local runtime files.
-
-Markdown prompt files are intentionally ignored by Git except `README.md`. Create them locally when setting up a bot instance.
+The design and roadmap are in [docs/PLAN.md](docs/PLAN.md).
 
 ## Requirements
 
-- Python 3.11 or newer.
-- A Telegram bot token from BotFather.
-- Codex CLI installed and authenticated on the machine running the bot.
-- Optional: `tdl` installed if you want Alfred to manage local tasks.
+- Python 3.9 or newer
+- Claude Code installed and logged in (`claude` on `PATH`) on the machine that runs the bot
+- A Telegram bot token from [@BotFather](https://t.me/BotFather)
+- Optional: the Codex CLI, if you want that backend
 
-Install Python dependencies:
+## Setup
 
 ```bash
 python3 -m venv venv
-venv/bin/pip install python-telegram-bot
+venv/bin/pip install -e .
+cp .env.example .env        # then fill in the token and who is allowed
+venv/bin/alfred run
 ```
 
-If you already have a Python environment, installing `python-telegram-bot` there is enough.
-
-## Create A Telegram Bot
-
-1. Open Telegram and message `@BotFather`.
-2. Run `/newbot`.
-3. Choose a bot name and username.
-4. Copy the bot token BotFather gives you.
-5. Start a chat with your new bot and send it a test message after the bot process is running.
-
-Keep the token private. Do not commit it.
-
-## Configure `.env`
-
-Create a local `.env` file in this directory:
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env`:
+`.env` needs two values:
 
 ```env
-whitelisted@your_telegram_username
-TELEGRAM_BOT_TOKEN=1234567890:replace_with_your_real_token
+TELEGRAM_BOT_TOKEN=1234567890:your_token
+ALFRED_ALLOWED_USERS=123456789
 ```
 
-Add one `whitelisted@...` entry for each Telegram username allowed to use the bot:
+`ALFRED_ALLOWED_USERS` takes Telegram user ids and usernames, comma-separated. Ids are safer because
+usernames can change hands. To find an id, send `/start` to the bot from that account: unlisted accounts
+get a reply with their id and nothing else. The old `whitelisted@username` lines still work. The allow-list
+is re-read on every message, so changing it needs no restart.
 
-```env
-whitelisted@first_user
-whitelisted@second_user
-TELEGRAM_BOT_TOKEN=1234567890:replace_with_your_real_token
-```
+One process does everything: `alfred run` polls Telegram and delivers scheduled reminders.
 
-The bot reloads `.env` on each message for the whitelist. The Telegram token is read when the bot or worker starts, so restart those processes after changing the token.
+### Keeping it running
 
-## Configure `SOUL.md`
-
-Create `SOUL.md` locally to define Alfred's personality and general behavior:
-
-```markdown
-Your name is Alfred.
-
-You are the user's personal assistant. Give short, precise, helpful answers.
-You may be lightly funny or sarcastic in casual contexts, but stay serious for important, sensitive, or risky topics.
-Be honest about uncertainty and ask concise follow-up questions only when needed.
-```
-
-`SOUL.md` is optional. If it is missing, the bot runs with only the built-in runtime instructions.
-
-## Configure `SKILLS.md`
-
-Create `SKILLS.md` locally to describe workflows, tools, and conventions Alfred should follow.
-
-Example:
-
-```markdown
-# Obsidian Markdown
-
-Use Obsidian wiki links like `[[Note Name]]` when referring to vault notes.
-Use headings, short paragraphs, and simple lists.
-
-# ToDoList CLI
-
-Use `tdl` when the user asks to manage tasks.
-Common commands:
-- `tdl list`
-- `tdl add "Task name" -p medium -d "08-06-2026"`
-- `tdl start <id-or-name>`
-- `tdl done <id-or-name>`
-```
-
-`SKILLS.md` is optional. If present, it is inserted into the Codex prompt before memory and scheduler instructions.
-
-## Run The Bot
-
-From this directory:
+`alfred run` in a terminal stops when the terminal closes. Install it as a background service instead:
 
 ```bash
-venv/bin/python bot.py
+venv/bin/alfred service install     # start now, at every login, and again whenever it exits
+venv/bin/alfred service status
+venv/bin/alfred service logs        # last lines of ~/.alfred/state/alfred.log
+venv/bin/alfred service restart     # after changing code or the backend settings
+venv/bin/alfred service uninstall
 ```
 
-The bot uses Telegram long polling. That means it contacts Telegram directly for updates. You do not need to expose a public port for the normal setup.
+On macOS this is a launchd agent, on Linux a systemd user unit. `install` refuses if the token, the
+allow-list or the backend CLI is missing, so it cannot end up in a restart loop.
 
-For a detached process:
+- The service runs as you, inside your login session, because Claude Code's login, Orca and Chrome
+  belong to that session. After a reboot it starts once you are logged in; turn on automatic login if
+  the machine should recover from a power cut unattended.
+- The machine must not sleep. On a Mac: System Settings, Energy, "Prevent automatic sleeping".
+- The service points at this checkout and its `venv`. If you move or delete the folder, run
+  `service install` again from the new place.
+- Run only one bot per token. Stop a foreground `alfred run` before installing the service.
+
+Conversations survive restarts by themselves: each chat's session id is stored in
+`~/.alfred/state/sessions.json` and resumed on the next message, and reminders that were due while the
+bot was down are delivered when it comes back. Background commands Alfred had running do not survive a
+restart.
+
+All settings are listed in [.env.example](.env.example).
+
+## Using it
+
+Write to the bot as you would to a person. Photos, documents and voice notes are saved to Alfred's inbox
+and handed to it by path.
+
+| Command | What it does |
+| --- | --- |
+| `/help` | What Alfred can do, and this list. |
+| `/new` | Start a fresh conversation. Memory and skills are kept. |
+| `/stop` | Stop what Alfred is doing, including anything it left running in the background. The conversation is kept. |
+| `/usage` | How much of your Claude plan limits is used, and when they reset. |
+| `/memory` | List what Alfred has memorized. |
+| `/skills` | List the skills Alfred has. |
+| `/schedule` | List pending reminders and timed tasks. |
+| `/backend [claude\|codex]` | Show or switch the backend for this chat. |
+| `/status` | Backend, session, whether its process is open, browser and home directory. |
+
+The commands live in one list (`COMMANDS` in `alfred/telegram_bot.py`); adding one is a line there plus a
+`_cmd_<name>` method. Any other `/command` is passed to the agent as text, so `/disk-report` is a short way to ask for that skill.
+
+### How a conversation runs
+
+With the Claude backend, each chat has one Claude Code process that stays open. It sleeps between
+messages and wakes up when something arrives:
+
+- **A message from you.** If Alfred is in the middle of something, it reads the message at its next
+  step, so you can correct it or add to the request without `/stop`. One reply may then answer several
+  messages.
+- **A scheduled task or reminder** coming due.
+- **A background job of its own finishing.** Alfred can start something slow, tell you it is running,
+  and write again when it ends.
+- **An event from another program:** `~/.alfred/bin/alfred event --chat-id <id> "the backup finished"`
+  wakes Alfred with that note. Your Telegram user id is the chat id of your private chat with the bot.
+
+Alfred's last message of a turn is posted to the chat. It can also post earlier with `alfred send`, and
+it stays quiet when it has nothing to add. The process is started by the first message after a restart
+and is closed by `/stop`, `/new` and `/backend`. Set `ALFRED_LIVE=0` to go back to one process per
+message; Codex always works that way, so with Codex messages wait their turn and nothing wakes it
+between them.
+
+### Choosing the model
+
+Set `ALFRED_CLAUDE_MODEL` in `.env` to an alias (`fable`, `opus`, `sonnet`, `haiku`) or a full model
+name; `ALFRED_CODEX_MODEL` does the same for Codex. Unset means the backend's own default. The file is
+read again for every message, so a change applies from your next message with no restart: Alfred closes
+the chat's process once it is idle and reopens it on the new model, in the same conversation.
+`/status` shows the model in use. A name the backend does not know comes back as an error reply.
+
+`ALFRED_CLAUDE_EFFORT` (`low`, `medium`, `high`, `xhigh`, `max`) sets how hard Claude thinks, and
+`ALFRED_CODEX_EFFORT` sets Codex's `model_reasoning_effort`. They apply the same way as the model.
+Unset, the backend decides: Claude Code uses the effort saved in your own settings for that model
+(`/model` in Claude Code), or its default. Claude Code ignores a value it does not know and uses its
+default, so check `/status` after a change.
+
+Things to try:
+
+- "Remind me in 20 minutes to take the pizza out."
+- "Every weekday at 8, check my calendar and send me a briefing."
+- "Remember that I'm vegetarian."
+- "From now on, when I say *expense*, append it to `~/finance/2026.csv` as date, amount, note. Learn that."
+- "Put Codex on the failing tests in mus-solver and tell me when it is done." (needs the Orca app; see
+  the `orca-agents` skill in Alfred's home)
+
+You can also talk to the same agent from a terminal, with no Telegram involved:
 
 ```bash
-setsid venv/bin/python bot.py > bot.log 2>&1 < /dev/null &
+venv/bin/alfred chat                  # interactive
+venv/bin/alfred chat -m "disk report" # one message
 ```
 
-## Run The Reminder Worker
+## Browser
 
-Scheduled reminders need a second process:
+Alfred has a real browser. It can open pages, click, fill in forms, upload and download files, and send
+you screenshots, using sites you are already logged in to. Pick one with `ALFRED_BROWSER`:
 
-```bash
-venv/bin/python scheduler_worker.py
-```
+| | `orca` (default) | `chrome` |
+| --- | --- | --- |
+| What it is | The browser built into the Orca app, driven by the `orca` CLI | Your own Google Chrome, driven by the Claude in Chrome extension |
+| Setup | `venv/bin/alfred browser-setup` | Install the Claude extension in Chrome and sign in with the account Claude Code uses |
+| Must be running | The Orca app (Alfred starts it if needed) | A Chrome window |
+| Backends | Claude and Codex | Claude only |
+| Logins | Whatever you log in to inside Orca's browser | The sessions in its Chrome profile (see below) |
+| Where tabs open | Alfred's own Orca workspace | A tab group in your Chrome window |
 
-The bot creates reminder rows in `scheduler.sqlite3`. The worker polls that database and sends due reminders through Telegram.
+### A Chrome profile of its own
 
-For a detached worker:
+With `chrome`, give Alfred a Chrome profile of its own, so it only reaches the sites you choose and
+never your personal tabs, mail or bank:
 
-```bash
-setsid venv/bin/python scheduler_worker.py > scheduler_worker.log 2>&1 < /dev/null &
-```
+1. Set `ALFRED_CHROME_PROFILE=Alfred` in `.env` and run `venv/bin/alfred chrome`. It opens a window of
+   that profile, creating it the first time.
+2. In that window, install the Claude extension and sign in with the account Claude Code uses.
+3. Remove or turn off the Claude extension in your other profiles. With more than one browser
+   connected, Claude Code asks which to use every session, and Alfred has nobody to answer.
+4. Log in, in that window, to the sites you want Alfred to use. It keeps a list in
+   `memory/web-logins.md`.
 
-## Scheduled Reminder Commands
+Keep a window of the profile open. When none is, Alfred runs `alfred chrome` itself. When a session
+expires, Alfred sends you a screenshot and waits for you to log in again (the `web-logins` skill);
+from away, use macOS Screen Sharing. Alfred never asks for or types passwords.
 
-Alfred is instructed to use `scheduler_tool.py` when the user asks to schedule, remind, notify, or send a message in the future.
+`alfred browser-setup` registers Alfred's home as an Orca workspace and opens a test page, so Alfred's
+tabs open in its own workspace instead of in whatever you have on screen. `/status` in Telegram shows
+which browser is configured.
 
-Manual add:
+Either way:
 
-```bash
-venv/bin/python scheduler_tool.py add \
-  --chat-id 123 \
-  --user-id 456 \
-  --username your_telegram_username \
-  --due 2099-01-01T09:00:00Z \
-  --message "Call Sam" \
-  --source-request "Remind me to call Sam"
-```
+- When a site needs a login or a 2FA code, Alfred asks you to log in once in that browser. It is told
+  never to ask for passwords in chat.
+- Alfred asks before the step that pays, orders, posts or sends.
+- Alfred opens its own tabs and leaves yours alone.
 
-List reminders:
-
-```bash
-venv/bin/python scheduler_tool.py list --chat-id 123
-```
-
-Show one reminder:
-
-```bash
-venv/bin/python scheduler_tool.py show --id <reminder-id>
-```
-
-Cancel one reminder:
-
-```bash
-venv/bin/python scheduler_tool.py cancel --id <reminder-id> --chat-id 123
-```
-
-Dates must be ISO-8601 timestamps with timezone. UTC with `Z` is recommended:
-
-```text
-2026-06-08T09:00:00Z
-```
-
-## Reminder Smoke Test
-
-Use real Telegram `chat_id` and `user_id` values:
-
-```bash
-venv/bin/python manual_one_minute_reminder.py --chat-id 123 --user-id 456
-venv/bin/python scheduler_worker.py --once
-```
-
-If no username is passed, the helper uses the first whitelisted username from `.env`.
+Alfred itself does not run inside Orca. The bot stays a plain process that works with any terminal or
+service manager, and the browser is a tool it uses.
 
 ## Memory
 
-Memory is stored per Telegram `chat_id`:
+Alfred keeps permanent memory as Markdown files in `~/.alfred/memory/`, one topic per file, grouped in
+folders such as `people/`, `preferences/`, `projects/` and `reference/`. A short index, `MEMORY.md`, is
+loaded into every conversation, and Alfred opens the files it needs.
+
+- **You ask:** "remember that Sam's birthday is 3 May" is always saved and confirmed.
+- **Alfred decides:** it also saves things on its own when they will matter later, such as who you are,
+  people, preferences, projects and where things live. It does not ask first.
+- **You always see it:** every reply that added, changed or removed a memory ends with a note such as
+  `💾 Memory: saved people/sam`. That note comes from the runtime comparing the folder before and after
+  the turn, so it does not depend on Alfred telling you.
+- **Forgetting:** "forget where Sam lives" removes it. `/memory` lists the files.
+
+The files are plain text, so you can read and edit them yourself, and every change is a commit in the
+home's git history. Alfred is told never to store passwords or keys, only where they live.
+
+## Alfred's home
+
+Everything Alfred knows lives in `ALFRED_HOME` (default `~/.alfred`), outside this repository:
 
 ```text
-memory/chats/<chat_id>/memory.md
-memory/chats/<chat_id>/recent.json
+~/.alfred/
+  CLAUDE.md               operating manual, regenerated on every start
+  SOUL.md                 personality; edit freely
+  memory/                 long-term memory: Markdown files written by Alfred
+    MEMORY.md             the index, loaded into every conversation
+    people/sam.md         one topic per file, grouped in folders
+  extensions/<name>/      what Alfred added to itself, one Claude Code plugin each
+  extensions-disabled/    extensions turned off with `alfred ext disable`
+  .claude/skills/<name>/  loose skills you add by hand (optional)
+  inbox/                  files you sent
+  outbox/                 screenshots and files Alfred made for you
+  bin/alfred              the tool Alfred uses to schedule and send
+  state/                  sessions and the scheduler database
 ```
 
-Private chats get separate memory because each private chat has a different `chat_id`. Group chats share memory by group, because Telegram uses one `chat_id` for the group.
+The home is its own git repository and Alfred commits to it after every turn that changes something.
+`git -C ~/.alfred log --stat` shows what it taught itself and when, and `git revert` undoes it.
 
-Persistent memory changes only when the user explicitly asks Alfred to remember or forget something. Recent memory is short-term context and is capped.
+### Base and extensions
+
+Alfred keeps what it is given apart from what it adds to itself (full protocol in
+[docs/EXTENSIONS.md](docs/EXTENSIONS.md)):
+
+- **Base**: this code plus its built-in plugin, `alfred/plugin/`. Its skills appear as `alfred:browser`,
+  `alfred:reminders`, `alfred:web-logins`, `alfred:orca-agents` and `alfred:extensions` (the protocol
+  itself), and its `bin/` adds commands such as `alfred-wait-agent`. It changes when you update Alfred;
+  Alfred is told never to edit it.
+- **Extensions**: what Alfred writes, in `~/.alfred/extensions/<name>/`, one Claude Code plugin per
+  domain, with skills (`<name>:<skill>`), commands in `bin/`, tests, and, only with your yes, hooks or
+  MCP servers. Every process loads the base and each enabled extension with `--plugin-dir`, and a
+  changed extension is picked up at the next message without restarting the bot.
+
+Every turn that adds, changes or removes an extension ends with a 🧩 note in the chat, flagged ⚠️ when
+it adds something that runs by itself. To manage them yourself:
+
+```bash
+~/.alfred/bin/alfred ext list
+~/.alfred/bin/alfred ext check <name>
+~/.alfred/bin/alfred ext disable <name>     # or enable, remove
+```
+
+Because the backend is your own Claude Code installation, Alfred also has whatever that has: your
+global skills, MCP servers and connectors.
+
+## Upgrading from the first version
+
+On first start Alfred imports what it finds next to this README: `SOUL.md` becomes its personality,
+`SKILLS.md` becomes a `legacy-notes` skill, and remembered facts from `memory/chats/*/memory.md` are
+carried into the memory folder. Existing reminders carry over if you move `scheduler.sqlite3` to
+`~/.alfred/state/`. The separate `scheduler_worker.py` process is gone; `alfred run` replaces both.
+
+## Security
+
+Alfred runs an agent with your user's full permissions, driven by chat messages. Treat the allow-list
+and the bot token like SSH keys.
+
+- Only allow-listed accounts get any response. Everyone else is ignored and logged.
+- `ALFRED_CLAUDE_PERMISSION_MODE=bypassPermissions` is the default, because nobody is at the keyboard to
+  approve prompts. Set it to `acceptEdits` or `dontAsk` for a more restricted Alfred, or run the bot as a
+  dedicated user or inside a container or VM.
+- The browser carries your logged-in sessions. A web page can contain text written to manipulate an
+  agent. Alfred is told to treat page content as data, and a browser profile with fewer
+  logins is the stronger protection if that worries you.
+- Alfred is instructed to confirm before destructive, costly or outward-facing actions, and to treat
+  web pages and files as data. Those are instructions to a model, so they reduce risk without removing it.
 
 ## Tests
 
-Run the focused test suite:
-
 ```bash
-PYTHONPATH=tests ../venv/bin/python -m unittest tests.test_prompt_files tests.test_scheduler
+PYTHONPATH=tests venv/bin/python -m unittest discover -s tests
 ```
 
-Or, from inside this directory with dependencies installed locally:
-
-```bash
-PYTHONPATH=tests python3 -m unittest tests.test_prompt_files tests.test_scheduler
-```
-
-## GitHub Safety
-
-Before committing, verify ignored files are not staged:
-
-```bash
-git status --short --ignored
-```
-
-These should stay ignored:
-
-- `.env`
-- `SOUL.md`
-- `SKILLS.md`
-- `memory/`
-- `*.sqlite3`
-- `*.log`
-- `venv/`
-
-`README.md`, source files, tests, `.gitignore`, and `.env.example` are intended to be safe to commit.
+The suite uses stand-ins for the `claude` and `codex` binaries and for Telegram, so it needs no network
+or credentials.
 
 ## Troubleshooting
 
-If the bot does not answer:
-
-- Confirm the Telegram bot process is running.
-- Confirm `.env` contains `TELEGRAM_BOT_TOKEN`.
-- Confirm your Telegram username appears as `whitelisted@your_username`.
-- Confirm you are messaging the correct bot.
-- Check `bot.log` if running detached.
-
-If reminders do not send:
-
-- Confirm `scheduler_worker.py` is running.
-- Confirm the reminder is due.
-- Confirm bot and worker use the same `scheduler.sqlite3`.
-- List reminders with `scheduler_tool.py list --chat-id <chat-id>`.
-
-If Telegram reports a polling conflict, more than one bot process is running for the same token. Stop duplicates and keep only one polling process.
+- **No answer at all:** check that your id or username is in `ALFRED_ALLOWED_USERS` (send `/start`), and
+  look at the log for "ignored message from unauthorized user".
+- **"claude backend failed: `claude` is not installed or not on PATH":** the bot's environment differs
+  from your shell's. Set `ALFRED_CLAUDE_BIN` to the full path.
+- **Polling conflict from Telegram:** two processes are using the same token. Stop the old bot.
+- **"no sign of life for 900 seconds, so I stopped it":** a turn produced nothing for that long. Raise
+  `ALFRED_TIMEOUT`, or ask Alfred to run long jobs in the background.
+- **Alfred went quiet after you asked for something:** send `/status`. "Busy: yes" means it is still
+  working; you can write to it, or `/stop` it.
