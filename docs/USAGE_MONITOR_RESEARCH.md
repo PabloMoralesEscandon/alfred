@@ -6,7 +6,7 @@ estimación de cuánto del semanal consume una ventana de 5 h (sección 10). Los
 (R1-R6) siguen sin lógica. Estado detallado y pendientes: [sección 9](#9-estado-de-la-implementación).
 Fecha: 2026-11-12. Claude Code probado: v2.1.322.
 
-Objetivo: que Alfred (1) avise antes de que se agoten los límites del plan (ventana de 5 horas y
+Objetivo: que Consiglieri (1) avise antes de que se agoten los límites del plan (ventana de 5 horas y
 límites semanales) y (2) detecte cuota sin usar antes de que se reinicie, para avisar al usuario o
 proponerle tareas pendientes que la aprovechen. Todo ello sin que el propio monitor gaste cuota.
 
@@ -18,9 +18,9 @@ proponerle tareas pendientes que la aprovechen. Todo ello sin que el propio moni
   `--output-format stream-json --verbose`, la misma respuesta trae un objeto **`usage_report`
   estructurado y documentado**: cada medidor con `kind`, `percent`, `resets_at` en ISO 8601 UTC,
   `severity` y `scope`. Es mucho más fiable que analizar el texto.
-- **Fuente pasiva y gratuita:** cada turno normal de Alfred ya emite un evento `rate_limit_event`
+- **Fuente pasiva y gratuita:** cada turno normal de Consiglieri ya emite un evento `rate_limit_event`
   con la utilización y el reinicio de las ventanas de 5 h y 7 días. Hoy `alfred/backends/live.py` lo
-  descarta. Capturarlo da datos frescos sin ninguna consulta extra mientras Alfred trabaja.
+  descarta. Capturarlo da datos frescos sin ninguna consulta extra mientras Consiglieri trabaja.
 - **El monitor no debe ser una tarea programada del agente.** Una entrada `alfred schedule --task`
   despierta al modelo y gasta cuota en cada comprobación. Tiene que ser un bucle en Python dentro del
   proceso del bot, junto al planificador, que solo mande mensajes fijos por Telegram. El agente solo
@@ -123,7 +123,7 @@ Lo que dice la documentación y conviene respetar:
   restrictiva.
 - `rate_limits` es `null` si Claude Code no consiguió el uso del plan, por ejemplo si el token no
   tiene el scope `user:profile`. Un token de `claude setup-token` pasado como
-  `CLAUDE_CODE_OAUTH_TOKEN` **no** lo trae, porque solo tiene `user:inference`. Alfred usa el
+  `CLAUDE_CODE_OAUTH_TOKEN` **no** lo trae, porque solo tiene `user:inference`. Consiglieri usa el
   login normal de Claude Code, así que sí aplica.
 - **El tipo está marcado como experimental: "its shape may change".** Requiere Agent SDK v0.3.273
   o posterior, así que conviene mantener el análisis del texto como respaldo.
@@ -156,7 +156,7 @@ prueba de esta investigación que gastó cuota.
   extra opcional.
 - No incluye los semanales por modelo (`weekly_scoped`, p. ej. Fable). Para esos solo sirve
   `/usage`.
-- Solo llega cuando hay tráfico al modelo. Sirve para reaccionar al instante mientras Alfred
+- Solo llega cuando hay tráfico al modelo. Sirve para reaccionar al instante mientras Consiglieri
   trabaja (`allowed_warning`, `rejected`), no para saber qué pasa cuando está parado.
 - Hoy `LiveSession._handle()` en `alfred/backends/live.py` y `_run_once()` en
   `alfred/backends/claude.py` ignoran cualquier `type` que no reconocen, así que el evento llega y
@@ -169,7 +169,7 @@ El JSON que recibe un script de status line trae `rate_limits.five_hour` y
 ([statusline › Available data](https://code.claude.com/docs/en/statusline#available-data),
 [› Rate limit usage](https://code.claude.com/docs/en/statusline#rate-limit-usage)). Solo aparece
 para suscriptores Pro/Max/Ultra, después de la primera respuesta, y cada ventana puede faltar.
-**No sirve para Alfred:** la status line no se ejecuta en modo `-p` y engancharla obligaría a tocar
+**No sirve para Consiglieri:** la status line no se ejecuta en modo `-p` y engancharla obligaría a tocar
 el `~/.claude/settings.json` del usuario. Solo sería útil como fuente extra si el usuario ya tiene
 una status line que escribe esos datos en un archivo.
 
@@ -180,7 +180,7 @@ Claude Code ya avisa con `You've used 85% of your session limit · resets 3:45pm
 ([errors › Usage limits](https://code.claude.com/docs/en/errors#usage-limits)). En sesiones
 interactivas puede esperar al reinicio y continuar solo (`autoContinueAtUsageLimit`,
 [interactive-mode › Wait for a usage limit to reset](https://code.claude.com/docs/en/interactive-mode#wait-for-a-usage-limit-to-reset)).
-Para Alfred lo útil es el equivalente estructurado: `status: "allowed_warning"` y `"rejected"` del
+Para Consiglieri lo útil es el equivalente estructurado: `status: "allowed_warning"` y `"rejected"` del
 punto 2.2. Leer ese texto es la peor opción.
 
 ### 2.5 Logs locales de sesión (`~/.claude/projects/**/*.jsonl`)
@@ -232,7 +232,7 @@ y [clauth](https://docs.rs/crate/clauth/0.5.5/source/src/usage/fetch.rs)). **Se 
 | cship, clauth, claude-usage y otros | Endpoint no documentado de 2.7 | Ver 2.7. |
 
 La idea útil de estas herramientas es la **proyección por ritmo de consumo** ("a este ritmo llegas
-al límite a las 15:10"). Alfred puede calcularla con los porcentajes reales de varias consultas
+al límite a las 15:10"). Consiglieri puede calcularla con los porcentajes reales de varias consultas
 seguidas, sin contar tokens.
 
 ### 2.9 Comparativa
@@ -267,7 +267,7 @@ sin usar al llegar su reinicio. La ventana de 5 h es un limitador de ritmo: el m
 usar solo es aprovechable si el semanal también tiene margen. Por eso la regla de cuota sobrante de
 5 h tiene que mirar también el ritmo semanal.
 
-## 4. Encaje con el planificador de Alfred
+## 4. Encaje con el planificador de Consiglieri
 
 ### Por qué no `alfred schedule`
 
@@ -345,7 +345,7 @@ se adelanta si cae dentro del silencio.
 
 ### Proponer tareas pendientes
 
-Hoy Alfred no tiene una lista de pendientes (memoria y skills sí, backlog no). Propuesta:
+Hoy Consiglieri no tiene una lista de pendientes (memoria y skills sí, backlog no). Propuesta:
 
 - Una tabla `backlog` en el mismo `scheduler.sqlite3` (`id, chat_id, text, size: s|m|l, model,
   created_at, done_at`) y una orden para el agente `alfred backlog add|list|done`, siguiendo el
@@ -363,7 +363,7 @@ Hoy Alfred no tiene una lista de pendientes (memoria y skills sí, backlog no). 
 ### Tope de gasto (fase 2 de `docs/PLAN.md`)
 
 Con la misma instantánea, en `_deliver` antes de despertar al agente con un `KIND_TASK`: si algún
-medidor que afecta al modelo de Alfred está a ≥ `ALFRED_USAGE_CAP` (95 %), o el último
+medidor que afecta al modelo de Consiglieri está a ≥ `ALFRED_USAGE_CAP` (95 %), o el último
 `rate_limit_event` dice `rejected`, la tarea se aplaza a `resets_at + 2 min` y se avisa una vez. Hace
 falta un `SchedulerStore.defer(item_id, due)` que cambie `due_at_utc` sin contar un intento. Los
 recordatorios fijos (`KIND_MESSAGE`) no se aplazan nunca.
@@ -378,8 +378,8 @@ recordatorios fijos (`KIND_MESSAGE`) no se aplazan nunca.
 | **Límite de frecuencia del endpoint de uso** | Intervalo adaptativo, respetar `rate limited until`, reutilizar `rate_limit_event`, mínimo de 5 min. |
 | **Hooks o MCP del usuario en cada consulta** | `--setting-sources project`, `--strict-mcp-config` y `cwd` en `state/usage-probe/` sin `.claude/`. |
 | **Avisos excesivos** | Deduplicación persistente, horas de silencio, máximo de propuestas, todo configurable y con un interruptor general. |
-| **Términos de servicio** | Alfred usa el binario oficial de Claude Code con el login del propio usuario, y la página legal no lo impide ("Nor does it prevent an end user from signing in to the unmodified Claude Code binary with their own Claude subscription"). Pero: (a) los términos de consumidor prohíben el acceso "through automated or non-human means, whether through a bot, script, or otherwise" salvo con API key o permiso explícito ([Consumer Terms](https://www.anthropic.com/legal/consumer-terms)), y (b) "Advertised usage limits for Pro, Max, and Ultra plans assume ordinary, individual usage" ([legal-and-compliance](https://code.claude.com/docs/en/legal-and-compliance)). Consultar `/usage` es leer el estado de la propia cuenta, sin inferencia. **Llenar la cuota de forma automática y continua** se acerca a lo que esos textos quieren evitar. Por eso el diseño **propone** y el usuario decide. No se usa el endpoint no documentado ni se toca el token. Esto no es asesoramiento legal: si se activa `AUTORUN`, conviene revisar los términos vigentes. |
-| **Datos de otros dispositivos** | No es un problema: `usage_report` viene del servidor e incluye el uso de claude.ai y de otros equipos. Pero R2 puede dispararse por uso que no es de Alfred, y el mensaje no debe culpar a Alfred. |
+| **Términos de servicio** | Consiglieri usa el binario oficial de Claude Code con el login del propio usuario, y la página legal no lo impide ("Nor does it prevent an end user from signing in to the unmodified Claude Code binary with their own Claude subscription"). Pero: (a) los términos de consumidor prohíben el acceso "through automated or non-human means, whether through a bot, script, or otherwise" salvo con API key o permiso explícito ([Consumer Terms](https://www.anthropic.com/legal/consumer-terms)), y (b) "Advertised usage limits for Pro, Max, and Ultra plans assume ordinary, individual usage" ([legal-and-compliance](https://code.claude.com/docs/en/legal-and-compliance)). Consultar `/usage` es leer el estado de la propia cuenta, sin inferencia. **Llenar la cuota de forma automática y continua** se acerca a lo que esos textos quieren evitar. Por eso el diseño **propone** y el usuario decide. No se usa el endpoint no documentado ni se toca el token. Esto no es asesoramiento legal: si se activa `AUTORUN`, conviene revisar los términos vigentes. |
+| **Datos de otros dispositivos** | No es un problema: `usage_report` viene del servidor e incluye el uso de claude.ai y de otros equipos. Pero R2 puede dispararse por uso que no es de Consiglieri, y el mensaje no debe culpar a Consiglieri. |
 | **Zonas horarias** | `resets_at` es UTC. Mostrarlo en la hora local del equipo, la misma que usa `alfred schedule`. |
 
 ## 7. Diseño propuesto
@@ -544,18 +544,18 @@ Garantías comprobadas por los tests (`tests/test_usage_monitor.py`, `test_usage
 ### Bots creados (tras el merge de `refactor` / agent-chats)
 
 Desde ese merge, un proceso (`alfred run` → `BotPool`) sirve el panel de control y todos los bots que
-Alfred ha creado. Cada bot tiene su `TelegramBot`, su `Agent` y su `Config` (`config_for(bot_id)`),
+Consiglieri ha creado. Cada bot tiene su `TelegramBot`, su `Agent` y su `Config` (`config_for(bot_id)`),
 pero todos usan **la misma cuenta de Claude**: el mismo `claude` con el mismo login. Los límites del
 plan son de esa cuenta, así que:
 
-- **El monitor corre una sola vez por proceso, en `BotPool.start`, con la configuración de Alfred.**
+- **El monitor corre una sola vez por proceso, en `BotPool.start`, con la configuración de Consiglieri.**
   No va en `TelegramBot`: un monitor por bot repetiría las consultas al endpoint de uso, que tiene
   límite de frecuencia, y duplicaría los avisos. `TelegramBot._post_init` ya no es la ruta de
   arranque (el pool llama a `started()`).
 - `start()` devuelve `None` con la configuración de un bot creado (`config.bot_id`), aunque sus
   ajustes propios (`overrides`) activen el interruptor.
 - Una sola lectura por ciclo sirve para los avisos de todos los bots (sección 12).
-- El historial va en `state/usage.json` de Alfred. Los avisos de cada bot van en
+- El historial va en `state/usage.json` de Consiglieri. Los avisos de cada bot van en
   `state/bots/<id>/usage-alerts.json`.
 - `/usage` sigue en cada bot como en `refactor`: todos muestran los mismos límites, los de la
   cuenta.
@@ -649,7 +649,7 @@ Max 5x.
   orden del **15-16 % del semanal de Fable** por ventana en Max. Es una deducción sin medición.
 - Las cifras de modelos de 2025 (Sonnet 4 y Opus 4 por horas) no sirven para los modelos de 2026.
 
-### Resultado y uso en Alfred
+### Resultado y uso en Consiglieri
 
 | Plan | Porcentaje del semanal por ventana de 5 h llena | Confianza |
 | --- | --- | --- |
@@ -697,7 +697,7 @@ el uso del plan (`alfred usage`) y registrar avisos (`alfred usage-alert`).
 3. **El monitor**: en cada ciclo solo revisa los bots activos que tienen el permiso. Si se lo
    quitan, sus avisos se conservan pero no se evalúan ni lo despiertan.
 4. **Sandbox**: con `shell full` y sandbox, las dos órdenes salen del sandbox
-   (`excludedCommands`) solo si el bot tiene el permiso, porque necesitan el estado de Alfred y el
+   (`excludedCommands`) solo si el bot tiene el permiso, porque necesitan el estado de Consiglieri y el
    login de Claude Code.
 
 No afecta a la orden `/usage` del chat de cada bot: esa la usa el dueño, no el agente, y se ha
@@ -806,7 +806,7 @@ que el servidor redondea a 0 %. Para detectar que "no hay ventana" haría falta 
   escriben tanto `alfred usage-alert` como el monitor), así que un reinicio del proceso no lo
   repite.
 - Se guardan en `state/bots/<id>/usage-alerts.json`, fuera del directorio del bot, que no puede
-  leer el estado de Alfred. Solo los cambia a través de la orden. Como mucho 20 avisos activos por
+  leer el estado de Consiglieri. Solo los cambia a través de la orden. Como mucho 20 avisos activos por
   bot.
 
 ### Cómo llega
