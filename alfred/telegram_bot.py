@@ -5,7 +5,7 @@ handler returns; the agent's results arrive later through the `Listener`
 methods, whenever a turn ends, including turns the agent started by itself.
 
 One process serves several bots. `BotPool` runs the main bot (TELEGRAM_BOT_TOKEN)
-and every bot Alfred created (see `alfred/bots.py`), each as its own
+and every bot Consiglieri created (see `alfred/bots.py`), each as its own
 python-telegram-bot `Application` with its own `TelegramBot` front end and its
 own `Agent`, all in one event loop with one scheduler. A bot created while the
 process runs is started on the spot. Nothing is shared between bots except the
@@ -45,7 +45,7 @@ from .text import split_message
 
 log = logging.getLogger("alfred.telegram")
 
-# The commands of a bot with an agent (every bot Alfred created), in the order /help and the menu show them.
+# The commands of a bot with an agent (every bot Consiglieri created), in the order /help and the menu show them.
 # To add one: add a line here and a `_cmd_<name>` method on TelegramBot.
 COMMANDS = [
     ("help", "Show what this bot can do and the commands"),
@@ -170,7 +170,7 @@ def command_text(message: Any) -> str:
 
 
 class TelegramBot(Listener):
-    """One bot's front end. `record` is set for a bot Alfred created; None is the main bot."""
+    """One bot's front end. `record` is set for a bot Consiglieri created; None is the main bot."""
 
     def __init__(
         self,
@@ -602,7 +602,7 @@ class ControlPanel:
         await update.effective_message.reply_text(await usage.fetch(self.config, dict(os.environ)))
 
     async def _cmd_shared(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """The shared memory, written by you here (and by Alfred's main agent), read by every agent."""
+        """The shared memory, written by you here (and by Consiglieri's main agent), read by every agent."""
         if not self._authorized(update):
             return
         await self._send(context.bot, chat_of(update), shared_memory.command(self.config, command_text(update.effective_message)))
@@ -925,7 +925,7 @@ class ControlPanel:
 
 
 class BotPool:
-    """Runs the control panel and every bot Alfred created, in one process, and changes that set while it runs."""
+    """Runs the control panel and every bot Consiglieri created, in one process, and changes that set while it runs."""
 
     def __init__(self, config: Config) -> None:
         self.config = config
@@ -1093,7 +1093,7 @@ class BotPool:
         return bots.suggest_username(name, self.manager_username, task, self.registry.known_usernames())
 
     async def on_managed_bot(self, creator: Dict[str, Any], bot: Dict[str, Any]) -> Optional[BotRecord]:
-        """Telegram says a bot managed by Alfred was created, or its token or owner changed."""
+        """Telegram says a bot managed by Consiglieri was created, or its token or owner changed."""
         creator_id = int(creator["id"])
         bot_id = int(bot["id"])
         username = str(bot.get("username") or "")
@@ -1109,7 +1109,7 @@ class BotPool:
                                    "%s now belongs to someone else, so I disconnected it and forgot its token. "
                                    "/bot destroy %s removes what is left of it here." % (existing.handle, existing.username))
                 return None
-            # Anyone who knows Alfred's username can open a creation link. Their bot is never taken over.
+            # Anyone who knows the panel's username can open a creation link. Their bot is never taken over.
             log.warning("ignored managed bot %s created by unauthorized user id=%s", bot_id, creator_id)
             return None
         manager = self.main.bot
@@ -1132,7 +1132,7 @@ class BotPool:
         self.registry.set_token(bot_id, token)
         try:
             await bots.restrict_access(manager, bot_id)
-        except Exception as exc:  # Alfred's own allow-list still guards the bot
+        except Exception as exc:  # Consiglieri's own allow-list still guards the bot
             log.warning("could not restrict access to %s: %s", record.handle, exc)
         running = await self.launch(record)
         if running:

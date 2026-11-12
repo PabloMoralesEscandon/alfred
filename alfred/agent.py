@@ -210,7 +210,7 @@ class Agent:
         self._locks: Dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._live: Dict[int, _Live] = {}
         self._turns: Dict[int, Set["asyncio.Future[None]"]] = defaultdict(set)
-        # The bot's @username, for the context line of a bot Alfred created. None for the main bot.
+        # The bot's @username, for the context line of a bot Consiglieri created. None for the main bot.
         self.bot_username: Optional[str] = None
 
     # -- backend selection --------------------------------------------------
@@ -385,12 +385,12 @@ class Agent:
     # -- one turn -----------------------------------------------------------
 
     def _prepare_workspace(self) -> None:
-        """A bot Alfred created gets its manual written from its current settings before a process opens."""
+        """A bot Consiglieri created gets its manual written from its current settings before a process opens."""
         if self.config.bot_id:
             from . import bots
 
             bots.prepare_workspace(self.config)
-        else:  # Alfred's main agent: only its copy of the shared memory's index changes between turns
+        else:  # Consiglieri's main agent: only its copy of the shared memory's index changes between turns
             from . import shared_memory
 
             shared_memory.refresh_copy(self.config, self.config.home, shared_memory.MAIN)
@@ -415,7 +415,7 @@ class Agent:
             env["ALFRED_WORKSPACE"] = str(self.config.workspace)
         env["ALFRED_USER_ID"] = "" if user_id is None else str(user_id)
         env["ALFRED_USERNAME"] = username or ""
-        # Alfred's launcher, then the base plugin's and each extension's bin/ (Claude Code adds those too).
+        # Consiglieri's launcher, then the base plugin's and each extension's bin/ (Claude Code adds those too).
         folders = [self.config.home / "bin"] + extensions.bin_dirs(self.config)
         env["PATH"] = os.pathsep.join([str(folder) for folder in folders] + [env.get("PATH", "")])
         return env

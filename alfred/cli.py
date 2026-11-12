@@ -359,7 +359,7 @@ def cmd_screenshot(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
 
 
 def chrome_command(config: Config) -> List[str]:
-    """How to open a window of Alfred's Chrome profile, starting Chrome if it is not running."""
+    """How to open a window of Consiglieri's Chrome profile, starting Chrome if it is not running."""
     if not config.chrome_profile:
         raise CommandError("no Chrome profile is set; put ALFRED_CHROME_PROFILE=<profile folder> in .env")
     flag = "--profile-directory=%s" % config.chrome_profile
@@ -449,7 +449,7 @@ def cmd_init(config: Config, args: argparse.Namespace) -> int:
 
 
 def cmd_browser_setup(config: Config, args: argparse.Namespace) -> int:
-    """Link Alfred's home to Orca so its built-in browser can be used, and prove a page loads."""
+    """Link Consiglieri's home to Orca so its built-in browser can be used, and prove a page loads."""
     from . import orca
 
     home.bootstrap(config)

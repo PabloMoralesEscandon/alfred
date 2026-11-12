@@ -635,7 +635,7 @@ class UsageMonitor:
 def start(
     config: Config, environ: Optional[Dict[str, str]] = None, *, scheduler: Optional[SchedulerStore] = None,
 ) -> Optional[UsageMonitor]:
-    """Called once per process, by `BotPool.start`, with Alfred's own configuration and the shared scheduler.
+    """Called once per process, by `BotPool.start`, with Consiglieri's own configuration and the shared scheduler.
 
     Off by default: then this reads nothing else and returns None. A created bot's configuration
     (`config.bot_id` set) never starts one, because the plan limits belong to the Claude account that

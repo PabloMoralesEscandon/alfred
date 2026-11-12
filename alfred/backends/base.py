@@ -116,7 +116,7 @@ class Backend:
     """One agent CLI. Subclasses implement `_run_once`."""
 
     name = "base"
-    # True when the CLI discovers `.claude/skills` by itself. Otherwise Alfred
+    # True when the CLI discovers `.claude/skills` by itself. Otherwise Consiglieri
     # puts a skills index into the first prompt of each session.
     native_skills = False
     # True when the CLI can stay open between messages (see `live.LiveSession`).

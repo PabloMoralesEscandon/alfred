@@ -1,11 +1,11 @@
-"""Extensions: what Alfred adds to itself, kept apart from what ships with it.
+"""Extensions: what Consiglieri adds to itself, kept apart from what ships with it.
 
 Three layers, each in its own place:
 
 - base: `alfred/plugin/`, a Claude Code plugin shipped with this code. Its
-  skills are `alfred:<skill>` and its `bin/` is on PATH. Alfred never edits it.
+  skills are `alfred:<skill>` and its `bin/` is on PATH. Consiglieri never edits it.
 - extensions: `~/.alfred/extensions/<name>/`, one Claude Code plugin per
-  extension, written by Alfred. Skills are `<name>:<skill>`, executables in
+  extension, written by Consiglieri. Skills are `<name>:<skill>`, executables in
   `bin/` are bare commands, and hooks or MCP servers load with the plugin.
 - disabled extensions: `~/.alfred/extensions-disabled/<name>/`, kept on disk
   but not loaded.
@@ -13,7 +13,7 @@ Three layers, each in its own place:
 Every process gets the base plugin and each enabled extension with
 `--plugin-dir`. `fingerprint()` changes when an extension's shape changes, and
 the agent then reopens its process at the next idle moment so the change loads.
-See docs/EXTENSIONS.md for the protocol Alfred follows.
+See docs/EXTENSIONS.md for the protocol Consiglieri follows.
 """
 
 from __future__ import annotations
@@ -185,7 +185,7 @@ def held_back(config: Config, extension: Extension) -> List[str]:
     Hooks, monitors and LSP servers run as the user, outside Claude Code's permission rules and its sandbox,
     and a bot writes its own extensions: loading them would let a bot get past every permission it has,
     the blacklist on other agents' memory and tools included. MCP servers load only with the bot's `mcp`
-    permission. Alfred's main agent (bot 0) loads everything, as before.
+    permission. Consiglieri's main agent (bot 0) loads everything, as before.
     """
     if not config.bot_id:
         return []
@@ -341,7 +341,7 @@ def _files(path: Path) -> List[Path]:
 
 
 def check(config: Config, name: str, run_tests: bool = True) -> Dict[str, Any]:
-    """Everything an extension must pass before Alfred relies on it."""
+    """Everything an extension must pass before Consiglieri relies on it."""
     extension = find(config, name)
     path = extension.path
     errors: List[str] = []

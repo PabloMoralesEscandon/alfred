@@ -1,4 +1,4 @@
-"""The bots Alfred creates: registry, tokens, settings, permissions and each bot's own directory."""
+"""The bots Consiglieri creates: registry, tokens, settings, permissions and each bot's own directory."""
 
 from __future__ import annotations
 
@@ -46,7 +46,7 @@ class BotsTestCase(unittest.TestCase):
         self.config = self.sandbox.config
         home.bootstrap(self.config, legacy_dir=None)
         self.registry = BotRegistry(self.config)
-        self.work = self.sandbox.root / "work"  # a project directory, outside Alfred's home
+        self.work = self.sandbox.root / "work"  # a project directory, outside Consiglieri's home
         self.work.mkdir()
 
     def add_bot(self, bot_id: int = 5000000001, username: str = "research_bot", **fields: Any) -> BotRecord:
@@ -123,7 +123,7 @@ class ConfigTests(BotsTestCase):
         config = self.registry.config_for(5000000001)
         workspace = self.config.bots_home / "5000000001"
         self.assertEqual(config.workspace, workspace)
-        self.assertNotIn(self.config.home, workspace.parents)  # Claude Code would load Alfred's CLAUDE.md
+        self.assertNotIn(self.config.home, workspace.parents)  # Claude Code would load the main agent's CLAUDE.md
         self.assertEqual(config.memory_dir, workspace / "memory")
         self.assertEqual(config.inbox_dir, workspace / "inbox")
         self.assertEqual(config.skills_dir, workspace / ".claude" / "skills")
@@ -138,7 +138,7 @@ class ConfigTests(BotsTestCase):
         config = self.registry.config_for(5000000001)
         self.assertEqual(config.claude_model, "sonnet")
         self.assertEqual(config.claude_effort, "high")
-        self.assertIsNone(config.workdir)  # a working directory never comes from Alfred's .env
+        self.assertIsNone(config.workdir)  # a working directory never comes from Consiglieri's .env
         self.assertEqual(config.claude_permission_mode, "dontAsk")
         self.assertEqual(config.browser, "none")
 
@@ -174,7 +174,7 @@ class ConfigTests(BotsTestCase):
         record.permissions["mcp"] = "on"
         self.registry.save(record)
         self.assertEqual([path.name for path in extensions.plugin_dirs(research)], ["plugin", "plain", "served"])
-        # Alfred's main agent loads everything, as before.
+        # Consiglieri's main agent loads everything, as before.
         main_ext = extensions.scaffold(self.config, "mainhook", "Main agent hook").path
         (main_ext / "hooks").mkdir()
         self.assertIn("mainhook", [path.name for path in extensions.plugin_dirs(self.config)])

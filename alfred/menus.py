@@ -25,7 +25,7 @@ PREFIX = "m"
 
 Row = List[Tuple[str, str]]  # (label, action)
 
-# What the model step offers. The empty value means "Alfred's default" (.env, or the backend's own).
+# What the model step offers. The empty value means "Consiglieri's default" (.env, or the backend's own).
 CLAUDE_MODELS = (("Default", ""), ("Fable", "fable"), ("Opus", "opus"), ("Sonnet", "sonnet"), ("Haiku", "haiku"))
 CODEX_MODELS = (("Default", ""),)
 CLAUDE_EFFORTS = ("", "low", "medium", "high", "xhigh", "max")

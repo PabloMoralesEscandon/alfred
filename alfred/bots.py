@@ -1,4 +1,4 @@
-"""The bots Alfred creates: Telegram managed bots, each with its own settings, permissions, token and directory.
+"""The bots Consiglieri creates: Telegram managed bots, each with its own settings, permissions, token and directory.
 
 How a bot comes to exist (see docs/AGENT_CHATS_RESEARCH.md): the main bot is a control panel and a
 *manager bot* (Bot Management Mode, switched on once in @BotFather's Mini App). It sends the user a
@@ -18,8 +18,8 @@ What a bot owns, and where:
         extensions/  .claude/skills/  tools it adds to itself; no other bot loads them
 
 The bots' directories sit next to the home, not inside it, because Claude Code loads every CLAUDE.md
-from its working directory up to the root: inside the home, a bot would also read Alfred's manual and
-Alfred's memory index.
+from its working directory up to the root: inside the home, a bot would also read the main agent's manual and
+the main agent's memory index.
 
 This module has no Telegram connection of its own. The few Bot API calls a manager makes take the
 manager's `telegram.Bot` as an argument, and go through `do_api_request`, so they work with any
@@ -91,15 +91,15 @@ SWITCHES = ("sandbox", "edit", "web", "browser", "mcp", "schedule", "contact", "
 # `+name` / `-name` when creating a bot: on and off, or for shell: full and alfred.
 SHORTHANDS = {"bypass": ("mode", "bypassPermissions")}
 
-# alfred subcommands a bot never runs: they start or install Alfred itself.
+# alfred subcommands a bot never runs: they start or install Consiglieri itself.
 ALWAYS_DENIED = ("Bash(alfred run)", "Bash(alfred run *)", "Bash(alfred service *)", "Bash(alfred init)",
                  "Bash(alfred chat)", "Bash(alfred chat *)", "Bash(alfred browser-setup *)")
-# alfred subcommands that run outside the sandbox: they need Alfred's state and Telegram, and check
+# alfred subcommands that run outside the sandbox: they need Consiglieri's state and Telegram, and check
 # the bot's permissions themselves.
 UNSANDBOXED_ALFRED = ("alfred send *", "alfred schedule *", "alfred event *", "alfred skills", "alfred bots *")
 BROWSER_RULES = ("Bash(orca *)", "mcp__claude-in-chrome__*")
 # The usage permission: the commands it opens, as deny rules when it is off and as sandbox exclusions when on
-# (they need Alfred's state and Claude Code's own login).
+# (they need Consiglieri's state and Claude Code's own login).
 USAGE_RULES = ("Bash(alfred usage)", "Bash(alfred usage *)", "Bash(alfred usage-alert)", "Bash(alfred usage-alert *)")
 USAGE_UNSANDBOXED = ("alfred usage", "alfred usage-alert *")
 
@@ -222,7 +222,7 @@ class BotRecord:
 
 @dataclass
 class Pending:
-    """A creation link Alfred sent and the settings and permissions the new bot will start with."""
+    """A creation link Consiglieri sent and the settings and permissions the new bot will start with."""
 
     owner_id: int
     chat_id: int
@@ -352,7 +352,7 @@ class BotRegistry:
         }
 
     def config_for(self, bot_id: int) -> Config:
-        """The configuration a bot's agent runs with: Alfred's, with the bot's own directory and settings."""
+        """The configuration a bot's agent runs with: Consiglieri's, with the bot's own directory and settings."""
         bot_id = int(bot_id)
         return Config(
             home=self.config.home,
@@ -396,7 +396,7 @@ class BotRegistry:
         return pending
 
     def known_usernames(self) -> List[str]:
-        """Usernames Alfred already uses or has asked for: its bots and its pending requests."""
+        """Usernames Consiglieri already uses or has asked for: its bots and its pending requests."""
         return [record.username for record in self.list()] + [item.username for item in self._pending()]
 
     def take_pending(self, owner_id: int, username: str) -> Optional[Pending]:
@@ -625,7 +625,7 @@ def shell_is_open(record: BotRecord) -> bool:
 
 @dataclass
 class OtherAgent:
-    """Another agent on this machine: one of the other bots, or Alfred's main agent (its home)."""
+    """Another agent on this machine: one of the other bots, or Consiglieri's main agent (its home)."""
 
     label: str
     workspace: Path
@@ -644,7 +644,7 @@ def claude_project_dir(config: Config, workspace: Path) -> Path:
 
 
 def other_agents(config: Config, record: BotRecord) -> List[OtherAgent]:
-    """Every agent but this bot: Alfred's main agent, each registered bot, and any leftover bot directory."""
+    """Every agent but this bot: Consiglieri's main agent, each registered bot, and any leftover bot directory."""
     found: Dict[Path, str] = {}
     for other in BotRegistry(config).list():
         if other.bot_id != record.bot_id:
@@ -743,7 +743,7 @@ def blacklist(config: Config, record: BotRecord) -> Dict[str, List[str]]:
         deny += ["Read(%s)" % _rule_path(agent.workspace / ".env")] if agent.main else []
         deny.append("Read(%s/*.jsonl)" % _rule_path(project))  # its conversations stay its own
     if not record.cross_agent:
-        deny.append("Read(%s/**)" % _rule_path(config.home))  # .env, every bot's token, Alfred's memory and tools
+        deny.append("Read(%s/**)" % _rule_path(config.home))  # .env, every bot's token, the main agent's memory and tools
     deny += ["Read(%s)" % _rule_path(path) for path in config.env_files]
     return {
         "deny": list(dict.fromkeys(deny)),
@@ -793,12 +793,12 @@ def claude_settings(config: Config, record: BotRecord) -> Dict[str, Any]:
     shell_full = record.permission("shell") == "full"
     allow = ["Skill", "Read", "Glob", "Grep", "TodoWrite", "Agent", "Edit(%s/**)" % absolute(workspace)]
     deny = list(ALWAYS_DENIED)
-    # Other agents' memory and tools, Alfred's home (.env, every bot's token) and the .env next to the code:
+    # Other agents' memory and tools, Consiglieri's home (.env, every bot's token) and the .env next to the code:
     # denied at every level, whatever the switches, the extra rules or the mode say. Deny rules win over
     # allow rules, so nothing in `allow` can open them again; only cross-agent access changes them.
     others = blacklist(config, record)
     deny += others["deny"]
-    # The bot's manual and settings are rewritten by Alfred.
+    # The bot's manual and settings are rewritten by Consiglieri.
     deny += ["Edit(%s)" % absolute(workspace / name) for name in ("CLAUDE.md", "AGENTS.md", shared_memory.COPY_NAME,
                                                                   ".claude/settings.json", ".claude/settings.local.json")]
     # The shared memory: readable at every level and with or without cross-agent access (it is outside
@@ -1014,7 +1014,7 @@ def suggest_username(name: str, manager_username: str = "", task: str = "", take
 
     The slug comes from the name, or from the task when the name has no usable letters, is shortened (never
     the prefix) to keep within 32 characters, and gets a short number when the username is already one of
-    `taken` (Alfred's own bots, its pending requests, the panel). Telegram can still refuse a username
+    `taken` (Consiglieri's own bots, its pending requests, the panel). Telegram can still refuse a username
     someone else holds; the user then edits it in Telegram's creation window.
     """
     prefix = username_prefix(manager_username)
@@ -1100,7 +1100,7 @@ async def revoke_token(manager: Any, bot_id: int) -> None:
 
 
 async def restrict_access(manager: Any, bot_id: int) -> None:
-    """Only the bot's owner can use it. Alfred's own allow-list is checked as well."""
+    """Only the bot's owner can use it. Consiglieri's own allow-list is checked as well."""
     await manager.do_api_request(
         "setManagedBotAccessSettings", api_kwargs={"user_id": int(bot_id), "is_access_restricted": True}
     )

@@ -1,6 +1,6 @@
-"""Orca integration: Alfred's browser is the one built into the Orca app, driven by the `orca` CLI.
+"""Orca integration: Consiglieri's browser is the one built into the Orca app, driven by the `orca` CLI.
 
-Alfred does not run inside Orca. Its home is registered as an Orca workspace,
+Consiglieri does not run inside Orca. Its home is registered as an Orca workspace,
 so browser commands run from the home open tabs there (visible in the app, with
 the app's persistent logins) instead of in whichever workspace is on screen.
 """
@@ -17,7 +17,7 @@ from .config import Config
 
 # Remote-runtime selection is the user's choice and is passed through. Everything else
 # Orca exports into its terminals describes that terminal's pane and workspace, and
-# would make Alfred's agent report into, and open tabs in, the wrong place.
+# would make the agent report into, and open tabs in, the wrong place.
 KEPT_ORCA_VARS = ("ORCA_PAIRING_CODE", "ORCA_ENVIRONMENT", "ORCA_CLI_COMMAND")
 TEST_URL = "https://example.com/"
 
@@ -36,7 +36,7 @@ def detached_env(env: Mapping[str, str]) -> Dict[str, str]:
 
 
 def call(config: Config, *args: str, timeout: float = 60) -> Dict[str, Any]:
-    """Run an `orca` command from Alfred's home and return its `result` object."""
+    """Run an `orca` command from Consiglieri's home and return its `result` object."""
     try:
         process = subprocess.run(
             [config.orca_bin, *args, "--json"],
@@ -72,7 +72,7 @@ def runtime_ready(config: Config) -> bool:
 
 
 def workspace(config: Config) -> Optional[Dict[str, Any]]:
-    """The Orca workspace that contains Alfred's home, if it has been registered."""
+    """The Orca workspace that contains Consiglieri's home, if it has been registered."""
     try:
         found = call(config, "worktree", "current").get("worktree")
     except OrcaError as exc:
@@ -103,7 +103,7 @@ def summary(config: Config) -> str:
 
 
 def setup_browser(config: Config, *, test: bool = True) -> List[Step]:
-    """Make the browser usable from Alfred's home. Idempotent. Returns (step, ok, detail) rows."""
+    """Make the browser usable from Consiglieri's home. Idempotent. Returns (step, ok, detail) rows."""
     steps: List[Step] = []
 
     def record(label: str, ok: bool, detail: str) -> bool:

@@ -1,4 +1,4 @@
-"""Extensions: what Alfred adds to itself, kept apart from the base it ships with."""
+"""Extensions: what Consiglieri adds to itself, kept apart from the base it ships with."""
 
 from __future__ import annotations
 
@@ -213,7 +213,7 @@ class ExtensionTests(unittest.TestCase):
 
 
 class ExtensionTurnTests(unittest.TestCase):
-    """An extension Alfred writes during a turn is reported, and loads into its next process."""
+    """An extension Consiglieri writes during a turn is reported, and loads into its next process."""
 
     def setUp(self) -> None:
         self.sandbox = Sandbox()

@@ -65,7 +65,7 @@ class Config:
     home: Path = DEFAULT_HOME
     env_files: List[Path] = field(default_factory=list)
     environ: Dict[str, str] = field(default_factory=lambda: dict(os.environ))
-    # Set for one of the bots Alfred created (see `alfred/bots.py`); 0 is the main bot.
+    # Set for one of the bots Consiglieri created (see `alfred/bots.py`); 0 is the main bot.
     bot_id: int = 0
     # Where this bot's agent runs and keeps its memory and inbox. None means the home itself.
     workspace_dir: Optional[Path] = None
@@ -156,7 +156,7 @@ class Config:
 
     @property
     def chrome_profile(self) -> str:
-        """The Chrome profile folder kept for Alfred (for example `Alfred`), so `alfred chrome` can open it."""
+        """The Chrome profile folder kept for Consiglieri (for example `Alfred`), so `alfred chrome` can open it."""
         return self.get("ALFRED_CHROME_PROFILE")
 
     @property
@@ -208,7 +208,7 @@ class Config:
         return self.get_bool("ALFRED_PROGRESS", True)
 
     def _bot_value(self, name: str) -> str:
-        """A setting only a created bot has. It comes from the bot's own settings, never from Alfred's .env."""
+        """A setting only a created bot has. It comes from the bot's own settings, never from Consiglieri's .env."""
         if not self.bot_id or self.overrides is None:
             return ""
         return str(self.overrides().get(name) or "").strip()
@@ -240,7 +240,7 @@ class Config:
 
     @property
     def bots_state_dir(self) -> Path:
-        """Settings, sessions and tokens of the bots Alfred created, one folder each. Never committed."""
+        """Settings, sessions and tokens of the bots Consiglieri created, one folder each. Never committed."""
         return self.state_dir / "bots"
 
     @property
@@ -248,7 +248,7 @@ class Config:
         """Where the bots' own directories live: next to the home, never inside it.
 
         Claude Code loads every CLAUDE.md from its working directory up to the root, so a bot running
-        inside the home would also load Alfred's manual and Alfred's memory index.
+        inside the home would also load the main agent's manual and memory index.
         """
         value = self.get("ALFRED_BOTS_HOME")
         if value:
@@ -313,7 +313,7 @@ class Config:
     # -- access control -----------------------------------------------------
 
     def allowed_users(self) -> Set[str]:
-        """Lower-cased usernames and numeric user ids allowed to talk to Alfred."""
+        """Lower-cased usernames and numeric user ids allowed to talk to Consiglieri."""
         allowed = _legacy_whitelist(self._file_lines())
         for entry in self.get("ALFRED_ALLOWED_USERS").replace(";", ",").split(","):
             entry = entry.strip().lstrip("@").lower()

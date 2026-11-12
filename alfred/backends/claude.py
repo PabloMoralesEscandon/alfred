@@ -14,7 +14,7 @@ from .. import extensions
 from .base import Backend, ProgressCallback, RunResult, run_json_lines, shorten
 from .live import LiveEvents, LiveSession
 
-# Set by a parent Claude Code session. Alfred's child must not think it is nested in one.
+# Set by a parent Claude Code session. Consiglieri's child must not think it is nested in one.
 INHERITED_SESSION_VARS = (
     "CLAUDECODE",
     "CLAUDE_CODE_ENTRYPOINT",

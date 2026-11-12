@@ -1,16 +1,16 @@
-"""The shared memory: general facts every agent on this machine reads, Alfred and every bot.
+"""The shared memory: general facts every agent on this machine reads, the main agent and every bot.
 
 It lives in `config.shared_memory_dir` (`~/.alfred-shared/memory` by default), with the same shape as an
 agent's own memory: `MEMORY.md`, one line per topic, and one Markdown file per topic at `<folder>/<name>.md`.
-That folder is outside Alfred's home and outside the bots' directories on purpose: the blacklist denies
+That folder is outside Consiglieri's home and outside the bots' directories on purpose: the blacklist denies
 both to every bot, and a deny rule wins over any allow rule in Claude Code.
 
 Claude Code does not load a CLAUDE.md import from outside the project in a non-interactive session (it
 would ask for approval, and nobody is there), so the index is not imported from where it lives. Before
-every conversation Alfred copies it into the agent's own directory as `SHARED_MEMORY.md`, with a header
+every conversation Consiglieri copies it into the agent's own directory as `SHARED_MEMORY.md`, with a header
 saying what it is, and the agent's manual imports that copy. The topic files are read where they live.
 
-Who writes it: the user, from the control panel (`/shared`), and Alfred's main agent. A bot only with the
+Who writes it: the user, from the control panel (`/shared`), and Consiglieri's main agent. A bot only with the
 `shared` permission, off in every preset. Everything here is context for the agents, never instructions.
 """
 

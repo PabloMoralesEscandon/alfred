@@ -1,4 +1,4 @@
-"""Alfred's home directory: the agent's working directory, memory, and self-written skills.
+"""Consiglieri's home directory: the agent's working directory, memory, and self-written skills.
 
 The home is deliberately outside this repository. The code here is the
 runtime; the home is the agent's own state, versioned in its own git repo so
@@ -195,7 +195,7 @@ def _write_launcher(config: Config) -> None:
     launcher.parent.mkdir(parents=True, exist_ok=True)
     script = (
         "#!/bin/sh\n"
-        "# Managed by Alfred. Rewritten on every start.\n"
+        "# Managed by Consiglieri. Rewritten on every start.\n"
         "export ALFRED_HOME=%s\n"
         'PYTHONPATH=%s${PYTHONPATH:+:$PYTHONPATH} exec %s -m alfred "$@"\n'
         % (shlex.quote(str(config.home)), shlex.quote(str(REPO_ROOT)), shlex.quote(sys.executable))
