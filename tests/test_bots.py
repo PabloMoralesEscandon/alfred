@@ -193,11 +193,63 @@ class SettingTests(BotsTestCase):
             bots.parse_options(self.config, ["+everything"])
         self.assertEqual(bots.split_options("-5 degrees outside"), ([], "-5 degrees outside"))
 
-    def test_usernames_and_links(self) -> None:
-        self.assertEqual(bots.suggest_username("Research"), "research_bot")
-        self.assertEqual(bots.suggest_username("Daily news bot"), "daily_news_bot")
-        self.assertEqual(bots.suggest_username("42"), "a_42_bot")
-        self.assertLessEqual(len(bots.suggest_username("x" * 80)), 32)
+    def test_usernames_extend_the_panels(self) -> None:
+        suggest = bots.suggest_username
+        self.assertEqual(suggest("Gestor calendarios", "manolito_bot"), "manolito_gestor_calendarios_bot")
+        self.assertEqual(suggest("Research", "AlfredPanelBot"), "alfredpanel_research_bot")
+        self.assertEqual(suggest("Research", "@Manolito_Bot"), "manolito_research_bot")
+        self.assertEqual(bots.username_prefix("manolitobot"), "manolito")
+        # Without a panel username (the CLI before it knows it): just the slug.
+        self.assertEqual(suggest("Research"), "research_bot")
+        self.assertEqual(suggest("42"), "a_42_bot")
+
+    def test_usernames_from_odd_names(self) -> None:
+        suggest = bots.suggest_username
+        self.assertEqual(suggest("Ñandú Café", "manolito_bot"), "manolito_nandu_cafe_bot")  # accents
+        self.assertEqual(suggest("  My   NEWS  Bot ", "manolito_bot"), "manolito_my_news_bot")  # spaces, capitals, its own "bot"
+        self.assertEqual(suggest("📅 Agenda ✨", "manolito_bot"), "manolito_agenda_bot")  # emojis
+        self.assertEqual(suggest("📅", "manolito_bot", "Organiza mi agenda"), "manolito_organiza_mi_agenda_bot")  # from the task
+        self.assertEqual(suggest("📅", "manolito_bot"), "manolito_agent_bot")  # nothing usable at all
+        self.assertEqual(suggest("a--b__c", "manolito_bot"), "manolito_a_b_c_bot")
+        for name in ("Ñandú Café", "📅", "a" * 50, "x y z " * 10, "日本語のボット"):
+            username = suggest(name, "manolito_bot")
+            self.assertRegex(username, r"^[a-z][a-z0-9_]{3,31}$", name)
+            self.assertNotIn("__", username)
+            self.assertTrue(username.endswith("_bot"))
+
+    def test_long_usernames_are_cut_in_the_slug_only(self) -> None:
+        suggest = bots.suggest_username
+        username = suggest("Gestor de Calendarios de la Oficina", "manolito_bot")
+        self.assertEqual(username, "manolito_gestor_de_calendari_bot")
+        self.assertEqual(len(username), 32)
+        self.assertTrue(username.startswith("manolito_"))
+        # A cut that lands on an underscore leaves none hanging.
+        self.assertEqual(suggest("abcdefghijklmnopqr st", "manolito_bot"), "manolito_abcdefghijklmnopqr_bot")
+        # A panel name so long that prefix_slug_bot can never fit: the slug goes, the prefix stays as far as it can.
+        self.assertLessEqual(len(suggest("Research", "b" * 29 + "bot")), 32)
+
+    def test_usernames_that_are_taken_get_a_number(self) -> None:
+        suggest = bots.suggest_username
+        self.assertEqual(suggest("Research", "manolito_bot", taken=["manolito_research_bot"]), "manolito_research_2_bot")
+        self.assertEqual(suggest("Research", "manolito_bot", taken=["Manolito_Research_Bot", "manolito_research_2_bot"]),
+                         "manolito_research_3_bot")
+        long_name = "Gestor de Calendarios de la Oficina"
+        first = suggest(long_name, "manolito_bot")
+        second = suggest(long_name, "manolito_bot", taken=[first])
+        self.assertEqual(second, "manolito_gestor_de_calenda_2_bot")
+        self.assertEqual(len(second), 32)
+        # The panel's own username is never suggested.
+        self.assertEqual(suggest("", "manolito_bot", "", taken=[]), "manolito_agent_bot")
+        self.assertEqual(suggest("Agent", "manolito_agent_bot"), "manolito_agent_agent_bot")
+
+    def test_known_usernames_include_bots_and_pending_requests(self) -> None:
+        self.add_bot(username="manolito_research_bot")
+        self.registry.add_pending(99, 99, "Chef", "manolito_chef_bot", {})
+        taken = self.registry.known_usernames()
+        self.assertEqual(sorted(taken), ["manolito_chef_bot", "manolito_research_bot"])
+        self.assertEqual(bots.suggest_username("Chef", "manolito_bot", taken=taken), "manolito_chef_2_bot")
+
+    def test_creation_links(self) -> None:
         self.assertEqual(
             bots.creation_link("@AlfredPanelBot", "research_bot", "Research Bot"),
             "https://t.me/newbot/AlfredPanelBot/research_bot?name=Research+Bot",

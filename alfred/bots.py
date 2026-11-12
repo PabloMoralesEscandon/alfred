@@ -34,6 +34,7 @@ import re
 import secrets
 import shutil
 import time
+import unicodedata
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -358,6 +359,10 @@ class BotRegistry:
         self._save_pending([item for item in self._pending() if item.username.lower() != username.lower()] + [pending])
         return pending
 
+    def known_usernames(self) -> List[str]:
+        """Usernames Alfred already uses or has asked for: its bots and its pending requests."""
+        return [record.username for record in self.list()] + [item.username for item in self._pending()]
+
     def take_pending(self, owner_id: int, username: str) -> Optional[Pending]:
         """The request a new bot answers: the same username, or else the owner's latest (names can be edited)."""
         items = self._pending()
@@ -679,16 +684,63 @@ def path_is_allowed(config: Config, record: BotRecord, path: Path) -> bool:
 # -- talking to Telegram as the manager ---------------------------------------
 
 
-def suggest_username(name: str) -> str:
-    """A bot username from a display name: letters, digits and underscores, 5 to 32 characters, ending in bot."""
-    slug = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_") or "agent"
-    if not slug[0].isalpha():
-        slug = "a_" + slug
-    slug = slug[:28].rstrip("_")
-    if slug.endswith("bot"):
-        slug = slug[: -len("bot")].rstrip("_") or "agent"
-    username = "%s_bot" % slug
-    return username if len(username) >= 5 else "%s_agent_bot" % slug
+USERNAME_MIN, USERNAME_MAX = 5, 32  # Telegram's limits for a bot username, which must end in "bot"
+
+
+def slugify(text: str) -> str:
+    """Lowercase ASCII words joined by single underscores: "Gestor de Calendarios 📅" -> "gestor_de_calendarios"."""
+    ascii_text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
+    return re.sub(r"[^a-z0-9]+", "_", ascii_text.lower()).strip("_")
+
+
+def username_prefix(manager_username: str) -> str:
+    """The panel's username without its bot suffix: manolito_bot -> manolito, AlfredPanelBot -> alfredpanel."""
+    base = manager_username.strip().lstrip("@").lower()
+    if base.endswith("bot"):
+        base = base[: -len("bot")]
+    return re.sub(r"_+", "_", base).strip("_")
+
+
+def _fit(prefix: str, slug: str, number: str) -> str:
+    """prefix_slug[_number]_bot within 32 characters, shortening only the slug, never leaving __ or a trailing _."""
+    fixed = [part for part in (prefix, number) if part]
+    room = USERNAME_MAX - len("_bot") - sum(len(part) + 1 for part in fixed)  # +1 for each part's underscore
+    slug = slug[:max(room, 0)].strip("_")
+    parts = [part for part in (prefix, slug, number) if part]
+    username = "_".join(parts) + "_bot"
+    if len(username) > USERNAME_MAX:  # a panel username so long that even prefix_bot does not fit
+        username = "_".join(part for part in (prefix[: USERNAME_MAX - len("_bot") - len(number) - 1].strip("_"), number) if part) + "_bot"
+    return re.sub(r"_+", "_", username)
+
+
+def suggest_username(name: str, manager_username: str = "", task: str = "", taken: Any = ()) -> str:
+    """A username for a new bot that extends the panel's: manolito_bot + "Gestor calendarios" ->
+    manolito_gestor_calendarios_bot.
+
+    The slug comes from the name, or from the task when the name has no usable letters, is shortened (never
+    the prefix) to keep within 32 characters, and gets a short number when the username is already one of
+    `taken` (Alfred's own bots, its pending requests, the panel). Telegram can still refuse a username
+    someone else holds; the user then edits it in Telegram's creation window.
+    """
+    prefix = username_prefix(manager_username)
+    slug = slugify(name) or slugify(task) or "agent"
+    if slug.endswith("_bot") or slug == "bot":
+        slug = slug[: -len("bot")].strip("_") or "agent"
+    if not prefix and not slug[0].isalpha():
+        slug = "a_" + slug  # a username starts with a letter
+    taken = {str(item).lower().lstrip("@") for item in taken}
+    if manager_username:
+        taken.add(manager_username.lower().lstrip("@"))
+    username = _fit(prefix, slug, "")
+    number = 2
+    while username.lower() in taken or len(username) < USERNAME_MIN:
+        if len(username) < USERNAME_MIN:
+            slug = (slug + "_agent").strip("_")
+            username = _fit(prefix, slug, "")
+            continue
+        username = _fit(prefix, slug, str(number))
+        number += 1
+    return username
 
 
 def creation_link(manager_username: str, username: str, name: str) -> str:

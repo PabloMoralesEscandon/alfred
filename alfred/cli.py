@@ -316,7 +316,6 @@ def cmd_bots_new(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
         raise CommandError("no owner: pass --owner <telegram user id>")
     task = " ".join(args.task).strip()
     settings = {"task": task} if task else {}
-    username = bots.suggest_username(args.name)
 
     try:
         from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
@@ -325,6 +324,9 @@ def cmd_bots_new(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
 
     async def ask() -> str:
         async with Bot(bot_token(config, 0)) as panel:
+            registry = bots.BotRegistry(config)
+            username = bots.suggest_username(args.name, panel.username, task, registry.known_usernames())
+            registry.add_pending(owner, owner, args.name, username, settings)
             link = bots.creation_link(panel.username, username, args.name)
             asked_by = " (%s asks for it)" % caller.handle if caller is not None else ""
             await panel.send_message(
@@ -335,7 +337,6 @@ def cmd_bots_new(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
             )
             return link
 
-    bots.BotRegistry(config).add_pending(owner, owner, args.name, username, settings)
     try:
         link = asyncio.run(ask())
     except Exception as exc:

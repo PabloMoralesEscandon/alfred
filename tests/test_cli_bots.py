@@ -152,8 +152,9 @@ class BotCliTests(unittest.TestCase):
         message = FakeTelegramBot.sent[-1]
         self.assertEqual((message["token"], message["chat_id"]), ("1:PANELPANELPANELPANELPANELPANELPANEL", 99))
         self.assertIn("@research_bot asks for it", message["text"])
-        self.assertEqual(asked["link"], "https://t.me/newbot/AlfredPanelBot/helper_bot?name=Helper")
-        pending = self.registry.take_pending(99, "helper_bot")
+        # The username extends the panel's: AlfredPanelBot -> alfredpanel_<slug>_bot.
+        self.assertEqual(asked["link"], "https://t.me/newbot/AlfredPanelBot/alfredpanel_helper_bot?name=Helper")
+        pending = self.registry.take_pending(99, "alfredpanel_helper_bot")
         self.assertEqual((pending.settings, pending.permissions), ({"task": "Fetch the data"}, {}))
 
     def test_skills_and_extensions_are_the_bots_own(self) -> None:
