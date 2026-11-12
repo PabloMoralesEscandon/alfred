@@ -782,7 +782,9 @@ class ControlPanel:
         updated = await self.pool.set_setting(record, setting, value)
         stored = updated.settings.get(setting.lower())
         await update.effective_message.reply_text(
-            "%s of %s: %s. It applies from its next message." % (setting.lower(), record.handle, stored or "default")
+            "%s of %s: %s. It applies from its next message.%s" % (
+                setting.lower(), record.handle, stored or "default",
+                menus._label_note(self.pool, updated) if setting.lower() == "task" else "")
         )
 
     async def _bot_perm(self, update: Update, record: BotRecord, rest: str) -> None:
@@ -1275,7 +1277,8 @@ class BotPool:
         """Replace a bot's personality, or with None put the base back. Its next message reopens its process
         with the same conversation, as with any change to its manual. Returns what it now is."""
         workspace = self.registry.workspace(record.bot_id)
-        written = soul.reset(self.config, workspace) if text is None else soul.write(workspace, text)
+        written = (soul.reset(self.config, workspace, record.settings.get("task", "")) if text is None
+                   else soul.write(workspace, text))
         log.info("personality of %s %s (%d characters)", record.handle, "reset" if text is None else "replaced", len(written))
         return written
 

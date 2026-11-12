@@ -1,8 +1,14 @@
-"""Each bot's personality: its own SOUL.md, and the base personality new bots start from.
+"""Each bot's SOUL.md (who it is, what it is for and how it talks), and the base new bots start from.
 
-A bot's personality lives in `SOUL.md` in its own directory, imported by its manual. It shapes tone and
-manner only: what a bot may do comes from its permissions, which the panel sets and Claude Code enforces
-outside the bot, and nothing written in SOUL.md can grant or lift any of them (the manual says so).
+A bot's SOUL.md lives in its own directory, imported by its manual. It holds its identity and its role
+(what it exists for, its scope, how it acts within it) as well as its tone: it says what the bot does.
+What a bot *may* do is another matter: its permissions, which the panel sets and Claude Code enforces
+outside the bot. Nothing written in SOUL.md can grant, widen or lift any of them (the manual says so).
+
+The role lives here and only here. The bot's `task` setting is a short label, shown in lists and on its
+Telegram profile, the starting point of a new bot's role and the default description for a draft. A bot
+whose SOUL.md has no `## Role` section (written before roles, or by hand without one) keeps its task as
+its job, exactly as before: nothing is migrated.
 
 The base personality is one file in the panel's state (`state/soul-base.md`), editable from the panel;
 until it is edited, it is the template shipped in `templates/SOUL.md`. A new bot starts with the base, or
@@ -15,6 +21,7 @@ bot itself only with the `soul` permission, off in every preset; never another b
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -24,7 +31,11 @@ from .extensions import SECRET_PATTERNS
 FILE_NAME = "SOUL.md"
 BASE_FILE = "soul-base.md"  # in the panel's state directory
 TEMPLATE = Path(__file__).resolve().parent / "templates" / "SOUL.md"
-LIMIT = 4000  # characters
+LIMIT = 6000  # characters: room for a role with its scope as well as the tone
+ROLE_SLOT = "{role}"  # in the base: replaced by the new bot's task label when it is created
+ROLE_HEADING = re.compile(r"^##\s+role\b", re.I | re.M)
+NO_ROLE_YET = ("Help the user with what they ask. No role has been set for you yet: suggest they describe it "
+               "from the control panel (My bots → Personality).")
 
 
 class SoulError(Exception):
@@ -33,6 +44,25 @@ class SoulError(Exception):
 
 def template() -> str:
     return TEMPLATE.read_text(encoding="utf-8")
+
+
+def has_role(text: Optional[str]) -> bool:
+    """Whether a SOUL.md says what the bot is for (a `## Role` section)."""
+    return bool(text) and bool(ROLE_HEADING.search(text or ""))
+
+
+def for_new_bot(config: Config, task: str = "") -> str:
+    """The base, made into one bot's SOUL.md: its `{role}` slot filled with the task label. A base without the
+    slot but with no Role section either gets one, so a new bot always knows what it is for."""
+    text = base(config)
+    role = (task or "").strip() or NO_ROLE_YET
+    if ROLE_SLOT in text:
+        return text.replace(ROLE_SLOT, role)
+    if not has_role(text) and task.strip():
+        lines = text.strip().splitlines()
+        head, rest = (lines[:1], lines[1:]) if lines and lines[0].startswith("# ") else ([], lines)
+        return "\n".join(head + ["", "## Role", role, ""] + rest).strip() + "\n"
+    return text
 
 
 def clean(text: str) -> str:
@@ -101,12 +131,12 @@ def read(workspace: Path) -> Optional[str]:
         return None
 
 
-def ensure(config: Config, workspace: Path) -> bool:
-    """Give a bot a SOUL.md from the base if it has none yet (a new bot, or one made before personalities).
-    Returns whether it wrote one. Never replaces one that exists."""
+def ensure(config: Config, workspace: Path, task: str = "") -> bool:
+    """Give a bot a SOUL.md from the base if it has none yet (a new bot, or one made before personalities),
+    with its task as its role. Returns whether it wrote one. Never replaces one that exists."""
     if path_in(workspace).exists():
         return False
-    _write(path_in(workspace), clean(base(config)))
+    _write(path_in(workspace), clean(for_new_bot(config, task)))
     return True
 
 
@@ -116,6 +146,6 @@ def write(workspace: Path, text: str) -> str:
     return cleaned
 
 
-def reset(config: Config, workspace: Path) -> str:
-    """Put the base personality back."""
-    return write(workspace, base(config))
+def reset(config: Config, workspace: Path, task: str = "") -> str:
+    """Put the base back, with the task as its role."""
+    return write(workspace, for_new_bot(config, task))

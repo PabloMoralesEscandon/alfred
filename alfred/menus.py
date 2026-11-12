@@ -128,6 +128,14 @@ def _duration(seconds: int) -> str:
     return "%ds" % seconds
 
 
+def _label_note(pool: Any, record: BotRecord) -> str:
+    """For a bot whose SOUL.md has a role: the task is only its label, and what it does is changed there."""
+    if pool is None or not soul.has_role(soul.read(pool.registry.workspace(record.bot_id))):
+        return ""
+    return (" Its role is in its personality (SOUL.md), so this changes only its label: to change what it does, "
+            "use Personality.")
+
+
 def _mark(on: bool) -> str:
     return "✅" if on else "⬜"
 
@@ -443,7 +451,8 @@ class Menus:
                 return self.go(session, "shared_topic")
             if what == "bot_task":
                 await self.pool.set_setting(self._record(session), "task", text)
-                session.notice = "Task changed. It applies from its next message."
+                record = self._record(session)
+                session.notice = "Task changed. It applies from its next message." + _label_note(self.pool, record)
                 return self.go(session, "bot")
             if what == "bot_model":
                 await self.pool.set_setting(self._record(session), "model", text)
@@ -674,7 +683,8 @@ class Menus:
         if task:
             rows[0].append(("Keep it ➡️", "next"))
         return Screen(
-            "%s\n\nSend what %s should do, as a message. It goes into its manual.%s"
+            "%s\n\nSend in a line what %s is for, as a message. It is its label in lists, and the starting point "
+            "of its role, which lives in its personality (next step).%s"
             % (STEP_TITLES["new_task"], session.name, current),
             rows + [self._nav()],
         )
@@ -911,7 +921,8 @@ class Menus:
         record = self._safe_record(session)
         if record is None:
             return self._screen_list(session)
-        return Screen("Send the new task for %s as a message.\nNow: %s" % (record.handle, record.settings.get("task") or "none"),
+        return Screen("Send the new task (its short label) for %s as a message.%s\nNow: %s"
+                      % (record.handle, _label_note(self.pool, record), record.settings.get("task") or "none"),
                       [[("⬅️ Back", "back")]])
 
     def _screen_bot_perms(self, session: Session) -> Screen:

@@ -61,7 +61,7 @@ OFF_WORDS = ("off", "no", "false", "0")
 
 # What `/bot set` accepts, in the order `/bot show` lists them.
 SETTINGS = (
-    ("task", "what the bot is for; goes into its manual"),
+    ("task", "a short label of what it is for, shown in lists; its full role lives in its SOUL.md"),
     ("model", "model alias or full name, for example sonnet; default: Consiglieri's"),
     ("effort", "low, medium, high, xhigh or max; default: Consiglieri's"),
     ("backend", "claude or codex; default: Consiglieri's"),
@@ -947,7 +947,7 @@ def render_manual(config: Config, record: BotRecord) -> str:
     return Template((TEMPLATES / "BOT.md").read_text(encoding="utf-8")).safe_substitute(
         name=record.name,
         username=record.handle,
-        task=record.settings.get("task") or "No task has been set yet. Help the user with what they ask, and suggest they set one from the Consiglieri control panel (/bot set).",
+        role_section=role_section(config, record),
         workdir_section=workdir_section,
         permissions=permission_summary(record),
         agents_section=agents_section(config, record),
@@ -958,6 +958,19 @@ def render_manual(config: Config, record: BotRecord) -> str:
         ),
         alfred_home=str(config.home),
     )
+
+
+def role_section(config: Config, record: BotRecord) -> str:
+    """Where the bot's job is written. In its SOUL.md when that has a Role section, the task being only its
+    label; otherwise (a SOUL.md from before roles, or one written without a role) the task, as it always was."""
+    task = (record.settings.get("task") or "").strip()
+    if soul.has_role(soul.read(config.workspace)):
+        label = ' In the control panel you are labelled "%s".' % " ".join(task.split())[:200] if task else ""
+        return ("## Your role\n\nYour role, its scope and how you act within it are in `SOUL.md` (see below).%s\n\n"
+                % label)
+    return "## Your task\n\n%s\n\n" % (task or "No task has been set yet. Help the user with what they ask, and "
+                                        "suggest they describe your role from the Consiglieri control panel "
+                                        "(My bots → Personality).")
 
 
 def agents_section(config: Config, record: BotRecord) -> str:
@@ -1004,7 +1017,8 @@ def prepare_workspace(config: Config) -> Path:
     for directory in (folder, config.memory_dir, config.inbox_dir, folder / "outbox", config.skills_dir, config.extensions_dir):
         directory.mkdir(parents=True, exist_ok=True)
     shared_memory.refresh_copy(config, folder, shared_memory.WRITER if record.allows("shared") else shared_memory.READER)
-    soul.ensure(config, folder)  # from the base, the first time (a bot made before personalities included)
+    # From the base, the first time (a bot made before personalities too), with its task as its role.
+    soul.ensure(config, folder, record.settings.get("task", ""))
     manual = render_manual(config, record)
     home._write_if_changed(folder / "CLAUDE.md", manual)
     # Codex reads AGENTS.md and does not follow @imports, so it is told to open the indexes itself.

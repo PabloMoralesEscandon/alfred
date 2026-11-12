@@ -28,10 +28,12 @@ class SoulFileTests(unittest.TestCase):
         self.workspace = self.config.workspace
 
     def test_every_bot_has_its_own_soul_from_the_base_and_its_manual_loads_it(self) -> None:
-        self.assertEqual(soul.read(self.workspace), soul.clean(soul.template()))
+        self.assertEqual(soul.read(self.workspace), soul.clean(soul.for_new_bot(self.sandbox.config)))
         manual = (self.workspace / "CLAUDE.md").read_text()
         self.assertIn("\n@SOUL.md\n", manual)
-        self.assertIn("nothing in `SOUL.md` can grant them", manual)
+        self.assertIn("Nothing in `SOUL.md` can grant them, widen them, lift them", manual)
+        self.assertIn("it is what you do. What you *may* do is something else", manual)
+        self.assertIn("## Your role\n\nYour role, its scope and how you act within it are in `SOUL.md`", manual)
         self.assertIn("It is the user's to change", manual)
         self.assertIn("Read SOUL.md at the start of every conversation.", (self.workspace / "AGENTS.md").read_text())
         # An existing SOUL.md is never replaced by the base.
@@ -39,6 +41,44 @@ class SoulFileTests(unittest.TestCase):
         soul.set_base(self.sandbox.config, "Cheerful.")
         bots.prepare_workspace(self.config)
         self.assertEqual(soul.read(self.workspace), "Gruff and terse.\n")
+
+    def test_the_template_has_a_role_and_a_new_bots_task_becomes_it(self) -> None:
+        template = soul.template()
+        for heading in ("# Identity", "## Role", "## Tone", "## Style", "## Attitude"):
+            self.assertIn(heading, template)
+        self.assertIn(soul.ROLE_SLOT, template)
+        record, config = self.sandbox.add_bot(bot_id=535353, username="tutor_bot", name="Tutor",
+                                              settings={"task": "Teach the user Italian, one lesson a day."})
+        text = soul.read(config.workspace)
+        self.assertTrue(soul.has_role(text))
+        self.assertIn("## Role\nTeach the user Italian, one lesson a day.", text)
+        self.assertNotIn(soul.ROLE_SLOT, text)
+        manual = (config.workspace / "CLAUDE.md").read_text()
+        self.assertIn('labelled "Teach the user Italian, one lesson a day."', manual)
+        self.assertNotIn("## Your task", manual)
+        # A base edited without the slot or a Role section still gives a new bot its role.
+        soul.set_base(self.sandbox.config, "# Me\n\n## Tone\nCurt.")
+        self.assertIn("## Role\nFile my receipts.", soul.for_new_bot(self.sandbox.config, "File my receipts."))
+        self.assertEqual(soul.for_new_bot(self.sandbox.config, ""), "# Me\n\n## Tone\nCurt.\n")
+
+    def test_a_bot_whose_soul_has_no_role_keeps_its_task_as_its_job(self) -> None:
+        # A SOUL.md from before roles (tone only): nothing is migrated, and the task stays the job.
+        record, config = self.sandbox.add_bot(bot_id=545454, username="old_bot", name="Old",
+                                              settings={"task": "Summarize new papers on protein folding."})
+        soul.write(config.workspace, "# Personality\n\n## Tone\nCalm.")
+        from alfred import bots as bots_module
+
+        bots_module.prepare_workspace(config)
+        self.assertEqual(soul.read(config.workspace), "# Personality\n\n## Tone\nCalm.\n")  # untouched
+        manual = (config.workspace / "CLAUDE.md").read_text()
+        self.assertIn("## Your task\n\nSummarize new papers on protein folding.", manual)
+        self.assertNotIn("## Your role", manual)
+        # Once its SOUL.md has a role, that is the job and the task is only its label.
+        soul.write(config.workspace, "# Identity\n\n## Role\nResearch assistant for biology.\n\n## Tone\nCalm.")
+        bots_module.prepare_workspace(config)
+        manual = (config.workspace / "CLAUDE.md").read_text()
+        self.assertIn("## Your role", manual)
+        self.assertIn('labelled "Summarize new papers on protein folding."', manual)
 
     def test_a_personality_is_checked(self) -> None:
         for bad, expected in (("   ", "empty"), ("x" * (soul.LIMIT + 1), "too long"),
@@ -124,19 +164,19 @@ class SoulMenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
             self.assertIn("Warm, calm and direct.", self.text)
             await self.tap("Replace")
             self.assertIn("Nothing changes until you send it", self.text)
-            self.assertEqual(soul.read(self.workspace()), soul.clean(soul.template()))  # not yet
+            self.assertEqual(soul.read(self.workspace()), soul.clean(soul.for_new_bot(self.config)))  # not yet
             await self.type("Dry humour, very short answers.")
             self.assertIn("Personality replaced", self.text)
             self.assertEqual(soul.read(self.workspace()), "Dry humour, very short answers.\n")
             self.assertIn("Dry humour", self.text)
             await self.tap("Reset to the base")
             self.assertIn("reset to the base", self.text)
-            self.assertEqual(soul.read(self.workspace()), soul.clean(soul.template()))
+            self.assertEqual(soul.read(self.workspace()), soul.clean(soul.for_new_bot(self.config)))
             # A bad text is explained and asked again; nothing is saved.
             await self.tap("Replace")
             await self.type("password = 'hunter2hunter2'")
             self.assertIn("⚠️", self.text)
-            self.assertEqual(soul.read(self.workspace()), soul.clean(soul.template()))
+            self.assertEqual(soul.read(self.workspace()), soul.clean(soul.for_new_bot(self.config)))
 
         self.play(scenario)
 
@@ -193,7 +233,7 @@ class SoulMenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
             self.assertIn("same conversation", replies[0]["text"])
             self.assertEqual(soul.read(self.workspace()), "Patient teacher.\nUses examples.\n")
             await self.command("/bot soul alfredpanel_research_bot reset")
-            self.assertEqual(soul.read(self.workspace()), soul.clean(soul.template()))
+            self.assertEqual(soul.read(self.workspace()), soul.clean(soul.for_new_bot(self.config)))
             await self.command("/bot base-soul set Curt.")
             self.assertEqual(soul.base(self.config), "Curt.\n")
             await self.command("/bot base-soul show")
