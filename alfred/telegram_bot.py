@@ -4,10 +4,13 @@ Receiving and replying are separate. A message is handed to the agent and the
 handler returns; the agent's results arrive later through the `Listener`
 methods, whenever a turn ends, including turns the agent started by itself.
 
-One process serves several bots. `BotPool` runs the main bot (TELEGRAM_BOT_TOKEN)
-and every bot Consiglieri created (see `alfred/bots.py`), each as its own
-python-telegram-bot `Application` with its own `TelegramBot` front end and its
-own `Agent`, all in one event loop with one scheduler. A bot created while the
+One process serves several bots. `BotPool` runs the control panel (the main bot,
+TELEGRAM_BOT_TOKEN), which has no agent and no Claude session, and every bot its
+users created (see `alfred/bots.py`), each as its own python-telegram-bot
+`Application` with its own `TelegramBot` front end and its own `Agent`, all in one
+event loop with one scheduler. The panel's Python code does all the managing:
+creating, configuring and destroying bots, the scheduler and its deliveries, the
+shared memory, the usage monitor and the audit log. A bot created while the
 process runs is started on the spot. Nothing is shared between bots except the
 scheduler's table, where every item names its bot.
 """
@@ -45,7 +48,7 @@ from .text import split_message
 
 log = logging.getLogger("alfred.telegram")
 
-# The commands of a bot with an agent (every bot Consiglieri created), in the order /help and the menu show them.
+# The commands of a bot (each one has an agent), in the order /help and the menu show them.
 # To add one: add a line here and a `_cmd_<name>` method on TelegramBot.
 COMMANDS = [
     ("help", "Show what this bot can do and the commands"),
@@ -58,7 +61,7 @@ COMMANDS = [
     ("schedule", "List pending reminders and tasks"),
     ("backend", "Show or switch the agent backend: claude or codex"),
 ]
-# The control panel's commands: the main bot has no agent, it creates and manages the others.
+# The control panel's commands: the main bot has no agent; it creates and manages the bots.
 PANEL_COMMANDS = [
     ("help", "What this control panel does"),
     ("bots", "List your bots"),
@@ -100,7 +103,7 @@ Settings: %s.
 Permissions: %s.
 Options for /bot new: +web +browser +shell +edit +mcp +contact +bots +usage +bypass, -schedule, -sandbox, and setting=value or permission=value (for example model=sonnet folders=~/notes).
 A new bot starts with the least: its own directory, the alfred command, reminders, nothing else.
-At every level, even full access, a bot can't read other agents' memory (other bots', Alfred's) or use their tools. Only cross-agent access lifts that, and only you can grant it here.
+At every level, even full access, a bot can't read the memory of your other bots or use their tools. Only cross-agent access lifts that, and only you can grant it here.
 <bot> is its @username, its name or its id.""" % (", ".join(presets.keys()), ", ".join(bots.SETTING_NAMES), ", ".join(bots.PERMISSION_NAMES))
 
 
@@ -112,7 +115,7 @@ class Progress:
         self.chat = Chat(chat_id)
         self.show_tools = show_tools
         self._message: Optional[Message] = None
-        self._last_edit = 0.0
+        self._last_edit = float("-inf")  # monotonic() can be near 0 right after start
         self._typing: Optional["asyncio.Future[None]"] = None
 
     async def _keep_typing(self) -> None:
@@ -170,35 +173,32 @@ def command_text(message: Any) -> str:
 
 
 class TelegramBot(Listener):
-    """One bot's front end. `record` is set for a bot Consiglieri created; None is the main bot."""
+    """One bot's front end: its chats, its commands and its agent. Every one belongs to a registered bot;
+    the control panel is `ControlPanel`, which has no agent."""
 
     def __init__(
         self,
         config: Config,
         agent: Optional[Agent] = None,
         *,
-        record: Optional[BotRecord] = None,
+        record: BotRecord,
         pool: Optional["BotPool"] = None,
     ) -> None:
+        if record is None or not config.bot_id:
+            raise ValueError("a TelegramBot is one of the bots; the control panel is ControlPanel")
         self.config = config
         self.record = record
         self.pool = pool
         self.agent = agent or Agent(config)
         self.agent.listener = self
-        if record is not None:
-            self.agent.bot_username = record.username
+        self.agent.bot_username = record.username
         self.store = SchedulerStore(config.db_path)
         self.bot: Any = None  # set when the application starts, or by the first update
         self._progress: Dict[int, Progress] = {}
-        self._scheduler: Optional["asyncio.Future[None]"] = None
 
     @property
     def bot_id(self) -> int:
         return self.config.bot_id
-
-    @property
-    def is_main(self) -> bool:
-        return self.record is None
 
     @property
     def commands(self) -> List[Tuple[str, str]]:
@@ -206,17 +206,17 @@ class TelegramBot(Listener):
 
     @property
     def title(self) -> str:
-        return "Alfred" if self.record is None else self.record.handle
+        return self.record.handle
 
     # -- wiring -------------------------------------------------------------
 
     def build(self, token: Optional[str] = None) -> Application:
+        if not token:
+            raise ValueError("a bot connects with its own token, never the panel's")
         application = (
             ApplicationBuilder()
-            .token(token or self.config.telegram_token)
+            .token(token)
             .concurrent_updates(True)  # so /stop is handled while a turn is running
-            .post_init(self._post_init)
-            .post_shutdown(self._post_shutdown)
             .build()
         )
         for name in ["start"] + [name for name, _ in self.commands]:
@@ -233,18 +233,6 @@ class TelegramBot(Listener):
             await application.bot.set_my_commands([BotCommand(name, description) for name, description in self.commands])
         except Exception as exc:  # the menu is a convenience; a bot without one still works
             log.warning("could not set the command menu of %s: %s", self.title, exc)
-
-    async def _post_init(self, application: Application) -> None:
-        """Used when one bot runs alone with `run_polling` (the pool calls `started` instead)."""
-        await self.started(application)
-        # Polled often because `alfred event` relies on it to wake the agent promptly.
-        self._scheduler = asyncio.ensure_future(run_scheduler(self.store, self._deliver, poll_seconds=2.0))
-        log.info("Consiglieri is up. home=%s backend=%s", self.config.home, self.config.default_backend)
-
-    async def _post_shutdown(self, application: Application) -> None:
-        if self._scheduler is not None:
-            self._scheduler.cancel()
-        await self.agent.shutdown()
 
     async def _on_error(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         log.error("update failed in %s", self.title, exc_info=context.error)
@@ -376,20 +364,17 @@ class TelegramBot(Listener):
             # The id is what the owner needs to put in ALFRED_ALLOWED_USERS.
             await update.effective_message.reply_text("This is a private bot. Your Telegram user id is %s." % user.id)
             return
-        if self.record is not None and self.pool is not None:
+        if self.pool is not None:
             self.pool.link_chat(self.record.bot_id, update.effective_chat.id)
         await self._cmd_help(update, context)
 
     async def _cmd_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not self._authorized(update):
             return
-        if self.record is None:
-            lines = ["I'm Alfred. Just write to me in plain language. You can also send photos, files and voice notes."]
-        else:
-            task = self.record.settings.get("task")
-            lines = ["I'm %s, a Consiglieri bot made for one job." % self.record.name]
-            lines.append("My task: %s" % task if task else "I have no task yet; give me one from the Consiglieri control panel (/bot set).")
-            lines.append("Write to me in plain language. My memory and files are my own.")
+        task = self.record.settings.get("task")
+        lines = ["I'm %s, a Consiglieri bot made for one job." % self.record.name]
+        lines.append("My task: %s" % task if task else "I have no task yet; give me one from the Consiglieri control panel (/bot set).")
+        lines.append("Write to me in plain language. My memory and files are my own.")
         lines += ["", "Commands:"]
         lines += ["/%s - %s" % command for command in self.commands]
         lines += ["", "Any other /name is passed to me as a request, so /disk-report asks for that skill."]
@@ -481,11 +466,9 @@ class TelegramBot(Listener):
         chat = chat_of(update)
         backend = self.agent.backend_name(chat)
         pid = self.agent.live_pid(chat)
-        lines = []
-        if self.record is not None:
-            lines.append("Bot: %s (%s)" % (self.record.name, self.record.handle))
-            workdir = self.config.workdir
-            lines.append("Works in: %s" % (workdir or "its own directory"))
+        workdir = self.config.workdir
+        lines = ["Bot: %s (%s)" % (self.record.name, self.record.handle),
+                 "Works in: %s" % (workdir or "its own directory")]
         lines += [
             "Backend: %s" % backend,
             "Model: %s" % self.agent.model(chat),
@@ -551,12 +534,14 @@ class ControlPanel:
     _send = staticmethod(TelegramBot._send)
 
     async def _deliver(self, item: Item) -> None:
-        """An item scheduled for the main bot, from before it became a panel. Messages still arrive."""
+        """An item scheduled for the main bot from before it became a panel (bot 0; nothing new is scheduled
+        there). A reminder message is still posted; a task or an event is announced, never run, because the
+        panel has no agent. Nothing is deleted: see docs/PANEL_ONLY.md."""
         chat = Chat(item["chat_id"], item.get("thread_id"))
         if self.bot is None:
             raise RuntimeError("the control panel is not connected")
         if item["kind"] in (KIND_TASK, KIND_EVENT):
-            await self._send(self.bot, chat, "⏰ This was scheduled for the old main agent, which no longer runs here, "
+            await self._send(self.bot, chat, "⏰ This task was scheduled for the old main agent. There is no main agent any more, "
                                              "so I can't carry it out. Give it to one of your bots: %s" % item["message"])
         else:
             await self._send(self.bot, chat, "⏰ %s" % item["message"])
@@ -602,7 +587,7 @@ class ControlPanel:
         await update.effective_message.reply_text(await usage.fetch(self.config, dict(os.environ)))
 
     async def _cmd_shared(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """The shared memory, written by you here (and by Consiglieri's main agent), read by every agent."""
+        """The shared memory, written by you here (and by a bot only with the `shared` permission), read by every bot."""
         if not self._authorized(update):
             return
         await self._send(context.bot, chat_of(update), shared_memory.command(self.config, command_text(update.effective_message)))
@@ -1331,6 +1316,6 @@ def run(config: Config) -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     # httpx logs every request URL at INFO, and a Bot API URL contains the bot's token.
     logging.getLogger("httpx").setLevel(logging.WARNING)
-    home.bootstrap(config)
+    home.prepare(config)
     log.info("browser: %s", orca.summary(config))
     asyncio.run(serve(config))

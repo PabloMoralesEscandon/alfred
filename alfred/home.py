@@ -1,15 +1,20 @@
-"""Consiglieri's home directory: the agent's working directory, memory, and self-written skills.
+"""Consiglieri's home, the control panel's state directory, and what every bot's directory shares with it.
 
-The home is deliberately outside this repository. The code here is the
-runtime; the home is the agent's own state, versioned in its own git repo so
-anything it teaches itself can be inspected and rolled back.
+The home is deliberately outside this repository and runs no agent: it holds the panel's state (the bots'
+registry and tokens, the scheduler, the audit log, the usage history, the base personality) under
+`state/`, and `bin/alfred`, the launcher every bot finds on its PATH. Each bot has its own directory
+next to it (see bots.py); the skill and memory helpers here work on whichever directory a bot's
+configuration names.
+
+Homes from before the panel (when the main bot ran an agent here) still hold that agent's CLAUDE.md,
+SOUL.md, memory/ and extensions/. Nothing reads or rewrites them any more, and every bot is denied the
+whole home; docs/PANEL_ONLY.md says what to do with them.
 """
 
 from __future__ import annotations
 
 import hashlib
 import shlex
-import shutil
 import stat
 import subprocess
 import sys
@@ -20,14 +25,6 @@ from typing import Dict, List, Optional
 from .config import REPO_ROOT, Config
 
 TEMPLATES = Path(__file__).resolve().parent / "templates"
-MANAGED_FILES = ("CLAUDE.md", "AGENTS.md")
-LEGACY_SKILL_NAME = "legacy-notes"
-INDEX_NAME = "MEMORY.md"
-CARRIED_OVER = "general"
-
-
-# Skills that earlier versions copied into the home. They now load from the base plugin.
-RETIRED_SEEDS = ("browser", "create-skill", "extensions", "orca-agents", "reminders", "web-logins")
 
 
 @dataclass
@@ -98,7 +95,7 @@ def skills_index(config: Config) -> str:
     lines = ["<skills>", "Read a skill's file before doing the kind of task it describes."]
     for skill in skills:
         try:
-            where = str(skill.path.relative_to(config.home))
+            where = str(skill.path.relative_to(config.workspace))
         except ValueError:
             where = str(skill.path)
         lines.append("- %s (%s): %s" % (skill.name, where, skill.description))
@@ -153,33 +150,6 @@ def memory_changes(before: Dict[str, str], after: Dict[str, str]) -> List[str]:
     return notes
 
 
-def _carry_over_memory(config: Config, facts: List[str], source: str) -> None:
-    """Put facts from an older single-file memory into the folder layout as one file plus its index line."""
-    description = "Facts carried over from %s. Split them into topic files when you next touch them." % source
-    target = config.memory_dir / ("%s.md" % CARRIED_OVER)
-    config.memory_dir.mkdir(parents=True, exist_ok=True)
-    target.write_text(
-        "---\nname: %s\ndescription: %s\n---\n\n%s\n" % (CARRIED_OVER, description, "\n".join(facts)),
-        encoding="utf-8",
-    )
-    index = config.memory_index.read_text(encoding="utf-8") if config.memory_index.exists() else "# Memory index\n\n"
-    config.memory_index.write_text(
-        index.rstrip("\n") + "\n\n- [%s](%s.md): %s\n" % (CARRIED_OVER, CARRIED_OVER, description), encoding="utf-8"
-    )
-
-
-def _migrate_single_file_memory(config: Config) -> bool:
-    """Homes created before the memory folder kept everything in one MEMORY.md at the top level."""
-    old = config.home / INDEX_NAME
-    if not old.is_file() or config.memory_index.exists():
-        return False
-    facts = [line.rstrip() for line in old.read_text(encoding="utf-8").splitlines() if line.strip() and not line.startswith("#")]
-    if facts:
-        _carry_over_memory(config, facts, "the earlier single-file memory")
-    old.unlink()
-    return bool(facts)
-
-
 def _write_if_changed(path: Path, content: str) -> None:
     try:
         if path.read_text(encoding="utf-8") == content:
@@ -190,7 +160,7 @@ def _write_if_changed(path: Path, content: str) -> None:
 
 
 def _write_launcher(config: Config) -> None:
-    """`bin/alfred` runs this checkout's CLI with the interpreter that started the bot."""
+    """`bin/alfred` runs this checkout's CLI with the interpreter that started the panel. Every bot has it on PATH."""
     launcher = config.home / "bin" / "alfred"
     launcher.parent.mkdir(parents=True, exist_ok=True)
     script = (
@@ -202,44 +172,6 @@ def _write_launcher(config: Config) -> None:
     )
     _write_if_changed(launcher, script)
     launcher.chmod(launcher.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-
-
-def _import_legacy(config: Config, legacy_dir: Path) -> List[str]:
-    """Carry over SOUL.md, SKILLS.md and remembered facts from the pre-refactor layout, once."""
-    imported: List[str] = []
-
-    soul = legacy_dir / "SOUL.md"
-    if soul.is_file() and not (config.home / "SOUL.md").exists():
-        shutil.copyfile(soul, config.home / "SOUL.md")
-        imported.append("SOUL.md")
-
-    skills = legacy_dir / "SKILLS.md"
-    target = config.skills_dir / LEGACY_SKILL_NAME
-    if skills.is_file() and not target.exists():
-        target.mkdir(parents=True)
-        body = skills.read_text(encoding="utf-8").strip()
-        (target / "SKILL.md").write_text(
-            "---\n"
-            "name: %s\n"
-            "description: Tool and workflow notes carried over from the old SKILLS.md. Check it when the user asks "
-            "for something you have no dedicated skill for, then split what you use into proper skills.\n"
-            "---\n\n%s\n" % (LEGACY_SKILL_NAME, body),
-            encoding="utf-8",
-        )
-        imported.append("SKILLS.md")
-
-    memory_files = sorted((legacy_dir / "memory" / "chats").glob("*/memory.md"))
-    if memory_files and not config.memory_index.exists() and not (config.home / INDEX_NAME).exists():
-        facts: List[str] = []
-        for memory_file in memory_files:
-            for line in memory_file.read_text(encoding="utf-8").splitlines():
-                if line.strip() and line.strip() not in facts:
-                    facts.append(line.strip())
-        if facts:
-            _carry_over_memory(config, facts, "the first version of Alfred")
-            imported.append("memory")
-
-    return imported
 
 
 def _git(home: Path, *args: str) -> subprocess.CompletedProcess:
@@ -254,65 +186,29 @@ def _git(home: Path, *args: str) -> subprocess.CompletedProcess:
 
 
 def autosave(config: Config, message: str) -> bool:
-    """Commit whatever changed in the agent's directory (the home, or a bot's own). True if a commit was made."""
+    """Commit whatever changed in a bot's own directory. True if a commit was made."""
     folder = config.workspace
-    if not config.autosave or not (folder / ".git").exists():
-        return False
+    if not config.bot_id or not config.autosave or not (folder / ".git").exists():
+        return False  # never the home: the panel's state is not versioned, and an old home's history stays as it is
     _git(folder, "add", "-A")
     if _git(folder, "diff", "--cached", "--quiet").returncode == 0:
         return False
     return _git(folder, "commit", "-q", "-m", message).returncode == 0
 
 
-def _retire_seed_copies(config: Config) -> None:
-    """Move old copies of the built-in skills out of `.claude/skills`, where they would shadow the base plugin.
+def prepare(config: Config) -> Path:
+    """Create or refresh the panel's state directory. Safe to run on every start.
 
-    They go to `state/retired-skills/`, and their history stays in git.
+    It makes `state/`, rewrites the launcher and creates the shared memory if it is missing. It never
+    writes an agent's manual, personality or memory here: the panel has no agent.
     """
-    for name in RETIRED_SEEDS:
-        copy = config.skills_dir / name
-        if not copy.is_dir():
-            continue
-        target = config.state_dir / "retired-skills" / name
-        if target.exists():
-            shutil.rmtree(target)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(copy), str(target))
-
-
-def bootstrap(config: Config, legacy_dir: Optional[Path] = REPO_ROOT) -> List[str]:
-    """Create or refresh the home directory. Safe to run on every start.
-
-    Managed files (the operating manual and the launcher) are always
-    rewritten. Everything the user or the agent owns is only created when
-    missing. Returns the names of legacy items that were imported.
-    """
-    home = config.home
-    for directory in (home, config.state_dir, config.inbox_dir, config.skills_dir, config.extensions_dir):
+    for directory in (config.home, config.state_dir):
         directory.mkdir(parents=True, exist_ok=True)
-
-    imported = _import_legacy(config, legacy_dir) if legacy_dir else []
-    _migrate_single_file_memory(config)
-    config.memory_dir.mkdir(parents=True, exist_ok=True)
-    if not config.memory_index.exists():
-        shutil.copyfile(TEMPLATES / INDEX_NAME, config.memory_index)
-
+    _write_launcher(config)
     from . import shared_memory  # late: shared_memory imports extensions, which imports this module
 
-    shared_memory.refresh_copy(config, home, shared_memory.MAIN)  # also creates the shared memory, empty
-    for name in MANAGED_FILES:
-        _write_if_changed(home / name, (TEMPLATES / name).read_text(encoding="utf-8"))
-    _write_launcher(config)
-
-    for name, source in (("SOUL.md", "SOUL.md"), (".gitignore", "gitignore")):
-        if not (home / name).exists():
-            shutil.copyfile(TEMPLATES / source, home / name)
-
-    _retire_seed_copies(config)
-
-    if config.autosave and shutil.which("git"):
-        if not (home / ".git").exists():
-            _git(home, "init", "-q")
-        autosave(config, "alfred: bootstrap")
-
-    return imported
+    try:
+        shared_memory.ensure(config)
+    except OSError:
+        pass  # reported by shared_memory itself when a bot first needs it
+    return config.home

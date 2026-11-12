@@ -278,7 +278,7 @@ class PoolWiringTests(SkeletonTestCase):
         super().setUp()
         self.sandbox.environ["ALFRED_ALLOWED_USERS"] = str(OWNER)
         self.sandbox.environ["TELEGRAM_BOT_TOKEN"] = token_for(1, "P")
-        home.bootstrap(self.sandbox.config, legacy_dir=None)
+        home.prepare(self.sandbox.config)
 
     def register_bots(self) -> None:
         registry = bots.BotRegistry(self.sandbox.config)

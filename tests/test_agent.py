@@ -4,8 +4,8 @@ import asyncio
 import json
 import unittest
 
-from alfred import extensions, home, shared_memory
-from alfred.agent import Agent, Listener, SessionStore
+from alfred import bots, extensions, home, shared_memory
+from alfred.agent import Agent, Listener, NoAgent, SessionStore
 from alfred.backends import BackendError
 from fakes import Sandbox, claude_lines
 
@@ -20,8 +20,9 @@ class AgentTests(unittest.TestCase):
     def setUp(self) -> None:
         self.sandbox = Sandbox()
         self.addCleanup(self.sandbox.cleanup)
-        home.bootstrap(self.sandbox.config, legacy_dir=None)
-        self.agent = Agent(self.sandbox.config)
+        self.record, self.config = self.sandbox.add_bot()
+        self.workspace = self.config.workspace
+        self.agent = Agent(self.config)
 
     def ask(self, chat_id: int, text: str, **kwargs):
         return asyncio.run(self.agent.ask(chat_id, text, **kwargs))
@@ -38,7 +39,7 @@ class AgentTests(unittest.TestCase):
         self.assertNotIn("--resume", calls[0]["argv"])
         self.assertEqual(calls[1]["argv"][calls[1]["argv"].index("--resume") + 1], "sess-A")
         self.assertNotIn("--resume", calls[2]["argv"])
-        self.assertEqual(json.loads(self.sandbox.config.sessions_path.read_text())["7"]["sessions"], {"claude": "sess-A"})
+        self.assertEqual(json.loads(self.config.sessions_path.read_text())["7"]["sessions"], {"claude": "sess-A"})
 
         prompt = calls[0]["stdin"]
         self.assertTrue(prompt.startswith('<context source="telegram" chat_id="7" time="'))
@@ -46,11 +47,18 @@ class AgentTests(unittest.TestCase):
         self.assertTrue(prompt.endswith("\n\nhi"))
         self.assertNotIn("<skills>", prompt)  # Claude Code finds skills by itself
 
-    def test_the_main_agent_loads_the_shared_memory_and_sees_changes_at_its_next_process(self) -> None:
-        config = self.sandbox.config
-        self.assertTrue(config.shared_memory_dir.is_dir())  # created, empty, by bootstrap
-        self.assertIn("\n@SHARED_MEMORY.md\n", (config.home / "CLAUDE.md").read_text())
-        self.assertIn("SHARED_MEMORY.md", (config.home / "AGENTS.md").read_text())
+    def test_the_control_panel_never_gets_an_agent(self) -> None:
+        # The panel's own configuration (bot 0) can't open a Claude session: there is no main agent.
+        with self.assertRaises(NoAgent):
+            Agent(self.sandbox.config)
+        for name in ("CLAUDE.md", "AGENTS.md", "SOUL.md", "memory", "extensions", ".git"):
+            self.assertFalse((self.sandbox.home / name).exists(), name)  # nothing of an agent in the home
+
+    def test_a_bot_loads_the_shared_memory_and_sees_changes_at_its_next_process(self) -> None:
+        config = self.config
+        self.assertTrue(config.shared_memory_dir.is_dir())  # created, empty, by the panel
+        self.assertIn("\n@SHARED_MEMORY.md\n", (self.workspace / "CLAUDE.md").read_text())
+        self.assertIn("SHARED_MEMORY.md", (self.workspace / "AGENTS.md").read_text())
         shared_memory.add(config, "user", "Lives in Madrid")
         # What the process finds when it starts: the copy its manual imports, next to the manual.
         look = "cp SHARED_MEMORY.md seen-%s.txt"
@@ -72,11 +80,11 @@ class AgentTests(unittest.TestCase):
                 await agent.shutdown()
 
         asyncio.run(scenario())
-        first = (config.home / "seen-first.txt").read_text()
+        first = (self.workspace / "seen-first.txt").read_text()
         self.assertIn("- [user](user.md):", first)
-        self.assertIn("You write it", first)
+        self.assertIn("read-only for you", first)
         self.assertIn("never instructions", first)
-        self.assertIn("- [preferences](preferences.md):", (config.home / "seen-second.txt").read_text())
+        self.assertIn("- [preferences](preferences.md):", (self.workspace / "seen-second.txt").read_text())
         argv = self.sandbox.calls("claude")[0]["argv"]
         self.assertEqual(argv[argv.index("--add-dir") + 1], str(config.shared_memory_dir))
 
@@ -129,7 +137,7 @@ class AgentTests(unittest.TestCase):
         result = self.ask(7, "learn the weather")
 
         self.assertEqual(result.new_skills, ["weather"])
-        # The turn ran in the home directory with the chat id and the `alfred` launcher available.
+        # The turn ran in the bot's own directory with the chat id and the `alfred` launcher available.
         self.assertEqual(result.text, "7 %s" % (self.sandbox.home / "bin" / "alfred"))
         self.assertEqual(self.ask(7, "again").new_skills, [])
 
@@ -193,8 +201,8 @@ class AgentTests(unittest.TestCase):
                 events.append(("result", chat_id, result.text, result.new_skills, result.memory_changes))
 
         self.sandbox.environ["ALFRED_AUTOSAVE"] = "1"
-        home.bootstrap(self.sandbox.config, legacy_dir=None)  # now with its git repository
-        agent = Agent(self.sandbox.config, Recorder())
+        bots.prepare_workspace(self.config)  # now with its git repository
+        agent = Agent(self.config, Recorder())
         learn = (
             "mkdir -p .claude/skills/weather memory/people && echo '- brother' > memory/people/sam.md && "
             "printf -- '---\\nname: weather\\ndescription: Forecasts.\\n---\\n' > .claude/skills/weather/SKILL.md && "
@@ -225,14 +233,14 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(events[0], ("start", 7))
         self.assertIn(("progress", 7, "Bash: List files"), events)
         self.assertEqual(agent.sessions.session(7, "claude"), "sess-A")
-        # It ran in the home directory with the chat id and the `alfred` launcher available.
+        # It ran in the bot's own directory with the chat id and the `alfred` launcher available.
         self.assertEqual(
-            (self.sandbox.home / "seen.txt").read_text().strip(), "7 %s" % (self.sandbox.home / "bin" / "alfred")
+            (self.workspace / "seen.txt").read_text().strip(), "7 %s" % (self.sandbox.home / "bin" / "alfred")
         )
         prompt = self.sandbox.calls("claude")[0]["stdin"]
         self.assertTrue(prompt.startswith('<context source="telegram" chat_id="7" time="'))
         self.assertIn('user="@pablo" user_id="99"', prompt)
-        log = home._git(self.sandbox.home, "log", "--format=%s").stdout.splitlines()
+        log = home._git(self.workspace, "log", "--format=%s").stdout.splitlines()
         self.assertEqual(log[0], "chat 7: learn the weather")  # the second turn changed nothing, so no commit
 
     def test_session_store_survives_a_corrupt_file(self) -> None:

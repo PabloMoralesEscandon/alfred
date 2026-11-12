@@ -1,20 +1,20 @@
-"""Extensions: what Consiglieri adds to itself, kept apart from what ships with it.
+"""Extensions: what a bot adds to itself, kept apart from what ships with it.
 
 Three layers, each in its own place:
 
 - base: `alfred/plugin/`, a Claude Code plugin shipped with this code. Its
-  skills are `alfred:<skill>` and its `bin/` is on PATH. Consiglieri never edits it.
-- extensions: `~/.alfred/extensions/<name>/`, one Claude Code plugin per
-  extension, written by Consiglieri. Skills are `<name>:<skill>`, executables in
-  `bin/` are bare commands, and hooks or MCP servers load with the plugin.
-- disabled extensions: `~/.alfred/extensions-disabled/<name>/`, kept on disk
-  but not loaded.
+  skills are `alfred:<skill>` and its `bin/` is on PATH. No bot ever edits it.
+- extensions: `<bot directory>/extensions/<name>/`, one Claude Code plugin per
+  extension, written by that bot (`~/.alfred-bots/<id>/extensions/`). Skills are
+  `<name>:<skill>`, executables in `bin/` are bare commands, and hooks or MCP
+  servers are held back (see `held_back`).
+- disabled extensions: `<bot directory>/extensions-disabled/<name>/`, kept on
+  disk but not loaded.
 
 Every process gets the base plugin and each enabled extension with
 `--plugin-dir`. `fingerprint()` changes when an extension's shape changes, and
 the agent then reopens its process at the next idle moment so the change loads.
-See docs/EXTENSIONS.md for the protocol Consiglieri follows.
-"""
+See docs/EXTENSIONS.md for the protocol a bot follows."""
 
 from __future__ import annotations
 
@@ -185,10 +185,8 @@ def held_back(config: Config, extension: Extension) -> List[str]:
     Hooks, monitors and LSP servers run as the user, outside Claude Code's permission rules and its sandbox,
     and a bot writes its own extensions: loading them would let a bot get past every permission it has,
     the blacklist on other agents' memory and tools included. MCP servers load only with the bot's `mcp`
-    permission. Consiglieri's main agent (bot 0) loads everything, as before.
+    permission. Every agent is a bot, so this holds for all of them.
     """
-    if not config.bot_id:
-        return []
     path = extension.path
     manifest = _read_json(path / ".claude-plugin" / "plugin.json")
     experimental = manifest.get("experimental") if isinstance(manifest.get("experimental"), dict) else {}

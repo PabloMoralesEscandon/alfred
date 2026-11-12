@@ -23,8 +23,8 @@ class ExtensionTests(unittest.TestCase):
         self.sandbox = Sandbox()
         self.addCleanup(self.sandbox.cleanup)
         self.sandbox.environ["ALFRED_CLAUDE_BIN"] = str(self.sandbox.root / "no-claude")  # no plugin validator
-        self.config = self.sandbox.config
-        home.bootstrap(self.config, legacy_dir=None)
+        # Every agent is a bot: extensions live in a bot's own directory.
+        self.record, self.config = self.sandbox.add_bot()
 
     def make_weather(self, *, with_command: bool = True) -> Path:
         extensions.scaffold(self.config, "weather", "Weather lookups")
@@ -178,7 +178,8 @@ class ExtensionTests(unittest.TestCase):
         later = extensions.inventory(self.config)
         self.assertEqual(
             extensions.changes(after, later, self.config),
-            ["updated weather 0.1.0: skills forecast; commands weather-now; MCP server radar ⚠️ runs by itself"],
+            ["updated weather 0.1.0: skills forecast; commands weather-now; MCP server radar ⚠️ not loaded: a bot's "
+             "extension can't run by itself (MCP servers (needs the mcp permission))"],
         )
         extensions.set_enabled(self.config, "weather", False)
         off = extensions.inventory(self.config)
@@ -188,6 +189,7 @@ class ExtensionTests(unittest.TestCase):
 
     def test_the_cli(self) -> None:
         env = dict(os.environ, **self.sandbox.environ)
+        env["ALFRED_BOT_ID"] = str(self.record.bot_id)  # inside the bot's turn
 
         def alfred(*argv: str):
             completed = subprocess.run(
@@ -213,12 +215,12 @@ class ExtensionTests(unittest.TestCase):
 
 
 class ExtensionTurnTests(unittest.TestCase):
-    """An extension Consiglieri writes during a turn is reported, and loads into its next process."""
+    """An extension a bot writes during a turn is reported, and loads into its next process."""
 
     def setUp(self) -> None:
         self.sandbox = Sandbox()
         self.addCleanup(self.sandbox.cleanup)
-        home.bootstrap(self.sandbox.config, legacy_dir=None)
+        self.record, self.config = self.sandbox.add_bot()
 
     def test_an_extension_written_in_a_turn_is_announced_and_loaded_at_the_next_message(self) -> None:
         results = []
@@ -227,7 +229,7 @@ class ExtensionTurnTests(unittest.TestCase):
             async def result(self, chat_id: int, result) -> None:
                 results.append(result)
 
-        agent = Agent(self.sandbox.config, Recorder())
+        agent = Agent(self.config, Recorder())
         write = (
             "mkdir -p extensions/weather/.claude-plugin extensions/weather/skills/forecast extensions/weather/bin && "
             "echo '{\"name\": \"weather\", \"version\": \"0.1.0\"}' > extensions/weather/.claude-plugin/plugin.json && "
@@ -255,7 +257,7 @@ class ExtensionTurnTests(unittest.TestCase):
         self.assertEqual(results[0].new_skills, [])  # reported as part of the extension instead
         self.assertEqual(results[1].extension_changes, [])
         second = self.sandbox.calls("claude")[1]["argv"]
-        self.assertIn(str(self.sandbox.home / "extensions" / "weather"), second)
+        self.assertIn(str(self.config.workspace / "extensions" / "weather"), second)
         self.assertEqual(second[second.index("--resume") + 1], "sess-A")
 
 

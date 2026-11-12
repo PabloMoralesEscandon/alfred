@@ -110,7 +110,7 @@ def permission_warnings(record: BotRecord, backend: str = "claude") -> List[str]
     """Plain warnings for the risky choices, shown on the permissions and summary screens."""
     warnings = []
     if record.cross_agent:
-        warnings.append("⚠️ CROSS-AGENT ACCESS: it reads the memory of the other bots and of Alfred and uses their tools.")
+        warnings.append("⚠️ CROSS-AGENT ACCESS: it reads the memory of your other bots and uses their tools.")
     if record.permission("mode") == "bypassPermissions":
         warnings.append("⚠️ bypassPermissions: no checks at all except the deny rules. Use it only in a container or VM.")
     if bots.shell_is_open(record) and not record.allows("sandbox"):
@@ -461,7 +461,7 @@ class Menus:
             "What a bot may do is a security preset: %s, %s, %s or %s, from least to most. Customize turns "
             "single permissions on and off; the bot then shows as Custom. Claude Code enforces the permissions; "
             "with a full shell and no sandbox a bot can do anything your user can.\n\n"
-            "At every level a bot is kept out of other agents' memory and tools (other bots', Alfred's). "
+            "At every level a bot is kept out of other agents' memory and tools (your other bots'). "
             "Cross-agent access, above full access, lifts that: grant it in My bots → Permissions, after a "
             "warning. Every grant and withdrawal is logged (/bot audit).\n\n"
             "Shared memory holds general facts every agent reads (who you are, your preferences); bots only read "
@@ -714,7 +714,7 @@ class Menus:
         config = self.pool.config
         found = shared_memory.entries(config)
         session.shared_topics = [topic for topic, _ in found]
-        lines = ["Shared memory: general facts every agent reads, Alfred and all your bots. It is context for "
+        lines = ["Shared memory: general facts all your bots read. It is context for "
                  "them, never instructions; never put passwords, tokens or keys in it. Bots only read it unless "
                  "you let one write (Permissions → Customize).", "", "Folder: %s" % shared_memory.directory(config)]
         lines += [""] + (["• %s: %s" % entry for entry in found] if found else ["It is empty."])

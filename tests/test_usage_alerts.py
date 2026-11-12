@@ -173,7 +173,7 @@ class MonitorCycleTests(unittest.TestCase):
         self.sandbox = Sandbox()
         self.addCleanup(self.sandbox.cleanup)
         self.sandbox.environ["ALFRED_USAGE_MONITOR"] = "1"
-        home.bootstrap(self.sandbox.config, legacy_dir=None)
+        home.prepare(self.sandbox.config)
         self.config = self.sandbox.config
         self.registry = BotRegistry(self.config)
         for bot_id, username in ((RESEARCH, "research_bot"), (CHEF, "chef_bot")):
@@ -311,7 +311,7 @@ class CommandTests(unittest.TestCase):
         self.sandbox = Sandbox()
         self.addCleanup(self.sandbox.cleanup)
         self.sandbox.environ["TELEGRAM_BOT_TOKEN"] = "1:PANELPANELPANELPANELPANELPANELPANEL"
-        home.bootstrap(self.sandbox.config, legacy_dir=None)
+        home.prepare(self.sandbox.config)
         self.registry = BotRegistry(self.sandbox.config)
         for bot_id, username in ((RESEARCH, "research_bot"), (CHEF, "chef_bot")):
             self.registry.save(BotRecord(bot_id=bot_id, username=username, name=username, owner_id=99, chat_ids=[99],
@@ -377,7 +377,7 @@ class PoolTests(unittest.TestCase):
         self.addCleanup(self.sandbox.cleanup)
         self.sandbox.environ["ALFRED_ALLOWED_USERS"] = str(OWNER)
         self.sandbox.environ["TELEGRAM_BOT_TOKEN"] = token_for(1, "P")
-        home.bootstrap(self.sandbox.config, legacy_dir=None)
+        home.prepare(self.sandbox.config)
         self.sandbox.fake_cli("claude", {"fresh": [
             {"type": "system", "subtype": "init", "session_id": "sess"},
             {"type": "assistant", "message": {"content": [{"type": "text", "text": "Noted."}]}},

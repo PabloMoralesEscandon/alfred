@@ -91,13 +91,13 @@ class TelegramBotTests(unittest.TestCase):
         self.addCleanup(self.sandbox.cleanup)
         self.sandbox.environ["ALFRED_ALLOWED_USERS"] = "pablo"
         self.sandbox.environ["TELEGRAM_BOT_TOKEN"] = "123:abc"
-        home.bootstrap(self.sandbox.config, legacy_dir=None)
+        self.record, self.config = self.sandbox.add_bot()
         self.bot = FakeBot()
         self.apps: List[Any] = []
         self.app = self.new_app()
 
     def new_app(self) -> Any:
-        app = TelegramBot(self.sandbox.config)
+        app = TelegramBot(self.config, record=self.record)
         app.bot = self.bot
         self.apps.append(app)
         return app
@@ -123,7 +123,7 @@ class TelegramBotTests(unittest.TestCase):
 
     def test_application_builds_with_all_handlers(self) -> None:
         async def build() -> int:
-            return len(self.app.build().handlers[0])
+            return len(self.app.build("424242:%s" % ("A" * 35)).handlers[0])
 
         # /start, every entry in COMMANDS, and the catch-all message handler.
         self.assertEqual(asyncio.run(build()), len(COMMANDS) + 2)
@@ -139,7 +139,8 @@ class TelegramBotTests(unittest.TestCase):
         text = self.bot.sent[0]
         for name, description in COMMANDS:
             self.assertIn("/%s - %s" % (name, description), text)
-        self.assertIn("Just write to me", text)
+        self.assertIn("Write to me in plain language", text)
+        self.assertIn("I'm Helper", text)
 
     def test_usage_command_replies_with_the_short_report(self) -> None:
         report = (
@@ -176,7 +177,7 @@ class TelegramBotTests(unittest.TestCase):
         self.assertEqual(self.bot.sent, ["Good evening."])
         self.assertEqual(self.bot.status, ["⏳ Bash: List files", "<deleted>"])
         call = self.sandbox.calls("claude")[0]
-        self.assertTrue(call["stdin"].startswith('<context source="telegram" chat_id="7"'))
+        self.assertTrue(call["stdin"].startswith('<context source="telegram" bot="@helper_bot" chat_id="7"'))
         self.assertTrue(call["stdin"].endswith("hello"))
         self.assertTrue(call["live"])
 
@@ -265,7 +266,7 @@ class TelegramBotTests(unittest.TestCase):
 
         self.play(scenario)
 
-        saved = list((self.sandbox.config.inbox_dir / "7").iterdir())
+        saved = list((self.config.inbox_dir / "7").iterdir())
         self.assertEqual(len(saved), 1)
         self.assertTrue(saved[0].name.endswith("-my_report.pdf"), saved[0].name)
         self.assertEqual(saved[0].read_bytes(), b"%PDF")
@@ -373,7 +374,7 @@ class TelegramBotTests(unittest.TestCase):
 
     def test_commands(self) -> None:
         self.sandbox.fake_cli("claude", {"fresh": claude_lines("Hi.", "sess-A")})
-        self.app.store.add(chat_id=7, due=scheduler.utc_now() + timedelta(hours=1), text="Call Sam")
+        self.app.store.add(chat_id=7, due=scheduler.utc_now() + timedelta(hours=1), text="Call Sam", bot_id=self.record.bot_id)
 
         async def scenario() -> None:
             await self.say("hello")
@@ -498,13 +499,14 @@ class TelegramBotTests(unittest.TestCase):
     def test_scheduled_message_task_and_event_delivery(self) -> None:
         self.sandbox.fake_cli("claude", {"fresh": claude_lines("It will rain.", "sess-A")})
         past = scheduler.utc_now() - timedelta(seconds=5)
-        self.app.store.add(chat_id=7, due=past, text="Call Sam")
-        self.app.store.add(chat_id=7, due=past, text="Check the weather", kind=scheduler.KIND_TASK, username="pablo")
+        bot_id = self.record.bot_id
+        self.app.store.add(chat_id=7, due=past, text="Call Sam", bot_id=bot_id)
+        self.app.store.add(chat_id=7, due=past, text="Check the weather", kind=scheduler.KIND_TASK, username="pablo", bot_id=bot_id)
 
         async def scenario() -> None:
             await scheduler.run_scheduler(self.app.store, self.app._deliver, once=True)
             await self.app.agent.wait_idle(7)
-            self.app.store.add(chat_id=7, due=past, text="The build finished", kind=scheduler.KIND_EVENT)
+            self.app.store.add(chat_id=7, due=past, text="The build finished", kind=scheduler.KIND_EVENT, bot_id=bot_id)
             await scheduler.run_scheduler(self.app.store, self.app._deliver, once=True)
             await self.app.agent.wait_idle(7)
 
@@ -516,7 +518,7 @@ class TelegramBotTests(unittest.TestCase):
         self.assertTrue(task.endswith("[Scheduled task] Check the weather"))
         self.assertIn('source="event"', event)
         self.assertTrue(event.endswith("[Event] The build finished"))
-        self.assertEqual(self.app.store.list(7), [])
+        self.assertEqual(self.app.store.list(7, bot_id=bot_id), [])
 
 
 if __name__ == "__main__":

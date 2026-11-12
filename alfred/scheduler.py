@@ -111,7 +111,8 @@ class SchedulerStore:
             connection.execute("ALTER TABLE scheduled_messages ADD COLUMN kind TEXT NOT NULL DEFAULT 'message'")
         if "repeat_seconds" not in existing:
             connection.execute("ALTER TABLE scheduled_messages ADD COLUMN repeat_seconds INTEGER")
-        # Which bot the item belongs to (0 is the main bot) and the topic it goes to, if any.
+        # Which bot the item belongs to and the topic it goes to, if any. 0 is the control panel: only items
+        # from before the panel have it (see ControlPanel._deliver); nothing new is scheduled there.
         if "bot_id" not in existing:
             connection.execute("ALTER TABLE scheduled_messages ADD COLUMN bot_id INTEGER NOT NULL DEFAULT 0")
         if "thread_id" not in existing:
@@ -207,7 +208,7 @@ class SchedulerStore:
     def delete_for_bot(self, bot_id: int) -> int:
         """Remove every item of a bot, done or pending, when the bot is destroyed. Returns how many."""
         if not bot_id:
-            raise ValueError("the main bot's items are never deleted in bulk")
+            raise ValueError("the panel's old items are never deleted in bulk")
         with self._connect() as connection:
             return connection.execute("DELETE FROM scheduled_messages WHERE bot_id = ?", (bot_id,)).rowcount
 

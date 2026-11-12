@@ -12,97 +12,55 @@ class HomeTests(unittest.TestCase):
     def setUp(self) -> None:
         self.sandbox = Sandbox()
         self.addCleanup(self.sandbox.cleanup)
-        self.config = self.sandbox.config
+        self.config = self.sandbox.config  # the panel's: its home holds only state
 
-    def test_bootstrap_creates_manual_seed_skills_and_launcher(self) -> None:
-        home.bootstrap(self.config, legacy_dir=None)
+    def test_prepare_makes_only_the_panels_state_and_the_launcher(self) -> None:
+        home.prepare(self.config)
 
-        manual = (self.config.home / "CLAUDE.md").read_text(encoding="utf-8")
-        self.assertIn("@SOUL.md", manual)
-        self.assertIn("@memory/MEMORY.md", manual)
-        self.assertEqual(self.config.memory_index.read_text(encoding="utf-8"), "# Memory index\n\n")
-        self.assertFalse((self.config.home / "MEMORY.md").exists())
-        self.assertEqual(home.list_memories(self.config), [])
-        self.assertTrue((self.config.home / "AGENTS.md").exists())
-        self.assertEqual({skill.name for skill in home.list_skills(self.config)}, {"alfred:browser", "alfred:extensions", "alfred:orca-agents", "alfred:reminders", "alfred:web-logins"})
-        self.assertEqual({skill.source for skill in home.list_skills(self.config)}, {"base"})
-        self.assertEqual(list(self.config.skills_dir.iterdir()), [])  # nothing is copied into the home any more
-        self.assertTrue(self.config.extensions_dir.is_dir())
-        for skill in home.list_skills(self.config):
-            self.assertTrue(skill.description, skill.name)
-
+        # The panel runs no agent: no manual, personality, memory, skills or history of one in the home.
+        self.assertEqual(sorted(path.name for path in self.config.home.iterdir()), ["bin", "state"])
+        self.assertTrue(self.config.shared_memory_dir.is_dir())  # next to the home, for the bots
         launcher = self.config.home / "bin" / "alfred"
         self.assertTrue(os.access(launcher, os.X_OK))
-        output = subprocess.run([str(launcher), "skills"], stdout=subprocess.PIPE, text=True, check=True, env={"PATH": os.environ["PATH"]})
+
+        # The launcher is what every bot has on PATH: inside a bot's turn it works on that bot's directory.
+        record, bot_config = self.sandbox.add_bot()
+        env = {"PATH": os.environ["PATH"], "ALFRED_BOT_ID": str(record.bot_id)}
+        output = subprocess.run([str(launcher), "skills"], stdout=subprocess.PIPE, text=True, check=True, env=env)
         self.assertIn('"alfred:extensions"', output.stdout)
+        # Outside a bot's turn there is no agent whose skills these would be.
+        output = subprocess.run([str(launcher), "skills"], stdout=subprocess.PIPE, text=True, env={"PATH": os.environ["PATH"]})
+        self.assertIn('"ok": false', output.stdout)
+        self.assertIn("no main agent", output.stdout)
 
-    def test_bootstrap_refreshes_managed_files_but_keeps_owned_ones(self) -> None:
-        home.bootstrap(self.config, legacy_dir=None)
-        (self.config.home / "CLAUDE.md").write_text("tampered", encoding="utf-8")
-        (self.config.home / "SOUL.md").write_text("You are Jeeves.", encoding="utf-8")
-        self.config.memory_index.write_text("# Memory index\n\n- [people/sam](people/sam.md): Sam\n", encoding="utf-8")
-        (self.config.memory_dir / "people").mkdir()
-        (self.config.memory_dir / "people" / "sam.md").write_text("- brother\n", encoding="utf-8")
-        mine = self.config.skills_dir / "my-notes" / "SKILL.md"
-        mine.parent.mkdir(parents=True)
-        mine.write_text("---\nname: my-notes\ndescription: written by hand\n---\n", encoding="utf-8")
-        # A copy of a built-in skill left by an earlier version, which would shadow the base plugin.
-        old_copy = self.config.skills_dir / "reminders" / "SKILL.md"
-        old_copy.parent.mkdir(parents=True)
-        old_copy.write_text("---\nname: reminders\ndescription: old seed\n---\n", encoding="utf-8")
-
-        home.bootstrap(self.config, legacy_dir=None)
-
-        self.assertIn("operating manual", (self.config.home / "CLAUDE.md").read_text(encoding="utf-8"))
-        self.assertEqual((self.config.home / "SOUL.md").read_text(encoding="utf-8"), "You are Jeeves.")
-        self.assertIn("people/sam", self.config.memory_index.read_text(encoding="utf-8"))
-        self.assertEqual((self.config.memory_dir / "people" / "sam.md").read_text(encoding="utf-8"), "- brother\n")
-        self.assertIn("written by hand", mine.read_text(encoding="utf-8"))
-        self.assertFalse(old_copy.exists())
-        self.assertTrue((self.config.state_dir / "retired-skills" / "reminders" / "SKILL.md").is_file())
-
-    def test_legacy_layout_is_imported_once(self) -> None:
-        legacy = self.sandbox.root / "old"
-        (legacy / "memory" / "chats" / "1").mkdir(parents=True)
-        (legacy / "memory" / "chats" / "2").mkdir(parents=True)
-        (legacy / "SOUL.md").write_text("Be direct.", encoding="utf-8")
-        (legacy / "SKILLS.md").write_text("# ToDoList CLI\nUse `tdl`.", encoding="utf-8")
-        (legacy / "memory" / "chats" / "1" / "memory.md").write_text("- owns a cat\n", encoding="utf-8")
-        (legacy / "memory" / "chats" / "2" / "memory.md").write_text("- owns a cat\n- born in May\n", encoding="utf-8")
-
-        self.assertEqual(home.bootstrap(self.config, legacy_dir=legacy), ["SOUL.md", "SKILLS.md", "memory"])
-
-        self.assertEqual((self.config.home / "SOUL.md").read_text(encoding="utf-8"), "Be direct.")
-        carried = {memory.key: memory for memory in home.list_memories(self.config)}["general"]
-        self.assertTrue(carried.path.read_text(encoding="utf-8").endswith("\n\n- owns a cat\n- born in May\n"))
-        self.assertIn("first version of Alfred", carried.description)
-        self.assertIn("- [general](general.md): Facts carried over", self.config.memory_index.read_text(encoding="utf-8"))
-        legacy_skill = {skill.name: skill for skill in home.list_skills(self.config)}[home.LEGACY_SKILL_NAME]
-        self.assertIn("Use `tdl`.", legacy_skill.path.read_text(encoding="utf-8"))
-        self.assertEqual(home.bootstrap(self.config, legacy_dir=legacy), [])
-
-    def test_single_file_memory_from_an_earlier_home_is_moved_into_the_folder(self) -> None:
+    def test_an_old_home_from_before_the_panel_is_left_as_it_was(self) -> None:
+        # What the old main agent left: its manual, personality, memory, a seed skill and its history.
         self.config.home.mkdir(parents=True)
-        (self.config.home / "MEMORY.md").write_text("# Memory\n\n- Drinks mate, not coffee.\n", encoding="utf-8")
+        old = {
+            "CLAUDE.md": "# Alfred: operating manual",
+            "AGENTS.md": "old",
+            "SOUL.md": "Your name is Alfred.",
+            "MEMORY.md": "# Memory\n\n- Drinks mate.\n",
+            "memory/MEMORY.md": "- [people/sam](people/sam.md): Sam\n",
+            "memory/people/sam.md": "- brother\n",
+            ".claude/skills/reminders/SKILL.md": "---\nname: reminders\n---\n",
+            "extensions/notes/.claude-plugin/plugin.json": "{}",
+        }
+        for name, text in old.items():
+            path = self.config.home / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
 
-        home.bootstrap(self.config, legacy_dir=None)
+        home.prepare(self.config)
+        home.prepare(self.config)
 
-        self.assertFalse((self.config.home / "MEMORY.md").exists())
-        self.assertEqual([memory.key for memory in home.list_memories(self.config)], ["general"])
-        self.assertIn("- Drinks mate, not coffee.", (self.config.memory_dir / "general.md").read_text(encoding="utf-8"))
-        self.assertIn("(general.md)", self.config.memory_index.read_text(encoding="utf-8"))
-        home.bootstrap(self.config, legacy_dir=None)  # and it does not happen twice
-        self.assertEqual(self.config.memory_index.read_text(encoding="utf-8").count("(general.md)"), 1)
-
-    def test_empty_single_file_memory_is_just_removed(self) -> None:
-        self.config.home.mkdir(parents=True)
-        (self.config.home / "MEMORY.md").write_text("# Memory\n\n", encoding="utf-8")
-        home.bootstrap(self.config, legacy_dir=None)
-        self.assertFalse((self.config.home / "MEMORY.md").exists())
-        self.assertEqual(home.list_memories(self.config), [])
+        for name, text in old.items():
+            self.assertEqual((self.config.home / name).read_text(encoding="utf-8"), text, name)
+        self.assertFalse((self.config.state_dir / "retired-skills").exists())
+        self.assertFalse((self.config.home / ".git").exists())
 
     def test_memories_are_listed_by_folder_and_the_index_is_not_one_of_them(self) -> None:
-        home.bootstrap(self.config, legacy_dir=None)
+        _, self.config = self.sandbox.add_bot()
         (self.config.memory_dir / "people").mkdir()
         (self.config.memory_dir / "people" / "sam.md").write_text(
             "---\nname: sam\ndescription: Sam, the user's brother: birthday\nupdated: 2026-11-11\n---\n- Born 3 May\n",
@@ -117,7 +75,7 @@ class HomeTests(unittest.TestCase):
         self.assertEqual(memories[0].description, "")
 
     def test_memory_changes_between_snapshots(self) -> None:
-        home.bootstrap(self.config, legacy_dir=None)
+        _, self.config = self.sandbox.add_bot()
         folder = self.config.memory_dir / "people"
         folder.mkdir()
         (folder / "sam.md").write_text("v1", encoding="utf-8")
@@ -144,25 +102,29 @@ class HomeTests(unittest.TestCase):
         self.assertEqual(home.parse_frontmatter("no frontmatter"), {})
 
     def test_skill_without_frontmatter_falls_back_to_folder_name(self) -> None:
+        _, self.config = self.sandbox.add_bot()
         folder = self.config.skills_dir / "rough-notes"
         folder.mkdir(parents=True)
         (folder / "SKILL.md").write_text("just text", encoding="utf-8")
         local = [skill for skill in home.list_skills(self.config) if skill.source == "local"]
         self.assertEqual([skill.name for skill in local], ["rough-notes"])
 
-    def test_autosave_commits_changes_to_the_home_repo(self) -> None:
+    def test_autosave_commits_a_bots_directory_and_never_the_home(self) -> None:
         self.sandbox.environ["ALFRED_AUTOSAVE"] = "1"
-        home.bootstrap(self.config, legacy_dir=None)
-        self.assertFalse(home.autosave(self.config, "nothing changed"))
-        (self.config.memory_dir / "MEMORY.md").write_text("- new fact\n", encoding="utf-8")
-        (self.config.state_dir / "sessions.json").write_text("{}", encoding="utf-8")
-        self.assertTrue(home.autosave(self.config, "learned a fact"))
+        _, bot_config = self.sandbox.add_bot()
+        self.assertFalse(home.autosave(bot_config, "nothing changed"))
+        (bot_config.memory_dir / "MEMORY.md").write_text("- new fact\n", encoding="utf-8")
+        self.assertTrue(home.autosave(bot_config, "learned a fact"))
         log = subprocess.run(
-            ["git", "log", "--format=%s", "--name-only"], cwd=str(self.config.home), stdout=subprocess.PIPE, text=True
+            ["git", "log", "--format=%s", "--name-only"], cwd=str(bot_config.workspace), stdout=subprocess.PIPE, text=True
         ).stdout
         self.assertIn("learned a fact", log)
         self.assertIn("MEMORY.md", log)
-        self.assertNotIn("sessions.json", log)  # runtime state stays out of history
+
+        # The panel's own configuration never commits, even in an old home that still has a repository.
+        subprocess.run(["git", "init", "-q"], cwd=str(self.config.home), check=True)
+        (self.config.home / "notes.md").write_text("x", encoding="utf-8")
+        self.assertFalse(home.autosave(self.config, "should not happen"))
 
 
 if __name__ == "__main__":

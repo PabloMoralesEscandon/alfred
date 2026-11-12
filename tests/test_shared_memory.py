@@ -87,8 +87,8 @@ class SharedMemoryTests(unittest.TestCase):
         self.assertIn(str(self.config.shared_memory_dir), copy)
         writer = shared_memory.render_copy(self.config, shared_memory.WRITER)
         self.assertIn("Every other agent will read what you write", writer)
-        main = shared_memory.render_copy(self.config, shared_memory.MAIN)
-        self.assertIn("You write it", main)
+        self.assertFalse(hasattr(shared_memory, "MAIN"))  # no main agent writes it: only the user, and bots allowed to
+        self.assertNotIn("Alfred", copy)
         shared_memory.remove(self.config, "user")
         self.assertIn("Nothing has been shared yet", shared_memory.render_copy(self.config, shared_memory.READER))
 

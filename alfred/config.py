@@ -65,9 +65,9 @@ class Config:
     home: Path = DEFAULT_HOME
     env_files: List[Path] = field(default_factory=list)
     environ: Dict[str, str] = field(default_factory=lambda: dict(os.environ))
-    # Set for one of the bots Consiglieri created (see `alfred/bots.py`); 0 is the main bot.
+    # Set for one of the bots (see `alfred/bots.py`); 0 is the control panel, which runs no agent.
     bot_id: int = 0
-    # Where this bot's agent runs and keeps its memory and inbox. None means the home itself.
+    # Where this bot's agent runs and keeps its memory and inbox. None for the panel: then it is the home.
     workspace_dir: Optional[Path] = None
     # Per-bot settings, as the same names as the environment (ALFRED_CLAUDE_MODEL, ...). Read on every lookup,
     # so a change applies from the next message, just like an edit to .env. An unset one falls back to .env.
@@ -235,7 +235,8 @@ class Config:
 
     @property
     def workspace(self) -> Path:
-        """The agent's own directory: where it runs, remembers and receives files. The home for the main bot."""
+        """A bot's own directory: where its agent runs, remembers and receives files. The home for the panel,
+        which runs no agent there."""
         return self.workspace_dir or self.home
 
     @property
@@ -248,7 +249,7 @@ class Config:
         """Where the bots' own directories live: next to the home, never inside it.
 
         Claude Code loads every CLAUDE.md from its working directory up to the root, so a bot running
-        inside the home would also load the main agent's manual and memory index.
+        inside the home would also load whatever manual is there (an old home keeps the old main agent's).
         """
         value = self.get("ALFRED_BOTS_HOME")
         if value:
@@ -313,7 +314,7 @@ class Config:
     # -- access control -----------------------------------------------------
 
     def allowed_users(self) -> Set[str]:
-        """Lower-cased usernames and numeric user ids allowed to talk to Consiglieri."""
+        """Lower-cased usernames and numeric user ids allowed to use the panel; each creates and manages only their own bots."""
         allowed = _legacy_whitelist(self._file_lines())
         for entry in self.get("ALFRED_ALLOWED_USERS").replace(";", ",").split(","):
             entry = entry.strip().lstrip("@").lower()

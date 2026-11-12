@@ -7,8 +7,8 @@ description: How you add to yourself - new skills, commands, helper scripts, hoo
 
 You are built in two layers, and they never mix:
 
-- **Base**: Consiglieri's code and its built-in plugin (skills named `alfred:<skill>`, commands such as `alfred` and `alfred-wait-agent`). The user maintains it. You never edit it: not the Consiglieri repository, not `CLAUDE.md`, `AGENTS.md` or `bin/alfred` in your home. If the base is wrong or missing something, tell the user what you would change and why.
-- **Extensions**: what you add. Each one is a folder in `extensions/<name>/` of your home, and each folder is a Claude Code plugin. They are yours to create, change, turn off and remove, following this protocol.
+- **Base**: Consiglieri's code and its built-in plugin (skills named `alfred:<skill>`, commands such as `alfred` and `alfred-wait-agent`). The user maintains it. You never edit it: not the Consiglieri repository, not `CLAUDE.md` or `AGENTS.md` in your directory, not the `alfred` command. If the base is wrong or missing something, tell the user what you would change and why.
+- **Extensions**: what you add. Each one is a folder in `extensions/<name>/` of your own directory, and each folder is a Claude Code plugin. They are yours to create, change, turn off and remove, following this protocol.
 
 ## The shape of an extension
 
@@ -51,10 +51,10 @@ Ask the user first, saying exactly what it will do, and wait for a yes:
 - hooks, MCP servers, monitors, or anything else that runs by itself, on every tool call, on a timer, or in the background
 - anything that listens on the network, installs software outside the extension (`brew`, global packages), or changes system settings
 - anything that spends money, sends messages or email on the user's behalf, or posts publicly
-- anything that touches the user's files outside your home beyond what they asked for
+- anything that touches the user's files outside your own directory beyond what they asked for
 - a recurring `alfred schedule` job you set up for an extension
 
-When `alfred ext check` lists `needs_approval`, do not rely on those parts until the user has said yes in this conversation. If they say no, remove them. If you are one of the bots Consiglieri created, hooks, monitors and LSP servers in your extensions are never loaded, and MCP servers only with the MCP permission: `alfred ext check` lists them under `not_loaded_for_this_bot`. Build what you need as skills and commands instead.
+When `alfred ext check` lists `needs_approval`, do not rely on those parts until the user has said yes in this conversation. If they say no, remove them. Every agent is a bot, and a bot's hooks, monitors and LSP servers are never loaded, and MCP servers only with the MCP permission: `alfred ext check` lists them under `not_loaded_for_this_bot`. Build what you need as skills and commands instead.
 
 ## Secrets
 
@@ -71,7 +71,7 @@ Ask the user to add it themselves, giving them the exact command to run in their
 - An extension that fails in use: fix it before finishing the task, bump the version, run the check again.
 - One you cannot fix now: `alfred ext disable <name>` and tell the user. `alfred ext enable <name>` brings it back.
 - One that is no longer wanted: `alfred ext remove <name>` (recoverable from `state/removed-extensions/` and from git).
-- Your home is a git repository that saves after every turn, so any version can be recovered.
+- Your directory is a git repository that saves after every turn, so any version can be recovered.
 
 ## Rules
 

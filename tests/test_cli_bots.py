@@ -52,7 +52,7 @@ class BotCliTests(unittest.TestCase):
         self.sandbox = Sandbox()
         self.addCleanup(self.sandbox.cleanup)
         self.sandbox.environ["TELEGRAM_BOT_TOKEN"] = "1:PANELPANELPANELPANELPANELPANELPANEL"
-        home.bootstrap(self.sandbox.config, legacy_dir=None)
+        home.prepare(self.sandbox.config)
         self.registry = BotRegistry(self.sandbox.config)
         for bot_id, username in ((RESEARCH, "research_bot"), (CHEF, "chef_bot")):
             self.registry.save(BotRecord(bot_id=bot_id, username=username, name=username[:-4], owner_id=99, chat_ids=[99]))

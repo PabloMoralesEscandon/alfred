@@ -18,7 +18,7 @@ class OrcaTests(unittest.TestCase):
         self.sandbox = Sandbox()
         self.addCleanup(self.sandbox.cleanup)
         self.config = self.sandbox.config
-        home.bootstrap(self.config, legacy_dir=None)
+        home.prepare(self.config)
 
     def calls(self, state):
         return json.loads(state.read_text())["calls"]
@@ -99,12 +99,12 @@ class OrcaTests(unittest.TestCase):
         probe.chmod(0o755)
         self.sandbox.environ["ALFRED_CLAUDE_BIN"] = str(probe)
         with mock.patch.dict(os.environ, {"ORCA_WORKTREE_ID": "someone-elses", "ORCA_PAIRING_CODE": "pair"}):
-            result = asyncio.run(Agent(self.config).ask(1, "hi"))
+            result = asyncio.run(Agent(self.sandbox.add_bot()[1]).ask(1, "hi"))
         self.assertEqual(result.text, "[][pair]")
 
     def test_browser_setting_switches_claude_to_chrome(self) -> None:
         self.sandbox.fake_cli("claude", {"fresh": claude_lines("ok")})
-        agent = Agent(self.config)
+        agent = Agent(self.sandbox.add_bot()[1])
         asyncio.run(agent.ask(1, "hi"))
         self.assertNotIn("--chrome", self.sandbox.calls("claude")[0]["argv"])
         self.assertEqual(self.config.browser, "orca")
@@ -123,7 +123,7 @@ class OrcaTests(unittest.TestCase):
     def test_extra_claude_arguments_are_appended(self) -> None:
         self.sandbox.environ["ALFRED_CLAUDE_EXTRA_ARGS"] = '--chrome --effort "high"'
         self.sandbox.fake_cli("claude", {"fresh": claude_lines("ok")})
-        asyncio.run(Agent(self.config).ask(1, "hi"))
+        asyncio.run(Agent(self.sandbox.add_bot()[1]).ask(1, "hi"))
         self.assertEqual(self.sandbox.calls("claude")[0]["argv"][-3:], ["--chrome", "--effort", "high"])
 
 

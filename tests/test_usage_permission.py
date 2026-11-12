@@ -29,7 +29,7 @@ class PermissionTests(unittest.TestCase):
         self.sandbox = Sandbox()
         self.addCleanup(self.sandbox.cleanup)
         self.sandbox.environ["TELEGRAM_BOT_TOKEN"] = "1:PANELPANELPANELPANELPANELPANELPANEL"
-        home.bootstrap(self.sandbox.config, legacy_dir=None)
+        home.prepare(self.sandbox.config)
         self.registry = BotRegistry(self.sandbox.config)
 
     def bot(self, **permissions: str) -> BotRecord:
@@ -84,7 +84,7 @@ class UsageCommandTests(unittest.TestCase):
         self.sandbox = Sandbox()
         self.addCleanup(self.sandbox.cleanup)
         self.sandbox.environ["TELEGRAM_BOT_TOKEN"] = "1:PANELPANELPANELPANELPANELPANELPANEL"
-        home.bootstrap(self.sandbox.config, legacy_dir=None)
+        home.prepare(self.sandbox.config)
         self.sandbox.fake_cli("claude", {"fresh": [{"type": "result", "is_error": False, "result": REPORT}]})
         self.registry = BotRegistry(self.sandbox.config)
         self.registry.save(BotRecord(bot_id=BOT, username="research_bot", name="Research", owner_id=99, chat_ids=[99]))

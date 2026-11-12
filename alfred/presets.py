@@ -74,7 +74,7 @@ PRESET_INFO: Dict[str, PresetInfo] = {
     ),
     "cross": PresetInfo(
         "⚠️", "Cross-agent access",
-        can="on top of its preset, read the memory of the other bots and of Alfred and use their tools "
+        can="on top of its preset, read the memory of your other bots and use their tools "
             "(skills, extensions, scripts)",
         cannot="change other agents' memory or tools, or open their tokens, conversations and inboxes. Below "
                "this level, even with Full access, no bot can read other agents' memory or use their tools",

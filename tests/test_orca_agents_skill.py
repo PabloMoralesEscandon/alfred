@@ -43,7 +43,7 @@ class OrcaAgentsSkillTests(unittest.TestCase):
     def setUp(self) -> None:
         self.sandbox = Sandbox()
         self.addCleanup(self.sandbox.cleanup)
-        home.bootstrap(self.sandbox.config, legacy_dir=None)
+        home.prepare(self.sandbox.config)
         self.script = extensions.BASE_PLUGIN / "bin" / "alfred-wait-agent"
 
     def wait(self, replies: List[Any], *extra: str) -> Dict[str, Any]:

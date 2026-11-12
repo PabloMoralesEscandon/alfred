@@ -1,4 +1,7 @@
-"""The agent core: one conversation per chat, routed to a backend running in the home directory.
+"""The agent core: one conversation per chat of a bot, routed to a backend running in the bot's own directory.
+
+Only a bot runs an agent. The control panel (the main bot) has none: `Agent` refuses a configuration
+without a bot, so nothing can open a Claude session for the panel's own chat.
 
 Two ways in. `Agent.submit` hands a message over and returns at once; replies
 come back through a `Listener`. With Claude this feeds a process that stays
@@ -201,8 +204,14 @@ class _Live(NamedTuple):
     settings: Any  # what the process was started with; when the configuration differs, it is reopened
 
 
+class NoAgent(ValueError):
+    """Raised for the control panel's configuration: the panel runs no agent and no Claude session."""
+
+
 class Agent:
     def __init__(self, config: Config, listener: Optional[Listener] = None) -> None:
+        if not config.bot_id:
+            raise NoAgent("only a bot runs an agent; the control panel has none")
         self.config = config
         self.listener = listener or Listener()
         self.sessions = SessionStore(config.sessions_path)
@@ -210,7 +219,7 @@ class Agent:
         self._locks: Dict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._live: Dict[int, _Live] = {}
         self._turns: Dict[int, Set["asyncio.Future[None]"]] = defaultdict(set)
-        # The bot's @username, for the context line of a bot Consiglieri created. None for the main bot.
+        # The bot's @username, for the context line.
         self.bot_username: Optional[str] = None
 
     # -- backend selection --------------------------------------------------
@@ -385,15 +394,10 @@ class Agent:
     # -- one turn -----------------------------------------------------------
 
     def _prepare_workspace(self) -> None:
-        """A bot Consiglieri created gets its manual written from its current settings before a process opens."""
-        if self.config.bot_id:
-            from . import bots
+        """The bot's manual, personality and permissions are written from its current settings before a process opens."""
+        from . import bots
 
-            bots.prepare_workspace(self.config)
-        else:  # Consiglieri's main agent: only its copy of the shared memory's index changes between turns
-            from . import shared_memory
-
-            shared_memory.refresh_copy(self.config, self.config.home, shared_memory.MAIN)
+        bots.prepare_workspace(self.config)
 
     def _context(self, source: str, chat_id: int, user_id: Optional[int], username: Optional[str]) -> str:
         return context_line(source, chat_id, user_id, username, bot=self.bot_username)
@@ -411,11 +415,10 @@ class Agent:
         if workdir:
             # Claude Code then also reads the working directory's CLAUDE.md, as project instructions.
             env["CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD"] = "1"
-        if self.config.bot_id:
-            env["ALFRED_WORKSPACE"] = str(self.config.workspace)
+        env["ALFRED_WORKSPACE"] = str(self.config.workspace)
         env["ALFRED_USER_ID"] = "" if user_id is None else str(user_id)
         env["ALFRED_USERNAME"] = username or ""
-        # Consiglieri's launcher, then the base plugin's and each extension's bin/ (Claude Code adds those too).
+        # The launcher in the home, then the base plugin's and each extension's bin/ (Claude Code adds those too).
         folders = [self.config.home / "bin"] + extensions.bin_dirs(self.config)
         env["PATH"] = os.pathsep.join([str(folder) for folder in folders] + [env.get("PATH", "")])
         return env

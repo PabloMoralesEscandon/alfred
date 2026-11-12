@@ -1,8 +1,12 @@
 """The `alfred` command.
 
-For the operator: `run`, `init`, `chat`. For the agent itself (through
-`bin/alfred` in its home): `schedule`, `send`, `event`, `skills`. The
-agent-facing commands print JSON so the model can read the outcome reliably.
+For the operator: `run`, `init`, `service`, `chat --bot`. For a bot's agent (through `bin/alfred`
+on its PATH): `schedule`, `send`, `event`, `skills`, `ext`. The agent-facing commands print JSON so
+the model can read the outcome reliably.
+
+There is no main agent. Whatever an agent does belongs to a bot: inside a bot's turn the bot is
+ALFRED_BOT_ID, and from a terminal or a script it is `--bot <@username|id>`. The control panel itself
+never posts, schedules or wakes anything through these commands.
 """
 
 from __future__ import annotations
@@ -41,12 +45,14 @@ def resolve_chat_id(args: argparse.Namespace) -> int:
         raise CommandError("no chat: pass --chat-id or run inside an agent's turn (ALFRED_CHAT_ID)") from None
 
 
+NO_BOT = ("which bot? Inside a bot's turn it is the bot whose turn it is; from a terminal or a script pass "
+          "--bot <@username|id>. There is no main agent: the control panel runs none")
+
+
 def resolve_bot_id(config: Config, args: argparse.Namespace) -> int:
-    """Which bot: `--bot <@username|id>`, else the one whose turn this is (ALFRED_BOT_ID), else the main bot (0)."""
+    """Which bot: `--bot <@username|id>`, else the one whose turn this is (ALFRED_BOT_ID), else 0 (none)."""
     wanted = getattr(args, "bot", None)
     if wanted:
-        if wanted.strip().lstrip("@").lower() in ("0", "main", "alfred"):
-            return 0
         from .bots import BotRegistry
 
         record = BotRegistry(config).find(wanted)
@@ -93,11 +99,19 @@ def require(record, permission: str) -> None:
 
 
 def own_bot_only(config: Config, record, args: argparse.Namespace) -> int:
-    """A bot acts as itself: it can't post, schedule or wake as another bot."""
+    """A bot acts as itself: it can't post, schedule or wake as another bot. Some bot it must be."""
     bot_id = resolve_bot_id(config, args)
     if record is not None and bot_id != record.bot_id:
         raise CommandError("%s can only act as itself" % record.handle)
+    if not bot_id:
+        raise CommandError(NO_BOT)
     return bot_id
+
+
+def bot_directory_only(config: Config) -> None:
+    """Skills and extensions are a bot's own; outside a bot's turn there is none to look at."""
+    if not config.bot_id:
+        raise CommandError("this works on a bot's own directory, inside that bot's turn; there is no main agent")
 
 
 def own_chat_only(record, chat_id: int) -> None:
@@ -247,7 +261,8 @@ def cmd_send(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
 
 
 def bot_token(config: Config, bot_id: int) -> str:
-    """The token to post as: the main bot's from .env, or a created bot's from its private state folder."""
+    """The token to post as: a bot's, from its private state folder. Bot 0 is the panel's, from .env, used only to
+    ask the owner to create a bot (`alfred bots new`)."""
     if not bot_id:
         try:
             return config.telegram_token
@@ -349,7 +364,7 @@ def cmd_screenshot(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
 
     from . import orca
 
-    default = config.home / "outbox" / ("screenshot-%s.png" % datetime.now().strftime("%Y%m%d-%H%M%S"))
+    default = config.workspace / "outbox" / ("screenshot-%s.png" % datetime.now().strftime("%Y%m%d-%H%M%S"))
     target = Path(args.out).expanduser() if args.out else default
     try:
         saved = orca.screenshot(config, target, page=args.page, full_page=args.full)
@@ -381,6 +396,7 @@ def cmd_chrome(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
 
 
 def cmd_skills(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
+    bot_directory_only(config)
     skills = home.list_skills(config)
     return {
         "ok": True,
@@ -391,9 +407,10 @@ def cmd_skills(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
     }
 
 
-def _extension_call(action):
+def _extension_call(action, config: Config):
     from . import extensions
 
+    bot_directory_only(config)
     try:
         return action(extensions)
     except extensions.ExtensionError as exc:
@@ -402,7 +419,7 @@ def _extension_call(action):
 
 def cmd_ext_list(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
     return _extension_call(
-        lambda ext: {"ok": True, "extensions": [item.to_json() for item in ext.list_extensions(config)]}
+        lambda ext: {"ok": True, "extensions": [item.to_json() for item in ext.list_extensions(config)]}, config
     )
 
 
@@ -415,36 +432,34 @@ def cmd_ext_new(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
             "next": "add skills/<skill>/SKILL.md and bin/<command>, then run `alfred ext check %s`" % created.name,
         }
 
-    return _extension_call(action)
+    return _extension_call(action, config)
 
 
 def cmd_ext_check(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
-    report = _extension_call(lambda ext: ext.check(config, args.name, run_tests=not args.no_tests))
+    report = _extension_call(lambda ext: ext.check(config, args.name, run_tests=not args.no_tests), config)
     if not report["ok"]:
         report["error"] = "; ".join(report["errors"])
     return report
 
 
 def cmd_ext_enable(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
-    return _extension_call(lambda ext: {"ok": True, "extension": ext.set_enabled(config, args.name, True).to_json()})
+    return _extension_call(lambda ext: {"ok": True, "extension": ext.set_enabled(config, args.name, True).to_json()}, config)
 
 
 def cmd_ext_disable(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
-    return _extension_call(lambda ext: {"ok": True, "extension": ext.set_enabled(config, args.name, False).to_json()})
+    return _extension_call(lambda ext: {"ok": True, "extension": ext.set_enabled(config, args.name, False).to_json()}, config)
 
 
 def cmd_ext_remove(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
-    return _extension_call(lambda ext: {"ok": True, "moved_to": str(ext.remove(config, args.name))})
+    return _extension_call(lambda ext: {"ok": True, "moved_to": str(ext.remove(config, args.name))}, config)
 
 
 # -- operator commands --------------------------------------------------------
 
 
 def cmd_init(config: Config, args: argparse.Namespace) -> int:
-    imported = home.bootstrap(config)
-    print("Consiglieri's home is ready at %s" % config.home)
-    if imported:
-        print("Imported from the old layout: %s" % ", ".join(imported))
+    home.prepare(config)
+    print("Consiglieri's home (the control panel's state) is ready at %s" % config.home)
     return 0
 
 
@@ -452,7 +467,7 @@ def cmd_browser_setup(config: Config, args: argparse.Namespace) -> int:
     """Link Consiglieri's home to Orca so its built-in browser can be used, and prove a page loads."""
     from . import orca
 
-    home.bootstrap(config)
+    home.prepare(config)
     steps = orca.setup_browser(config, test=not args.no_test)
     for label, ok, detail in steps:
         print("%s %-13s %s" % ("ok  " if ok else "FAIL", label, detail))
@@ -479,8 +494,6 @@ def usage_alert_bot(config: Config, args: argparse.Namespace, adding: bool = Fal
     if record is not None:
         require(record, "usage")
     bot_id = own_bot_only(config, record, args)
-    if not bot_id:
-        raise CommandError("usage alerts belong to the bots Consiglieri created; pass --bot <@username>")
     if adding:
         from .bots import BotRegistry
         from . import usage_monitor
@@ -561,7 +574,7 @@ def cmd_service(config: Config, args: argparse.Namespace) -> int:
 
     try:
         if args.action == "install":
-            home.bootstrap(config)
+            home.prepare(config)
             path, notes = service.install(config)
             print("Installed and started. Unit: %s" % path)
             print("Log: %s" % service.log_path(config))
@@ -591,21 +604,19 @@ def cmd_run(config: Config, args: argparse.Namespace) -> int:
 
 
 def cmd_chat(config: Config, args: argparse.Namespace) -> int:
-    """Talk to the agent from the terminal. Same home, memory and skills; no Telegram involved."""
+    """Talk to one bot's agent from the terminal: its directory, memory, skills and sessions; no Telegram."""
     from .agent import Agent
+    from .bots import BotRegistry, prepare_workspace
 
-    home.bootstrap(config)
-    bot_name = "Alfred"
-    if args.bot:
-        from .bots import BotRegistry, prepare_workspace
-
-        record = BotRegistry(config).find(args.bot)
-        if record is None:
-            print("alfred: no bot called %r" % args.bot, file=sys.stderr)
-            return 1
-        config = BotRegistry(config).config_for(record.bot_id)
-        prepare_workspace(config)
-        bot_name = record.handle
+    home.prepare(config)
+    record = BotRegistry(config).find(args.bot)
+    if record is None:
+        print("alfred: no bot called %r (there is no main agent; `alfred chat --bot <bot>` talks to one of "
+              "the bots)" % args.bot, file=sys.stderr)
+        return 1
+    config = BotRegistry(config).config_for(record.bot_id)
+    prepare_workspace(config)
+    bot_name = record.handle
     agent = Agent(config)
     chat_id = args.chat_id if args.chat_id is not None else LOCAL_CHAT_ID
     if args.backend:
@@ -650,8 +661,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version="alfred %s" % __version__)
     commands = parser.add_subparsers(dest="command")
 
-    commands.add_parser("run", help="start the Telegram bot and the scheduler").set_defaults(run=cmd_run)
-    commands.add_parser("init", help="create or refresh the home directory").set_defaults(run=cmd_init)
+    commands.add_parser("run", help="start the control panel, the bots and the scheduler").set_defaults(run=cmd_run)
+    commands.add_parser("init", help="create or refresh the home (the control panel's state)").set_defaults(run=cmd_init)
 
     service = commands.add_parser("service", help="keep the bot running in the background")
     service.add_argument("action", choices=("install", "uninstall", "status", "restart", "logs"))
@@ -689,27 +700,27 @@ def build_parser() -> argparse.ArgumentParser:
     browser.add_argument("--no-test", action="store_true", help="skip opening a test page")
     browser.set_defaults(run=cmd_browser_setup)
 
-    chat = commands.add_parser("chat", help="talk to the agent from this terminal")
+    chat = commands.add_parser("chat", help="talk to one of the bots from this terminal")
     chat.add_argument("-m", "--message", help="send one message and exit")
     chat.add_argument("--chat-id", type=int)
-    chat.add_argument("--bot", help="talk to one of the bots Consiglieri created, by @username, name or id")
+    chat.add_argument("--bot", required=True, help="the bot to talk to, by @username, name or id")
     chat.add_argument("--backend", choices=("claude", "codex"))
     chat.add_argument("--new", action="store_true", help="start a fresh conversation")
     chat.set_defaults(run=cmd_chat)
 
-    commands.add_parser("skills", help="list the agent's skills").set_defaults(json=cmd_skills)
+    commands.add_parser("skills", help="list a bot's skills (inside its turn)").set_defaults(json=cmd_skills)
 
     send = commands.add_parser("send", help="send a message or file to a chat now")
     send.add_argument("--chat-id", type=int)
-    send.add_argument("--bot", help="which bot posts it: @username or id; default the one whose turn this is")
+    send.add_argument("--bot", help="which bot posts it: @username or id; inside a turn, the one whose turn it is")
     send.add_argument("--thread-id", type=int, help="the topic to post in")
     send.add_argument("--file")
     send.add_argument("text", nargs="*")
     send.set_defaults(json=cmd_send)
 
-    event = commands.add_parser("event", help="wake the agent now with a note about something that happened")
+    event = commands.add_parser("event", help="wake a bot's agent now with a note about something that happened")
     event.add_argument("--chat-id", type=int)
-    event.add_argument("--bot", help="which bot's agent to wake: @username or id; default the main one")
+    event.add_argument("--bot", help="which bot's agent to wake: @username or id; inside a turn, the one whose turn it is")
     event.add_argument("--thread-id", type=int)
     event.add_argument("text", nargs="*")
     event.set_defaults(json=cmd_event)
@@ -784,7 +795,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     config = Config.load()
     bot_id = os.environ.get("ALFRED_BOT_ID", "").strip()
     if getattr(args, "json", None) and bot_id.isdigit() and int(bot_id):
-        # Inside a bot's turn: its skills, extensions and directory, not the main home's.
+        # Inside a bot's turn: its skills, extensions and directory, not the panel's home.
         from .bots import BotRegistry
 
         registry = BotRegistry(config)

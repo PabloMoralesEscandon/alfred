@@ -44,7 +44,7 @@ class BotsTestCase(unittest.TestCase):
         self.sandbox = Sandbox()
         self.addCleanup(self.sandbox.cleanup)
         self.config = self.sandbox.config
-        home.bootstrap(self.config, legacy_dir=None)
+        home.prepare(self.config)
         self.registry = BotRegistry(self.config)
         self.work = self.sandbox.root / "work"  # a project directory, outside Consiglieri's home
         self.work.mkdir()
@@ -81,15 +81,17 @@ class RegistryTests(BotsTestCase):
         self.registry.delete_token(5000000001)
         self.assertIsNone(self.registry.token(5000000001))
 
-    def test_the_token_stays_out_of_the_homes_git_history(self) -> None:
+    def test_the_token_stays_out_of_every_git_history(self) -> None:
         self.sandbox.environ["ALFRED_AUTOSAVE"] = "1"
-        home.bootstrap(self.config, legacy_dir=None)
+        home.prepare(self.config)
         self.add_bot()
         self.registry.set_token(5000000001, TOKEN)
-        home.autosave(self.config, "test")
-        tracked = home._git(self.config.home, "ls-files").stdout
-        self.assertNotIn("state/", tracked)
-        self.assertEqual(home._git(self.config.home, "grep", "-q", TOKEN[:20]).returncode, 1)
+        bot_config = self.registry.config_for(5000000001)
+        bots.prepare_workspace(bot_config)
+        # The panel's home is not a repository at all, and a bot's own history never holds a token.
+        self.assertFalse(home.autosave(self.config, "test"))
+        self.assertFalse((self.config.home / ".git").exists())
+        self.assertEqual(home._git(bot_config.workspace, "grep", "-q", TOKEN[:20]).returncode, 1)
 
     def test_pending_requests_match_by_username_then_latest_and_expire(self) -> None:
         self.registry.add_pending(99, 99, "Research", "research_bot", {"task": "A"}, {"web": "on"})
@@ -174,10 +176,10 @@ class ConfigTests(BotsTestCase):
         record.permissions["mcp"] = "on"
         self.registry.save(record)
         self.assertEqual([path.name for path in extensions.plugin_dirs(research)], ["plugin", "plain", "served"])
-        # Consiglieri's main agent loads everything, as before.
-        main_ext = extensions.scaffold(self.config, "mainhook", "Main agent hook").path
+        # There is no main agent loading everything: what an old home has in extensions/ runs for nobody.
+        main_ext = extensions.scaffold(self.config, "mainhook", "Old main agent hook").path
         (main_ext / "hooks").mkdir()
-        self.assertIn("mainhook", [path.name for path in extensions.plugin_dirs(self.config)])
+        self.assertNotIn("mainhook", [path.name for path in extensions.plugin_dirs(self.config)])
 
 
 class SettingTests(BotsTestCase):
@@ -348,7 +350,10 @@ class BlacklistTests(BotsTestCase):
         (self.config.home / ".claude" / "skills" / "mail").mkdir(parents=True, exist_ok=True)
         self.chef = self.config.bots_home / str(self.CHEF)
         self.chef_project = bots.claude_project_dir(self.config, self.chef)
-        self.alfred_project = bots.claude_project_dir(self.config, self.config.home)
+        # What a home from before the panel still has of its main agent: its Claude Code transcripts and memory.
+        self.old_main_project = bots.claude_project_dir(self.config, self.config.home)
+        (self.config.home / "memory").mkdir(parents=True, exist_ok=True)
+        (self.config.home / "extensions").mkdir(parents=True, exist_ok=True)
 
     def settings(self, permissions: Dict[str, str], cross: bool = False) -> Dict[str, Any]:
         record = self.registry.get(self.RESEARCH)
@@ -381,7 +386,7 @@ class BlacklistTests(BotsTestCase):
 
     def assert_closed(self, settings: Dict[str, Any], level: str) -> None:
         rules = settings["permissions"]
-        for path in (self.chef, self.chef_project, self.config.home, self.alfred_project):
+        for path in (self.chef, self.chef_project, self.config.home, self.old_main_project):
             for tool in ("Read", "Edit"):  # Read deny rules also hold for Grep, Glob, cat, head...
                 self.assertIn(self.rule(tool, path), rules["deny"], "%s: %s %s" % (level, tool, path))
         for path in (self.chef / "memory", self.chef / "extensions", self.chef / ".claude",
@@ -397,7 +402,7 @@ class BlacklistTests(BotsTestCase):
         self.assertTrue(settings["disableAllHooks"], level)
         if "sandbox" in settings:
             filesystem = settings["sandbox"]["filesystem"]
-            for path in (self.chef, self.chef_project, self.config.home, self.alfred_project):
+            for path in (self.chef, self.chef_project, self.config.home, self.old_main_project):
                 self.assertIn(str(path), filesystem["denyRead"], level)
                 self.assertIn(str(path), filesystem["denyWrite"], level)
             self.assertIn(str(self.config.bots_home), filesystem["denyRead"], level)  # bots created later too
@@ -491,17 +496,23 @@ class BlacklistTests(BotsTestCase):
         for permissions in ({}, {"shell": "full"}, {"shell": "full", "mode": "bypassPermissions"}):
             settings = self.settings(permissions, cross=True)
             rules = settings["permissions"]
-            for path in (self.chef, self.config.home):
-                self.assertNotIn(self.rule("Read", path), rules["deny"])
-                self.assertIn(self.rule("Edit", path), rules["deny"])  # read and run, never change
+            self.assertNotIn(self.rule("Read", self.chef), rules["deny"])
+            self.assertIn(self.rule("Edit", self.chef), rules["deny"])  # read and run, never change
             self.assertNotIn("Bash(*%s/*)" % (self.chef / "memory"), rules["deny"])
-            for shared in (self.chef / "memory", self.chef / "extensions", self.chef / ".claude" / "skills",
-                           self.config.home / "memory", self.config.home / "extensions"):
+            for shared in (self.chef / "memory", self.chef / "extensions", self.chef / ".claude" / "skills"):
                 self.assertIn(str(shared), rules["additionalDirectories"])
+            # The home is not another agent: cross-agent access opens nothing of it, the old main agent's
+            # memory, tools and transcripts included.
+            for path in (self.config.home, self.old_main_project):
+                self.assertIn(self.rule("Read", path), rules["deny"])
+                self.assertIn(self.rule("Edit", path), rules["deny"])
+            for closed in (self.config.home / "memory", self.config.home / "extensions"):
+                self.assertNotIn(str(closed), rules["additionalDirectories"])
+                self.assertIn("Bash(*%s/*)" % closed, rules["deny"])
             self.assertIn("Bash(%s/*/bin/*)" % (self.chef / "extensions"), rules["allow"])
             # Still closed: tokens and secrets, their conversations and inboxes.
-            for closed in (self.config.home / "state", self.chef / "inbox", self.chef / ".git"):
-                self.assertIn(self.rule("Read", closed), rules["deny"])
+            for closed in (self.chef / "inbox", self.chef / ".git"):
+                self.assertIn(self.rule("Read", closed), rules["deny"])  # the home's state: inside the whole home, above
             self.assertIn(self.rule("Read", self.config.home / ".env", ""), rules["deny"])
             self.assertIn(self.rule("Read", self.chef_project, "/*.jsonl"), rules["deny"])
             self.assertIn("Bash(*%s/*)" % (self.config.home / "state"), rules["deny"])
@@ -527,7 +538,8 @@ class BlacklistTests(BotsTestCase):
         manual = bots.render_manual(config, record)
         self.assertIn("cross-agent access", manual)
         self.assertIn(str(self.chef / "memory"), manual)
-        self.assertIn(str(self.config.home / "memory"), manual)
+        self.assertNotIn(str(self.config.home / "memory"), manual)  # no main agent among the others
+        self.assertNotIn("No other agent has memory or tools yet", manual)
         self.assertIn("CROSS-AGENT ACCESS ON since 2026-11-12T10:00:00Z", bots.describe(record))
 
     def test_the_audit_log_is_private_and_appends(self) -> None:

@@ -8,7 +8,7 @@ import stat
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
 from alfred.config import Config
 
@@ -95,6 +95,23 @@ class Sandbox:
 
     def cleanup(self) -> None:
         self._tempdir.cleanup()
+
+    def add_bot(self, bot_id: int = 424242, username: str = "helper_bot", name: str = "Helper", owner_id: int = 99,
+                permissions: Optional[Dict[str, str]] = None, settings: Optional[Dict[str, str]] = None,
+                token: Optional[str] = None, chat_ids: Tuple[int, ...] = (7,)) -> Tuple[Any, Config]:
+        """Register a bot (there is no main agent: every agent is one) and return (its record, its config)."""
+        from alfred import bots, home
+
+        home.prepare(self.config)
+        registry = bots.BotRegistry(self.config)
+        record = bots.BotRecord(bot_id=bot_id, username=username, name=name, owner_id=owner_id,
+                                permissions=dict(permissions or {}), settings=dict(settings or {}),
+                                chat_ids=list(chat_ids))  # chats that pressed Start: the tests talk in chat 7
+        registry.save(record)
+        registry.set_token(bot_id, token or "%d:%s" % (bot_id, "A" * 35))
+        config = registry.config_for(bot_id)
+        bots.prepare_workspace(config)
+        return record, config
 
     def fake_cli(self, name: str, script: Dict[str, Any]) -> Path:
         """Install a fake CLI. `script` maps "fresh"/"resume" to the JSON lines to print.

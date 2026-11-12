@@ -16,7 +16,10 @@ class CliTests(unittest.TestCase):
     def setUp(self) -> None:
         self.sandbox = Sandbox()
         self.addCleanup(self.sandbox.cleanup)
-        environ = dict(self.sandbox.environ, ALFRED_CHAT_ID="7", ALFRED_USER_ID="99", ALFRED_USERNAME="pablo")
+        # As inside a bot's turn: every agent is a bot, and the commands act as it.
+        self.record, self.bot_config = self.sandbox.add_bot()
+        environ = dict(self.sandbox.environ, ALFRED_CHAT_ID="7", ALFRED_USER_ID="99", ALFRED_USERNAME="pablo",
+                       ALFRED_BOT_ID=str(self.record.bot_id))
         patcher = mock.patch.dict(os.environ, environ)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -76,11 +79,14 @@ class CliTests(unittest.TestCase):
         self.assertEqual((code, queued["ok"]), (0, True))
         self.assertEqual((queued["item"]["kind"], queued["item"]["text"]), ("event", "The agent in mus-solver finished"))
 
-        # Another process on this machine names the chat itself.
-        self.run_json("event", "--chat-id", "8", "Backup done")
+        # Another process on this machine names the bot and the chat itself.
+        with mock.patch.dict(os.environ, {"ALFRED_BOT_ID": "", "ALFRED_CHAT_ID": ""}):
+            code, other = self.run_json("event", "--bot", "helper_bot", "--chat-id", "8", "Backup done")
+        self.assertEqual((code, other["ok"]), (0, True))
         store = SchedulerStore(self.sandbox.config.db_path)
         due = [store.claim_due(), store.claim_due()]
         self.assertEqual([(item["chat_id"], item["message"]) for item in due], [(7, "The agent in mus-solver finished"), (8, "Backup done")])
+        self.assertEqual({item["bot_id"] for item in due}, {self.record.bot_id})
         self.assertEqual(due[0]["username"], "pablo")
 
         code, empty = self.run_json("event")
@@ -117,7 +123,7 @@ class CliTests(unittest.TestCase):
         _, payload = self.run_json("send", "--file", str(self.sandbox.root / "missing.pdf"))
         self.assertIn("file not found", payload["error"])
 
-    def test_init_then_skills_then_chat(self) -> None:
+    def test_init_then_skills_then_chat_with_a_bot(self) -> None:
         code, output = self.run_cli("init")
         self.assertEqual(code, 0)
         self.assertIn(str(self.sandbox.home), output)
@@ -127,9 +133,24 @@ class CliTests(unittest.TestCase):
 
         self.sandbox.fake_cli("claude", {"fresh": claude_lines("At your service.", "sess-A")})
         with mock.patch.dict(os.environ, self.sandbox.environ):
-            code, output = self.run_cli("chat", "-m", "hello")
+            code, output = self.run_cli("chat", "--bot", "helper_bot", "-m", "hello")
         self.assertEqual((code, output), (0, "At your service.\n"))
         self.assertIn('source="terminal" chat_id="0"', self.sandbox.calls("claude")[0]["stdin"])
+
+    def test_without_a_bot_there_is_no_agent_to_act_as(self) -> None:
+        # From a terminal, outside any bot's turn: there is no main agent to post, schedule, wake or chat as.
+        with mock.patch.dict(os.environ, {"ALFRED_BOT_ID": ""}):
+            for argv in (("schedule", "add", "--in", "20m", "--message", "x"), ("schedule", "list"),
+                         ("event", "hello"), ("send", "hello"), ("skills",), ("ext", "list")):
+                code, payload = self.run_json(*argv)
+                self.assertEqual((code, payload["ok"]), (1, False), argv)
+                self.assertIn("main agent", payload["error"], argv)
+            buffer = io.StringIO()
+            with redirect_stdout(buffer), mock.patch("sys.stderr", io.StringIO()), self.assertRaises(SystemExit):
+                cli.main(["chat", "-m", "hello"])  # --bot is required
+            for alias in ("main", "alfred", "0"):
+                code, payload = self.run_json("event", "--bot", alias, "hello")
+                self.assertIn("no bot called", payload["error"], alias)
 
     def test_no_command_prints_help(self) -> None:
         code, output = self.run_cli()

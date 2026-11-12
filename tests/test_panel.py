@@ -138,7 +138,7 @@ class PanelHarness(unittest.TestCase):
         self.sandbox.environ["ALFRED_ALLOWED_USERS"] = str(OWNER)
         self.sandbox.environ["TELEGRAM_BOT_TOKEN"] = token_for(1, "P")
         self.config = self.sandbox.config
-        home.bootstrap(self.config, legacy_dir=None)
+        home.prepare(self.config)
         self.work = self.sandbox.root / "work"
         self.work.mkdir()
         self.sandbox.fake_cli("claude", {"fresh": claude_lines("On it.", "sess-R")})
@@ -339,6 +339,38 @@ class PanelTests(PanelHarness):
             ignored = await self.command("/bots", user_id=STRANGER)
             self.assertEqual(ignored, [])
             self.assertEqual([name for name, _ in PANEL_COMMANDS], ["help", "bots", "bot", "status", "usage", "shared"])
+
+        self.play(scenario)
+
+    def test_nothing_ever_opens_a_claude_session_for_the_panels_own_chat(self) -> None:
+        from alfred.agent import Agent, NoAgent
+        from alfred.telegram_bot import TelegramBot
+
+        async def scenario() -> None:
+            # Messages, commands and the old main bot's scheduled items, in the panel's own chat.
+            for text in ("hello", "/help", "/status", "/bots", "/usage", "/shared", "/new", "/stop", "/memory"):
+                await self.command(text)
+            past = scheduler.utc_now() - timedelta(seconds=5)
+            self.pool.store.add(chat_id=OWNER, due=past, text="Old task for the main agent", kind=scheduler.KIND_TASK)
+            self.pool.store.add(chat_id=OWNER, due=past, text="The backup finished", kind=scheduler.KIND_EVENT)
+            await scheduler.run_scheduler(self.pool.store, self.pool.deliver, once=True)
+            await scheduler.run_scheduler(self.pool.store, self.pool.deliver, once=True)
+            texts = [reply["text"] for reply in self.panel_bot.sent]
+            self.assertTrue(any("There is no main agent any more" in text for text in texts), texts)
+            # Not one Claude process for any of it: the panel runs no agent, and the usage command is a
+            # one-off /usage reading that never opens a session or a model turn of its own.
+            self.assertEqual([call for call in self.sandbox.calls("claude") if call.get("stdin") != "/usage"], [])
+            self.assertFalse(hasattr(self.pool.main, "agent"))
+            self.assertEqual(self.pool.frontends, {})
+            # And nothing can build one for it: not an Agent, not a bot front end without a bot.
+            with self.assertRaises(NoAgent):
+                Agent(self.config)
+            with self.assertRaises(TypeError):
+                TelegramBot(self.config)  # pylint: disable=missing-kwoa
+            with self.assertRaises(ValueError):
+                TelegramBot(self.config, record=None)  # type: ignore[arg-type]
+            for name in ("CLAUDE.md", "AGENTS.md", "SOUL.md", "SHARED_MEMORY.md", "memory"):
+                self.assertFalse((self.config.home / name).exists(), name)
 
         self.play(scenario)
 
