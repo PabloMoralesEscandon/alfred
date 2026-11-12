@@ -196,6 +196,26 @@ class SchedulerStore:
             )
         return self.get(matches[0]["id"])
 
+    def pending_for_bot(self, bot_id: int, chat_id: Optional[int] = None) -> List[Item]:
+        """A bot's pending items in every chat (or in one), soonest first: what the panel's menu lists."""
+        query = "SELECT * FROM scheduled_messages WHERE bot_id = ? AND status IN (?, ?)"
+        parameters: List[Any] = [int(bot_id), STATUS_SCHEDULED, STATUS_DELIVERING]
+        if chat_id is not None:
+            query += " AND chat_id = ?"
+            parameters.append(int(chat_id))
+        with self._connect() as connection:
+            rows = connection.execute(query + " ORDER BY due_at_utc, created_at_utc", parameters).fetchall()
+        return [dict(row) for row in rows]
+
+    def cancel_for_bot(self, item_id: str, bot_id: int) -> Optional[Item]:
+        """Cancel one pending item by its exact id, only if it belongs to this bot."""
+        item = self.get(item_id)
+        if item is None or int(item["bot_id"] or 0) != int(bot_id) or item["status"] != STATUS_SCHEDULED:
+            return None
+        with self._connect() as connection:
+            connection.execute("UPDATE scheduled_messages SET status = ? WHERE id = ?", (STATUS_CANCELLED, item_id))
+        return self.get(item_id)
+
     def count_for_bot(self, bot_id: int) -> int:
         """Pending items of a bot, in any chat."""
         with self._connect() as connection:

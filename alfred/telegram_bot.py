@@ -82,9 +82,9 @@ MAIN_UPDATES = ["message", "callback_query", "managed_bot"]
 BOT_UPDATES = ["message", "callback_query"]
 CONFIRM_SECONDS = 300
 CANCEL_CREATION = "Cancel"  # the second key of the creation keyboard
-BOT_USAGE = """I am the Consiglieri control panel. I have no agent of my own: I create and run bots, each with its own chat, task, model, permissions, memory, tools and Claude session.
+BOT_USAGE = """I am the Consiglieri control panel. There is no main agent: I create and run your bots, each with its own chat, task, model, permissions, memory, tools and Claude session. You see and manage only your own.
 
-/bot - the menu: create a bot step by step, or change one of yours, with buttons
+/bot - the menu, where everything is managed with buttons: create a bot step by step; in My bots change its settings, permissions, folders and rules, see and cancel its reminders and usage alerts, pause, resume or destroy it; the shared memory; the audit log
 
 Text shortcuts:
 /bots - list them
@@ -801,17 +801,8 @@ class ControlPanel:
                     reply_markup=markup)
 
     def _audit_text(self, user_id: int) -> str:
-        """The audit lines about the user's own bots (see docs/PANEL_ONLY.md for the open question of a global view)."""
-        mine = {record.bot_id for record in self.pool.registry.list(owner_id=user_id)} if self.pool is not None else set()
-        entries = [entry for entry in bots.read_audit(self.config, limit=500) if bots.audit_entry_is_for(entry, user_id, mine)][-20:]
-        if not entries:
-            return "The audit log has nothing about your bots: cross-agent access has never been granted to one."
-        words = {"cross_agent_granted": "granted", "cross_agent_revoked": "withdrawn"}
-        lines = ["Cross-agent access, latest last (%s):" % (self.config.state_dir / bots.AUDIT_FILE)]
-        for entry in entries:
-            lines.append("%s %s %s by %s (%s)" % (entry.get("time"), words.get(entry.get("event"), entry.get("event")),
-                                                   entry.get("bot"), entry.get("by"), entry.get("via")))
-        return "\n".join(lines)
+        """The audit lines about the user's own bots (docs/PANEL_ONLY.md: the open question of a global view)."""
+        return bots.audit_report(self.config, user_id)
 
     async def _bot_destroy_ask(self, update: Update, record: BotRecord) -> None:
         nonce = self.pool.ask_confirmation(record.bot_id, update.effective_user.id, "destroy")

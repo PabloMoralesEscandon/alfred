@@ -16,7 +16,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
-from . import bots, presets, shared_memory, usage_monitor
+from . import bots, presets, scheduler, shared_memory, usage_alerts, usage_monitor
 from .bots import BotError, BotRecord, DEFAULT_PERMISSIONS
 
 SESSION_SECONDS = 30 * 60
@@ -45,6 +45,14 @@ SWITCH_LABELS = (
     ("usage", "📊 Plan usage and alerts"),
     ("shared", "🧠 Write the shared memory"),
 )
+
+# The typed fields of a bot's "Folders and rules" screen: name -> (label, what to send).
+ADVANCED_FIELDS = {
+    "workdir": ("Working folder", "an absolute path, for example ~/projects/site"),
+    "folders": ("Extra folders", "absolute paths separated by commas"),
+    "allow": ("Allow rules", "Claude Code rules separated by ;, for example Bash(git status)"),
+    "deny": ("Deny rules", "Claude Code rules separated by ;"),
+}
 
 WIZARD = ("new_name", "new_task", "new_model", "new_effort", "new_perms", "new_summary")
 STEP_TITLES = {
@@ -79,6 +87,8 @@ class Session:
     pending: str = ""  # a preset waiting for "yes" before it is applied to a bot
     shared_topics: List[str] = field(default_factory=list)  # the shared topics as last listed, for their buttons
     shared_topic: str = ""  # the shared topic on screen
+    item_ids: List[str] = field(default_factory=list)  # the scheduled items as last listed, for their cancel buttons
+    alert_ids: List[str] = field(default_factory=list)  # a bot's usage alerts as last listed, for their buttons
     notice: str = ""  # one line shown above the next screen, then cleared
     touched: float = field(default_factory=time.time)
 
@@ -100,6 +110,13 @@ def parse_callback(data: str) -> Optional[Tuple[str, str]]:
     if len(parts) != 3 or parts[0] != PREFIX:
         return None
     return parts[1], parts[2]
+
+
+def _duration(seconds: int) -> str:
+    for unit, size in (("d", 86400), ("h", 3600), ("m", 60)):
+        if seconds % size == 0:
+            return "%d%s" % (seconds // size, unit)
+    return "%ds" % seconds
 
 
 def _mark(on: bool) -> str:
@@ -269,6 +286,33 @@ class Menus:
         if verb == "edittask":
             session.awaiting = "bot_task"
             return self.go(session, "bot_task")
+        if verb == "advanced" and argument in ADVANCED_FIELDS:
+            self._record(session)
+            session.awaiting = "bot_%s" % argument
+            return self.go(session, "bot_advanced")
+        if verb == "unschedule":  # a reminder of the bot being edited, or of the old main bot from the home screen
+            index = int(argument) if argument.isdigit() else -1
+            item_id = session.item_ids[index] if 0 <= index < len(session.item_ids) else ""
+            old = session.screen == "old_schedule"
+            bot_id = 0 if old else self._record(session).bot_id
+            if old:  # only the user's own chat's items from before the panel
+                mine = {item["id"] for item in self.pool.store.pending_for_bot(0, chat_id=session.user_id)}
+                item_id = item_id if item_id in mine else ""
+            cancelled = self.pool.store.cancel_for_bot(item_id, bot_id) if item_id else None
+            session.notice = "Cancelled: %s" % cancelled["message"][:80] if cancelled else "⚠️ That item is no longer pending."
+            return self.render(session)
+        if verb == "unalert":
+            record = self._record(session)
+            index = int(argument) if argument.isdigit() else -1
+            alert_id = session.alert_ids[index] if 0 <= index < len(session.alert_ids) else ""
+            removed = usage_alerts.AlertStore.for_bot(self.pool.config, record.bot_id).remove(alert_id) if alert_id else None
+            session.notice = "Removed the alert %s." % removed.when if removed else "⚠️ That alert is already gone."
+            return self.render(session)
+        if verb == "shfact":
+            number = int(argument) if argument.isdigit() else 0
+            removed = shared_memory.remove(self.pool.config, session.shared_topic, number)
+            session.notice = "Removed this fact:\n%s" % removed.strip()
+            return self.go(session, "shared_topic")
         if verb in ("pause", "resume"):
             record = self._record(session)
             if verb == "pause":
@@ -321,6 +365,15 @@ class Menus:
                 await self.pool.set_setting(self._record(session), "model", text)
                 session.notice = "Model changed. It applies from its next message."
                 return self.go(session, "bot")
+            if what and what[len("bot_"):] in ADVANCED_FIELDS:
+                name = what[len("bot_"):]
+                record = self._record(session)
+                if name == "workdir":
+                    await self.pool.set_setting(record, "workdir", text)
+                else:
+                    await self.pool.set_permission(record, name, text)
+                session.notice = "%s changed. It applies from its next message." % ADVANCED_FIELDS[name][0]
+                return self.go(session, "bot_advanced")
         except (BotError, shared_memory.SharedMemoryError) as exc:
             session.notice = "⚠️ %s" % exc
             session.awaiting = what
@@ -425,6 +478,8 @@ class Menus:
             return "bot_perms"
         if screen in ("shared_topic", "shared_add"):
             return "shared"
+        if screen in ("audit", "old_schedule"):
+            return "home"
         if screen == "shared_remove":
             return "shared_topic"
         if screen.startswith("bot_"):
@@ -451,19 +506,24 @@ class Menus:
         return screen
 
     def _screen_home(self, session: Session) -> Screen:
+        rows: List[Row] = [[("➕ Create bot", "go:new_name")], [("🤖 My bots", "go:list")],
+                           [("🧠 Shared memory", "go:shared"), ("📜 Audit", "go:audit")]]
+        old = len(self.pool.store.pending_for_bot(0, chat_id=session.user_id)) if self.pool is not None else 0
+        if old:  # items the main bot had scheduled in this chat before it became a panel
+            rows.append([("⏰ Old reminders (%d)" % old, "go:old_schedule")])
+        rows += [[("❓ Help", "go:help")], [("✖️ Close", "cancel")]]
         return Screen(
-            "The Consiglieri control panel. Each bot has its own chat, task, model, permissions, memory and session.",
-            [[("➕ Create bot", "go:new_name")], [("🤖 My bots", "go:list")], [("🧠 Shared memory", "go:shared")],
-             [("❓ Help", "go:help")], [("✖️ Close", "cancel")]],
-        )
+            "The Consiglieri control panel. There is no main agent: you create your own bots, and each has its own "
+            "chat, task, model, permissions, memory and session.", rows)
 
     def _screen_help(self, session: Session) -> Screen:
         return Screen(
             "How it works\n\n"
             "Create bot walks you through name, task, model, effort and permissions, then sends a button "
             "that asks Telegram to create the bot. Confirm there and the bot is ready in its own chat.\n\n"
-            "My bots lets you change a bot's model, effort, task and permissions, pause it, resume it or "
-            "destroy it.\n\n"
+            "My bots lets you change a bot's model, effort, task, permissions, folders and rules, see and cancel "
+            "its reminders and usage alerts, pause it, resume it or destroy it. You only ever see your own bots; "
+            "there is no main agent.\n\n"
             "What a bot may do is a security preset: %s, %s, %s or %s, from least to most. Customize turns "
             "single permissions on and off; the bot then shows as Custom. Claude Code enforces the permissions; "
             "with a full shell and no sandbox a bot can do anything your user can.\n\n"
@@ -472,6 +532,7 @@ class Menus:
             "warning. Every grant and withdrawal is logged (/bot audit).\n\n"
             "Shared memory holds general facts every agent reads (who you are, your preferences); bots only read "
             "it unless you let one write it under Customize. /shared does the same by text.\n\n"
+            "Audit lists every grant and withdrawal of cross-agent access to your bots.\n\n"
             "Text shortcuts still work: /bot help lists them." % tuple(presets.title(key) for key in presets.keys()),
             [[("⬅️ Back", "back")]],
         )
@@ -636,6 +697,8 @@ class Menus:
         rows: List[Row] = [
             [("🧠 Model", "go:bot_model"), ("⚙️ Effort", "go:bot_effort")],
             [("📝 Task", "edittask"), ("🔐 Permissions", "go:bot_perms")],
+            [("⏰ Reminders", "go:bot_schedule"), ("📊 Usage alerts", "go:bot_alerts")],
+            [("📂 Folders and rules", "go:bot_advanced")],
             [("⏸ Pause", "pause") if record.enabled else ("▶️ Resume", "resume"), ("🗑 Destroy", "destroy")],
             [("⬅️ Back", "back"), ("✖️ Close", "cancel")],
         ]
@@ -734,8 +797,11 @@ class Menus:
         except shared_memory.SharedMemoryError as exc:
             session.notice = "⚠️ %s" % exc
             return self._screen_shared(session)
-        return Screen(text + "\n\nTo remove one fact: /shared remove %s <number>." % session.shared_topic,
-                      [[("➕ Add a fact", "shadd"), ("🗑 Remove topic", "shremove")], [("⬅️ Back", "back")]])
+        count = len(shared_memory.facts(self.pool.config, session.shared_topic))
+        buttons = [("🗑 %d" % number, "shfact:%d" % number) for number in range(1, min(count, 20) + 1)]
+        rows: List[Row] = [buttons[i:i + 5] for i in range(0, len(buttons), 5)]
+        hint = "\n\nTap a number to remove that fact." if buttons else ""
+        return Screen(text + hint, rows + [[("➕ Add a fact", "shadd"), ("🗑 Remove topic", "shremove")], [("⬅️ Back", "back")]])
 
     def _screen_shared_add(self, session: Session) -> Screen:
         hint = " to %s" % session.shared_topic if session.shared_topic else ""
@@ -748,6 +814,82 @@ class Menus:
         return Screen("Remove the shared topic %s and all its facts? Every agent stops seeing it from its next "
                       "conversation." % session.shared_topic,
                       [[("🗑 Yes, remove it", "shremove!")], [("⬅️ No, back", "back")]])
+
+    # -- reminders, usage alerts, folders and rules, the audit log --
+
+    def _item_lines(self, session: Session, items: List[Dict[str, Any]]) -> Tuple[List[str], List[Row]]:
+        session.item_ids = [item["id"] for item in items[:20]]
+        lines, buttons = [], []
+        for number, item in enumerate(items[:20], 1):
+            due = scheduler.parse_time(item["due_at_utc"]).astimezone().strftime("%Y-%m-%d %H:%M")
+            repeat = " (every %s)" % _duration(item["repeat_seconds"]) if item["repeat_seconds"] else ""
+            lines.append("%d. %s · %s%s · %s" % (number, due, item["kind"], repeat, " ".join(item["message"].split())[:100]))
+            buttons.append(("🗑 %d" % number, "unschedule:%d" % (number - 1)))
+        return lines, [buttons[i:i + 5] for i in range(0, len(buttons), 5)]
+
+    def _screen_bot_schedule(self, session: Session) -> Screen:
+        record = self._safe_record(session)
+        if record is None:
+            return self._screen_list(session)
+        items = self.pool.store.pending_for_bot(record.bot_id)
+        lines, rows = self._item_lines(session, items)
+        head = ("Reminders and timed tasks of %s, soonest first. It schedules them itself (alfred schedule, or when "
+                "you ask it in its chat); tap a number to cancel one." % record.handle)
+        if not record.allows("schedule"):
+            head += "\n\nIts Reminders permission is off, so it can't add new ones."
+        return Screen("\n".join([head, ""] + (lines or ["Nothing pending."])), rows + [[("⬅️ Back", "back")]])
+
+    def _screen_old_schedule(self, session: Session) -> Screen:
+        items = self.pool.store.pending_for_bot(0, chat_id=session.user_id)
+        lines, rows = self._item_lines(session, items)
+        head = ("Reminders the main bot scheduled in this chat before it became the control panel. There is no main "
+                "agent any more: a reminder message is still posted here when it is due, and a task is announced, "
+                "not carried out (give it to one of your bots). Tap a number to cancel one.")
+        return Screen("\n".join([head, ""] + (lines or ["Nothing pending."])), rows + [[("⬅️ Back", "back")]])
+
+    def _screen_bot_alerts(self, session: Session) -> Screen:
+        record = self._safe_record(session)
+        if record is None:
+            return self._screen_list(session)
+        config = self.pool.config
+        alerts = usage_alerts.AlertStore.for_bot(config, record.bot_id).alerts()
+        session.alert_ids = [alert.id for alert in alerts[:20]]
+        lines = ["Usage alerts of %s: conditions on the Claude plan usage that wake it. It sets them itself "
+                 "(alfred usage-alert) when it has the Plan usage permission; each wake-up uses plan usage." % record.handle, ""]
+        if not record.allows("usage"):
+            lines.append("Its Plan usage permission is off (Permissions → Customize), so it can't add alerts.")
+        note = usage_monitor.permission_note(config, record)
+        if note:
+            lines.append(note)
+        if not usage_monitor.is_enabled(config):
+            lines.append("The usage monitor is off (%s=0 in .env), so no alert is checked." % usage_monitor.ENABLE_SETTING)
+        lines.append("")
+        for number, alert in enumerate(alerts[:20], 1):
+            state = "fired" if alert.spent else ("repeats" if alert.repeat else "once")
+            lines.append("%d. when %s · %s%s" % (number, alert.when, state, " · %s" % alert.note[:80] if alert.note else ""))
+        if not alerts:
+            lines.append("No alerts.")
+        buttons = [("🗑 %d" % number, "unalert:%d" % (number - 1)) for number in range(1, len(session.alert_ids) + 1)]
+        rows: List[Row] = [buttons[i:i + 5] for i in range(0, len(buttons), 5)]
+        return Screen("\n".join(lines), rows + [[("⬅️ Back", "back")]])
+
+    def _screen_bot_advanced(self, session: Session) -> Screen:
+        record = self._safe_record(session)
+        if record is None:
+            return self._screen_list(session)
+        lines = ["Folders and rules of %s. Each change applies from its next message." % record.handle, ""]
+        for name, (label, hint) in ADVANCED_FIELDS.items():
+            value = record.settings.get(name) if name == "workdir" else record.permission(name)
+            lines.append("%s: %s" % (label, value or "none"))
+        awaiting = (session.awaiting or "")[len("bot_"):]
+        if awaiting in ADVANCED_FIELDS:
+            label, hint = ADVANCED_FIELDS[awaiting]
+            lines += ["", "Send the new %s as a message (%s), or default to clear it." % (label.lower(), hint)]
+        rows: List[Row] = [[("✏️ %s" % label, "advanced:%s" % name)] for name, (label, _) in ADVANCED_FIELDS.items()]
+        return Screen("\n".join(lines), rows + [[("⬅️ Back", "back")]])
+
+    def _screen_audit(self, session: Session) -> Screen:
+        return Screen(bots.audit_report(self.pool.config, session.user_id), [[("⬅️ Back", "back")]])
 
     def _screen_bot_destroy(self, session: Session) -> Screen:
         record = self._safe_record(session)

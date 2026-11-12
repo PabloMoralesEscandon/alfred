@@ -811,6 +811,20 @@ def read_audit(config: Config, limit: int = 20) -> List[Dict[str, Any]]:
     return entries
 
 
+def audit_report(config: Config, user_id: int) -> str:
+    """The audit lines about this user's bots, latest last: for /bot audit and the menu's Audit screen."""
+    mine = {record.bot_id for record in BotRegistry(config).list(owner_id=user_id)}
+    entries = [entry for entry in read_audit(config, limit=500) if audit_entry_is_for(entry, user_id, mine)][-20:]
+    if not entries:
+        return "The audit log has nothing about your bots: cross-agent access has never been granted to one."
+    words = {"cross_agent_granted": "granted", "cross_agent_revoked": "withdrawn"}
+    lines = ["Cross-agent access of your bots, latest last (%s):" % (config.state_dir / AUDIT_FILE)]
+    for entry in entries:
+        lines.append("%s %s %s by %s (%s)" % (entry.get("time"), words.get(entry.get("event"), entry.get("event")),
+                                               entry.get("bot"), entry.get("by"), entry.get("via")))
+    return "\n".join(lines)
+
+
 def claude_settings(config: Config, record: BotRecord) -> Dict[str, Any]:
     """A bot's permissions as Claude Code settings. `config` is the bot's own configuration.
 

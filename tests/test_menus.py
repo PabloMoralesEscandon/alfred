@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Tuple
 
 try:
-    from test_panel import OWNER, RESEARCH, STRANGER, PanelHarness, update_for
+    from test_panel import CHEF as CHEF_ID, OWNER, RESEARCH, STRANGER, PanelHarness, update_for
 except ImportError:  # pragma: no cover
     PanelHarness = None  # type: ignore
 
@@ -83,7 +83,7 @@ class MenuTests(PanelHarness):  # type: ignore[misc,valid-type]
     def test_menu_the_assistant_walks_through_every_step_and_creates_the_request(self) -> None:
         async def scenario() -> None:
             await self.open()
-            self.assertEqual([label for label in self.labels()], ["➕ Create bot", "🤖 My bots", "🧠 Shared memory", "❓ Help", "✖️ Close"])
+            self.assertEqual([label for label in self.labels()], ["➕ Create bot", "🤖 My bots", "🧠 Shared memory", "📜 Audit", "❓ Help", "✖️ Close"])
             await self.tap("Create bot")
             self.assertIn("Step 1 of 6: name", self.text)
             await self.type("Gestor de Calendarios")
@@ -594,6 +594,120 @@ class MenuTests(PanelHarness):  # type: ignore[misc,valid-type]
             await self.tap("", data=grant)
             self.assertFalse(self.pool.registry.get(RESEARCH).cross_agent)
             self.assertIn("⚠️ Cross-agent access for Research", self.text)
+
+        self.play(scenario)
+
+
+    # -- everything the text commands manage is also in the menu --
+
+    def test_menu_a_bots_reminders_are_listed_and_cancelled(self) -> None:
+        from datetime import timedelta
+
+        from alfred import scheduler
+
+        async def scenario() -> None:
+            await self.create(RESEARCH, "alfredpanel_research_bot", "Research", "/bot new Research")
+            soon = scheduler.utc_now() + timedelta(hours=2)
+            first = self.pool.store.add(chat_id=OWNER, due=soon, text="Call Sam", bot_id=RESEARCH)
+            self.pool.store.add(chat_id=555, due=soon + timedelta(hours=1), text="Weekly digest",
+                                kind=scheduler.KIND_TASK, repeat_seconds=7 * 86400, bot_id=RESEARCH)
+            self.pool.store.add(chat_id=OWNER, due=soon, text="Someone else's", bot_id=CHEF_ID)
+            await self.open()
+            for label in ("My bots", "Research", "Reminders"):
+                await self.tap(label)
+            self.assertIn("1. ", self.text)
+            self.assertIn("message · Call Sam", self.text)
+            self.assertIn("task (every 7d) · Weekly digest", self.text)  # in any of its chats
+            self.assertNotIn("Someone else's", self.text)
+            await self.tap("🗑 1")
+            self.assertIn("Cancelled: Call Sam", self.text)
+            self.assertEqual(self.pool.store.get(first["id"])["status"], scheduler.STATUS_CANCELLED)
+            self.assertNotIn("Call Sam\n", self.text.split("\n\n", 1)[1])
+
+        self.play(scenario)
+
+    def test_menu_the_old_main_bots_reminders_are_kept_listed_and_can_be_cancelled(self) -> None:
+        from datetime import timedelta
+
+        from alfred import scheduler
+
+        async def scenario() -> None:
+            soon = scheduler.utc_now() + timedelta(hours=2)
+            kept = self.pool.store.add(chat_id=OWNER, due=soon, text="Old reminder", bot_id=0)
+            other = self.pool.store.add(chat_id=STRANGER, due=soon, text="Another chat's", bot_id=0)
+            await self.open()
+            await self.tap("Old reminders (1)")
+            self.assertIn("Old reminder", self.text)
+            self.assertNotIn("Another chat's", self.text)
+            self.assertIn("still posted here", self.text)
+            await self.tap("🗑 1")
+            self.assertEqual(self.pool.store.get(kept["id"])["status"], scheduler.STATUS_CANCELLED)
+            self.assertEqual(self.pool.store.get(other["id"])["status"], scheduler.STATUS_SCHEDULED)  # never deleted
+            await self.tap("Back")
+            self.assertNotIn("Old reminders", " ".join(self.labels()))
+
+        self.play(scenario)
+
+    def test_menu_usage_alerts_are_listed_and_removed(self) -> None:
+        from alfred import usage_alerts
+
+        async def scenario() -> None:
+            await self.create(RESEARCH, "alfredpanel_research_bot", "Research", "/bot new Research")
+            store = usage_alerts.AlertStore.for_bot(self.config, RESEARCH)
+            store.add("session.used > 80", note="slow down", chat_id=OWNER)
+            await self.open()
+            for label in ("My bots", "Research", "Usage alerts"):
+                await self.tap(label)
+            self.assertIn("1. when session.used > 80", self.text)
+            self.assertIn("Plan usage permission is off", self.text)
+            self.assertIn("usage monitor is off", self.text)
+            await self.tap("🗑 1")
+            self.assertIn("Removed the alert session.used > 80", self.text)
+            self.assertEqual(store.alerts(), [])
+
+        self.play(scenario)
+
+    def test_menu_folders_and_rules_are_typed_in_and_checked(self) -> None:
+        async def scenario() -> None:
+            await self.create(RESEARCH, "alfredpanel_research_bot", "Research", "/bot new Research")
+            await self.open()
+            for label in ("My bots", "Research", "Folders and rules", "Working folder"):
+                await self.tap(label)
+            self.assertIn("Send the new working folder", self.text)
+            await self.type(str(self.work))
+            self.assertEqual(self.pool.registry.get(RESEARCH).settings["workdir"], str(self.work))
+            self.assertIn("Working folder: %s" % self.work, self.text)
+            await self.tap("Deny rules")
+            await self.type("Bash(rm *)")
+            self.assertEqual(self.pool.registry.get(RESEARCH).permission("deny"), "Bash(rm *)")
+            await self.tap("Extra folders")
+            await self.type(str(self.config.home))  # Consiglieri's own state: refused
+            self.assertIn("⚠️", self.text)
+            self.assertEqual(self.pool.registry.get(RESEARCH).permission("folders"), "")
+            await self.type("default")
+            await self.tap("Deny rules")
+            await self.type("default")
+            self.assertEqual(self.pool.registry.get(RESEARCH).permission("deny"), "")
+
+        self.play(scenario)
+
+    def test_menu_the_audit_and_removing_one_shared_fact(self) -> None:
+        from alfred import shared_memory
+
+        async def scenario() -> None:
+            await self.create(RESEARCH, "alfredpanel_research_bot", "Research", "/bot new Research")
+            await self.pool.set_cross_agent(self.pool.registry.get(RESEARCH), True, OWNER, "command")
+            await self.open()
+            await self.tap("Audit")
+            self.assertIn("granted @alfredpanel_research_bot by %d (command)" % OWNER, self.text)
+            await self.tap("Back")
+            shared_memory.add(self.config, "user", "Lives in Madrid")
+            shared_memory.add(self.config, "user", "Works as a designer")
+            await self.tap("Shared memory")
+            await self.tap("📄 user")
+            await self.tap("🗑 1")
+            self.assertIn("Removed this fact", self.text)
+            self.assertEqual(shared_memory.facts(self.config, "user"), ["Works as a designer"])
 
         self.play(scenario)
 
