@@ -88,6 +88,7 @@ Text shortcuts:
 /bot show <bot> - its settings and permissions
 /bot set <bot> <setting> <value> - change a setting; `default` clears it
 /bot perm <bot> <permission> <value> - change a permission
+/bot perm <bot> <preset> - switch to a preset: %s
 /bot pause <bot>, /bot resume <bot> - disconnect or reconnect it
 /bot destroy <bot> - delete it, its schedule and its state (asks first)
 
@@ -95,7 +96,7 @@ Settings: %s.
 Permissions: %s.
 Options for /bot new: +web +browser +shell +edit +mcp +contact +bots +bypass, -schedule, -sandbox, and setting=value or permission=value (for example model=sonnet folders=~/notes).
 A new bot starts with the least: its own directory, the alfred command, reminders, nothing else.
-<bot> is its @username, its name or its id.""" % (", ".join(bots.SETTING_NAMES), ", ".join(bots.PERMISSION_NAMES))
+<bot> is its @username, its name or its id.""" % (", ".join(presets.keys()), ", ".join(bots.SETTING_NAMES), ", ".join(bots.PERMISSION_NAMES))
 
 
 class Progress:
@@ -656,7 +657,8 @@ class ControlPanel:
                     await reply("Which bot? Give its @username, name or id. /bots lists them.")
                     return
                 if action == "show":
-                    await reply(bots.describe(record, self.pool.is_running(record.bot_id)))
+                    await reply("%s\n\nPreset: %s" % (bots.describe(record, self.pool.is_running(record.bot_id)),
+                                                      presets.name_of(record.permissions)))
                 elif action == "set":
                     await self._bot_set(update, record, rest)
                 elif action == "perm":
@@ -705,8 +707,8 @@ class ControlPanel:
             text="To create it, tap \"Create @%s\" on the keyboard below and confirm in the window Telegram opens. "
             "You can change the name and username there. When it exists I connect to it and tell you here.\n\n"
             "If the keyboard doesn't show or the button does nothing (an older Telegram app), use the link in the "
-            "next message instead.\n\nIt will start with these permissions (change them any time with /bot perm):\n%s"
-            % (username, bots.permission_summary(draft, for_owner=True)),
+            "next message instead.\n\nIt will start with %s (change it any time from /bot or with /bot perm):\n%s"
+            % (username, presets.name_of(permissions), bots.permission_summary(draft, for_owner=True)),
             reply_markup=keyboard,
         )
         # Second way: the creation link. It works where the Telegram app opens t.me/newbot links itself.
@@ -732,7 +734,22 @@ class ControlPanel:
         name, _, value = rest.strip().partition(" ")
         if not name:
             await update.effective_message.reply_text(
-                "Which permission? One of: %s" % ", ".join(bots.PERMISSION_NAMES))
+                "Which permission? One of: %s. Or a preset: %s."
+                % (", ".join(bots.PERMISSION_NAMES), ", ".join(presets.keys())))
+            return
+        # A preset as a shortcut: `/bot perm <bot> assistant` or `/bot perm <bot> preset assistant`.
+        key = presets.find(value) if name.lower() == "preset" else (presets.find(name) if not value.strip() else None)
+        if name.lower() == "preset" and key is None:
+            await update.effective_message.reply_text("Which preset? One of: %s." % ", ".join(presets.keys()))
+            return
+        if key is not None:
+            updated = await self.pool.set_permissions(record, presets.apply(key, record.permissions))
+            warnings = menus.permission_warnings(updated)
+            await update.effective_message.reply_text(
+                "Permissions of %s: %s. It applies from its next message.\n\n%s%s" % (
+                    record.handle, presets.name_of(updated.permissions), bots.permission_summary(updated, for_owner=True),
+                    "".join("\n" + warning for warning in warnings))
+            )
             return
         updated = await self.pool.set_permission(record, name, value)
         await update.effective_message.reply_text(

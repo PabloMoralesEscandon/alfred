@@ -414,6 +414,21 @@ class PanelTests(PanelHarness):
             self.assertIn("web is on or off", replies[0]["text"])
             replies = await self.command("/bot set research_bot web on")
             self.assertIn("use /bot perm", replies[0]["text"])
+            # A preset by name is a shortcut; the folders and rules of its own are kept.
+            replies = await self.command("/bot perm research_bot power")
+            self.assertIn("Permissions of @research_bot: 🛠 Power", replies[0]["text"])
+            self.assertIn("⚠️ Browser", replies[0]["text"])
+            replies = await self.command("/bot perm research_bot preset Standard")  # the old name
+            self.assertIn("⭐ Assistant", replies[0]["text"])
+            self.assertEqual(self.pool.registry.get(RESEARCH).permissions, {"edit": "on", "web": "on"})
+            replies = await self.command("/bot perm research_bot preset nope")
+            self.assertIn("Which preset?", replies[0]["text"])
+            replies = await self.command("/bot perm research_bot browser on")
+            self.assertIn("browser of @research_bot: on", replies[0]["text"])
+            shown = await self.command("/bot show research_bot")
+            self.assertIn("Preset: 🎛 Custom (from ⭐ Assistant: + browser)", shown[0]["text"])
+            await self.command("/bot perm research_bot basic")
+            await self.command("/bot perm research_bot edit on")
 
             await self.tell(RESEARCH, "hi")
             rules = json.loads(self.pool.registry.settings_file(RESEARCH).read_text())["permissions"]
