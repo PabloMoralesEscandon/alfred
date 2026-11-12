@@ -338,7 +338,7 @@ class PanelTests(PanelHarness):
             self.assertEqual(self.sandbox.calls("claude"), [])
             ignored = await self.command("/bots", user_id=STRANGER)
             self.assertEqual(ignored, [])
-            self.assertEqual([name for name, _ in PANEL_COMMANDS], ["help", "bots", "bot", "status", "usage"])
+            self.assertEqual([name for name, _ in PANEL_COMMANDS], ["help", "bots", "bot", "status", "usage", "shared"])
 
         self.play(scenario)
 
@@ -381,6 +381,29 @@ class PanelTests(PanelHarness):
             await self.pool.resume(self.pool.registry.get(CHEF))
             self.assertIn(CHEF, self.pool.frontends)
             self.assertTrue(self.pool.dropped[-1])  # what it was sent while paused is not answered now
+
+        self.play(scenario)
+
+    def test_the_owner_writes_the_shared_memory_with_slash_shared(self) -> None:
+        async def scenario() -> None:
+            async def shared(text: str, user_id: int = OWNER) -> str:
+                before = len(self.panel_bot.texts)
+                await self.command(text, user_id=user_id)
+                return self.panel_bot.texts[-1] if len(self.panel_bot.texts) > before else ""
+
+            self.assertIn("The shared memory is empty", (await shared("/shared")))
+            self.assertIn("Added to user", await shared("/shared add user Lives in Madrid"))
+            await shared("/shared add user Prefers short answers")
+            self.assertIn("• user: Shared facts: user", (await shared("/shared list")))
+            self.assertIn("2. Prefers short answers", (await shared("/shared show user")))
+            self.assertIn("Removed this fact:\nLives in Madrid", (await shared("/shared remove user 1")))
+            self.assertIn("looks like a secret", (await shared("/shared add keys ghp_%s" % ("a" * 36))))
+            self.assertIn("a topic is a short name", (await shared("/shared add ../x y")))
+            self.assertIn("never instructions", (await shared("/shared help")))
+            self.assertEqual(await shared("/shared add user hi", user_id=STRANGER), "")  # not allowed: nothing
+            self.assertEqual(shared_memory.facts(self.config, "user"), ["Prefers short answers"])
+            self.assertIn("Removed this topic user", (await shared("/shared remove user")))
+            self.assertEqual(self.sandbox.calls("claude"), [])  # the panel did it all, no agent
 
         self.play(scenario)
 

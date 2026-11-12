@@ -35,7 +35,7 @@ from telegram.ext import (
     filters,
 )
 
-from . import bots, home, menus, orca, presets, usage, usage_monitor
+from . import bots, home, menus, orca, presets, shared_memory, usage, usage_monitor
 from .agent import Agent, Chat, Listener
 from .backends import BACKENDS, BackendError, RunResult
 from .bots import BotError, BotRecord, BotRegistry
@@ -65,6 +65,7 @@ PANEL_COMMANDS = [
     ("bot", "Menu to create and manage bots; /bot help for the text shortcuts"),
     ("status", "Whether bot management is on, and how many bots run"),
     ("usage", "How much of the Claude plan limits is used"),
+    ("shared", "The shared memory every agent reads: list, show, add, remove"),
 ]
 
 PROGRESS_INTERVAL = 2.5
@@ -91,6 +92,7 @@ Text shortcuts:
 /bot perm <bot> <preset> - switch to a preset: %s
 /bot perm <bot> cross on|off - cross-agent access: read other agents' memory and use their tools (asks first)
 /bot audit - the last grants and withdrawals of cross-agent access
+/shared - the shared memory every agent reads (list, show, add, remove); bots only read it
 /bot pause <bot>, /bot resume <bot> - disconnect or reconnect it
 /bot destroy <bot> - delete it, its schedule and its state (asks first)
 
@@ -598,6 +600,12 @@ class ControlPanel:
         if not self._authorized(update):
             return
         await update.effective_message.reply_text(await usage.fetch(self.config, dict(os.environ)))
+
+    async def _cmd_shared(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """The shared memory, written by you here (and by Alfred's main agent), read by every agent."""
+        if not self._authorized(update):
+            return
+        await self._send(context.bot, chat_of(update), shared_memory.command(self.config, command_text(update.effective_message)))
 
     async def _cmd_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not self._authorized(update):

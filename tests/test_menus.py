@@ -83,7 +83,7 @@ class MenuTests(PanelHarness):  # type: ignore[misc,valid-type]
     def test_menu_the_assistant_walks_through_every_step_and_creates_the_request(self) -> None:
         async def scenario() -> None:
             await self.open()
-            self.assertEqual([label for label in self.labels()], ["➕ Create bot", "🤖 My bots", "❓ Help", "✖️ Close"])
+            self.assertEqual([label for label in self.labels()], ["➕ Create bot", "🤖 My bots", "🧠 Shared memory", "❓ Help", "✖️ Close"])
             await self.tap("Create bot")
             self.assertIn("Step 1 of 6: name", self.text)
             await self.type("Gestor de Calendarios")
@@ -451,6 +451,36 @@ class MenuTests(PanelHarness):  # type: ignore[misc,valid-type]
             self.pool.registry.save(record)
             await self.tap("Back")
             self.assertIn("Permissions: 🎛 Custom (from 🔒 Basic: + other chats, mode: auto)", self.text)
+
+        self.play(scenario)
+
+    def test_menu_the_shared_memory_lists_adds_shows_and_removes(self) -> None:
+        async def scenario() -> None:
+            from alfred import shared_memory
+
+            await self.open()
+            await self.tap("Shared memory")
+            self.assertIn("never instructions", self.text)
+            self.assertIn("It is empty.", self.text)
+            await self.tap("Add a fact")
+            await self.type("no colon here")
+            self.assertIn("write it as topic: fact", self.text)
+            await self.type('keys: password = "hunter2hunter2"')
+            self.assertIn("looks like a secret", self.text)
+            await self.type("user: lives in Madrid")
+            self.assertIn("Added.", self.text)
+            self.assertIn("1. lives in Madrid", self.text)
+            self.assertEqual(shared_memory.facts(self.config, "user"), ["lives in Madrid"])
+            await self.tap("Back")
+            self.assertIn("📄 user", self.labels())
+            await self.tap("user")
+            await self.tap("Remove topic")
+            self.assertIn("Remove the shared topic user", self.text)
+            await self.tap("No, back")
+            await self.tap("Remove topic")
+            await self.tap("Yes, remove it")
+            self.assertIn("Removed user", self.text)
+            self.assertEqual(shared_memory.entries(self.config), [])
 
         self.play(scenario)
 

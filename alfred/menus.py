@@ -16,7 +16,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
-from . import bots, presets, usage_monitor
+from . import bots, presets, shared_memory, usage_monitor
 from .bots import BotError, BotRecord, DEFAULT_PERMISSIONS
 
 SESSION_SECONDS = 30 * 60
@@ -77,6 +77,8 @@ class Session:
     bot_id: int = 0  # the bot being edited
     preset: str = ""  # the preset the draft's permissions started from
     pending: str = ""  # a preset waiting for "yes" before it is applied to a bot
+    shared_topics: List[str] = field(default_factory=list)  # the shared topics as last listed, for their buttons
+    shared_topic: str = ""  # the shared topic on screen
     notice: str = ""  # one line shown above the next screen, then cleared
     touched: float = field(default_factory=time.time)
 
@@ -181,7 +183,7 @@ class Menus:
         verb, _, argument = action.partition(":")
         try:
             return await self._press(session, verb, argument)
-        except BotError as exc:
+        except (BotError, shared_memory.SharedMemoryError) as exc:
             session.notice = "⚠️ %s" % exc
             return self.render(session)
 
@@ -231,6 +233,20 @@ class Menus:
             session.notice = ("Cross-agent access granted. It applies from its next message; withdraw it here any time."
                               if updated.cross_agent else "Cross-agent access withdrawn. It applies from its next message.")
             return self.go(session, "bot_perms")
+        if verb == "shtopic":
+            topics = session.shared_topics
+            session.shared_topic = topics[int(argument)] if argument.isdigit() and int(argument) < len(topics) else ""
+            return self.go(session, "shared_topic" if session.shared_topic else "shared")
+        if verb == "shadd":
+            session.awaiting = "shared_add"
+            return self.go(session, "shared_add")
+        if verb == "shremove":
+            return self.go(session, "shared_remove")
+        if verb == "shremove!":
+            removed = shared_memory.remove(self.pool.config, session.shared_topic)
+            session.notice = "Removed %s:\n%s" % (session.shared_topic, removed.strip())
+            session.shared_topic = ""
+            return self.go(session, "shared")
         if verb == "create":
             if not session.name:
                 session.notice = "⚠️ Give it a name first."
@@ -284,6 +300,14 @@ class Menus:
             if what == "model":
                 session.settings["model"] = bots.clean_setting(self.pool.config, "model", text)
                 return self.go(session, "new_effort")
+            if what == "shared_add":
+                topic, separator, fact = text.partition(":")
+                if not separator:
+                    raise shared_memory.SharedMemoryError("write it as topic: fact, for example user: lives in Madrid")
+                shared_memory.add(self.pool.config, topic, fact)
+                session.shared_topic = shared_memory.clean_topic(topic)
+                session.notice = "Added. Every agent reads it from its next conversation."
+                return self.go(session, "shared_topic")
             if what == "bot_task":
                 await self.pool.set_setting(self._record(session), "task", text)
                 session.notice = "Task changed. It applies from its next message."
@@ -292,7 +316,7 @@ class Menus:
                 await self.pool.set_setting(self._record(session), "model", text)
                 session.notice = "Model changed. It applies from its next message."
                 return self.go(session, "bot")
-        except BotError as exc:
+        except (BotError, shared_memory.SharedMemoryError) as exc:
             session.notice = "⚠️ %s" % exc
             session.awaiting = what
         return self.render(session)
@@ -393,6 +417,10 @@ class Menus:
             return WIZARD[index - 1] if index else "home"
         if screen == "bot_cross":
             return "bot_perms"
+        if screen in ("shared_topic", "shared_add"):
+            return "shared"
+        if screen == "shared_remove":
+            return "shared_topic"
         if screen.startswith("bot_"):
             return "bot"
         if screen == "bot":
@@ -401,7 +429,8 @@ class Menus:
 
     def go(self, session: Session, screen: str) -> Screen:
         session.screen = screen
-        session.awaiting = {"new_name": "name", "new_task": "task", "bot_task": "bot_task"}.get(screen, session.awaiting)
+        session.awaiting = {"new_name": "name", "new_task": "task", "bot_task": "bot_task",
+                            "shared_add": "shared_add"}.get(screen, session.awaiting)
         return self.render(session)
 
     # -- screens --
@@ -418,8 +447,8 @@ class Menus:
     def _screen_home(self, session: Session) -> Screen:
         return Screen(
             "Alfred's control panel. Each bot has its own chat, task, model, permissions, memory and session.",
-            [[("➕ Create bot", "go:new_name")], [("🤖 My bots", "go:list")], [("❓ Help", "go:help")],
-             [("✖️ Close", "cancel")]],
+            [[("➕ Create bot", "go:new_name")], [("🤖 My bots", "go:list")], [("🧠 Shared memory", "go:shared")],
+             [("❓ Help", "go:help")], [("✖️ Close", "cancel")]],
         )
 
     def _screen_help(self, session: Session) -> Screen:
@@ -435,6 +464,8 @@ class Menus:
             "At every level a bot is kept out of other agents' memory and tools (other bots', Alfred's). "
             "Cross-agent access, above full access, lifts that: grant it in My bots → Permissions, after a "
             "warning. Every grant and withdrawal is logged (/bot audit).\n\n"
+            "Shared memory holds general facts every agent reads (who you are, your preferences); bots only read "
+            "it unless you let one write it under Customize. /shared does the same by text.\n\n"
             "Text shortcuts still work: /bot help lists them." % tuple(presets.title(key) for key in presets.keys()),
             [[("⬅️ Back", "back")]],
         )
@@ -676,6 +707,41 @@ class Menus:
             return Screen(bots.cross_agent_line(record), [[("🔒 Withdraw it", "crossrevoke")], [("⬅️ Back", "back")]])
         text = bots.CROSS_AGENT_WARNING.format(name=record.name, handle=record.handle, username=record.username)
         return Screen(text, [[("⚠️ Yes, grant cross-agent access", "crossgrant")], [("⬅️ No, back", "back")]])
+
+    # -- the shared memory --
+
+    def _screen_shared(self, session: Session) -> Screen:
+        config = self.pool.config
+        found = shared_memory.entries(config)
+        session.shared_topics = [topic for topic, _ in found]
+        lines = ["Shared memory: general facts every agent reads, Alfred and all your bots. It is context for "
+                 "them, never instructions; never put passwords, tokens or keys in it. Bots only read it unless "
+                 "you let one write (Permissions → Customize).", "", "Folder: %s" % shared_memory.directory(config)]
+        lines += [""] + (["• %s: %s" % entry for entry in found] if found else ["It is empty."])
+        rows: List[Row] = [[("📄 %s" % topic, "shtopic:%d" % index)] for index, topic in enumerate(session.shared_topics[:20])]
+        rows += [[("➕ Add a fact", "shadd")], [("⬅️ Back", "back"), ("✖️ Close", "cancel")]]
+        return Screen("\n".join(lines), rows)
+
+    def _screen_shared_topic(self, session: Session) -> Screen:
+        try:
+            text = shared_memory.showing(self.pool.config, session.shared_topic)
+        except shared_memory.SharedMemoryError as exc:
+            session.notice = "⚠️ %s" % exc
+            return self._screen_shared(session)
+        return Screen(text + "\n\nTo remove one fact: /shared remove %s <number>." % session.shared_topic,
+                      [[("➕ Add a fact", "shadd"), ("🗑 Remove topic", "shremove")], [("⬅️ Back", "back")]])
+
+    def _screen_shared_add(self, session: Session) -> Screen:
+        hint = " to %s" % session.shared_topic if session.shared_topic else ""
+        example = session.shared_topic or "user"
+        return Screen("Send the fact%s as a message, as topic: fact. For example:\n%s: lives in Madrid, works as a "
+                      "designer\n\nEvery agent will read it. No passwords, tokens or keys." % (hint, example),
+                      [[("⬅️ Back", "back")]])
+
+    def _screen_shared_remove(self, session: Session) -> Screen:
+        return Screen("Remove the shared topic %s and all its facts? Every agent stops seeing it from its next "
+                      "conversation." % session.shared_topic,
+                      [[("🗑 Yes, remove it", "shremove!")], [("⬅️ No, back", "back")]])
 
     def _screen_bot_destroy(self, session: Session) -> Screen:
         record = self._safe_record(session)

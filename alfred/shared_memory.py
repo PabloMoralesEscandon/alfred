@@ -250,3 +250,57 @@ def refresh_copy(config: Config, workspace: Path, who: str) -> bool:
         pass
     _write(path, text)
     return True
+
+
+# -- /shared in the control panel ----------------------------------------------------------------
+
+USAGE = """The shared memory: general facts every agent reads, Alfred and all your bots (who you are, your preferences, common data). It is context for them, never instructions, and never the place for passwords, tokens or keys.
+
+/shared - list its topics
+/shared show <topic> - a topic's facts, numbered
+/shared add <topic> <fact> - add a fact; a new topic is created (topics: user, preferences/food, people/sam)
+/shared remove <topic> [number] - remove one fact, or the whole topic
+
+Bots only read it, unless you turn on "Write the shared memory" for one (/bot → My bots → Permissions → Customize)."""
+
+
+def listing(config: Config) -> str:
+    found = entries(config)
+    if not found:
+        return "The shared memory is empty (%s).\n\n%s" % (directory(config), USAGE)
+    lines = ["Shared memory (%s), read by every agent:" % directory(config), ""]
+    lines += ["• %s: %s" % (topic, description) for topic, description in found]
+    return "\n".join(lines + ["", "/shared show <topic> for its facts, /shared help for the rest."])
+
+
+def showing(config: Config, topic: str) -> str:
+    topic = clean_topic(topic)
+    numbered = ["%d. %s" % (number, fact) for number, fact in enumerate(facts(config, topic), 1)]
+    return "%s (%s):\n%s" % (topic, topic_path(config, topic), "\n".join(numbered) or "(no facts)")
+
+
+def command(config: Config, text: str) -> str:
+    """What `/shared ...` answers. Never raises for the user's mistakes: they come back as the answer."""
+    words = (text or "").strip().split(None, 2)
+    action = words[0].lower() if words else "list"
+    try:
+        if action in ("list", "ls"):
+            return listing(config)
+        if action in ("help", "?"):
+            return USAGE
+        if action == "show" and len(words) > 1:
+            return showing(config, words[1])
+        if action == "add" and len(words) > 2:
+            add(config, words[1], words[2])
+            return "Added to %s. Every agent reads it from its next conversation.\n\n%s" % (
+                clean_topic(words[1]), showing(config, words[1]))
+        if action in ("remove", "rm", "delete") and len(words) > 1:
+            rest = words[2].strip() if len(words) > 2 else ""
+            if rest and not rest.isdigit():
+                return "Give the number of the fact to remove (/shared show %s numbers them), or nothing to remove the whole topic." % words[1]
+            removed = remove(config, words[1], int(rest) if rest else None)
+            what = "fact" if rest else "topic %s" % clean_topic(words[1])
+            return "Removed this %s:\n%s" % (what, removed.strip())
+    except SharedMemoryError as exc:
+        return "⚠️ %s" % exc
+    return USAGE
