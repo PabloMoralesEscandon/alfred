@@ -2,6 +2,11 @@
 
 Estado: **fases 0 (análisis) y 1 (nombre visible) hechas** en la rama `PabloMoralesEscandon/rename`,
 sin fusionar ni publicar. Las fases 2 a 5 esperan la confirmación del usuario.
+
+**Corrección posterior a la fase 1:** el usuario decidió que no haya agente principal. Alfred ya no es un
+personaje dentro de Consiglieri: el bot base es solo el panel, y cada agente es un bot de un usuario.
+Lo que la fase 1 dejó como «personaje Alfred» se ha corregido (detalles en
+[PANEL_ONLY.md](PANEL_ONLY.md)). Esa parte de este documento se ha actualizado en consecuencia.
 Fecha del análisis: 2026-11-12, sobre el commit `2fd0e0a`.
 
 ## Decisión
@@ -59,9 +64,9 @@ en GitHub (`consigliere`) ya es de una organización ajena. Si algún día hace 
    `~/.alfred/bin/alfred` (regenerado en cada arranque); el convenio de secretos del llavero
    `alfred-<extensión>-<clave>`; la identidad git `Alfred <alfred@localhost>` de los autoguardados
    del home.
-7. **`SOUL.md` ya existe en el home y dice «Your name is Alfred.»** La plantilla solo se copia si
-   falta, así que cambiarla no renombra al agente que corre. Encaja con mantener a Alfred como
-   personaje (ver decisiones abiertas).
+7. **`SOUL.md` ya existe en el home y dice «Your name is Alfred.»** Era la personalidad del agente
+   principal, que ya no existe. Nada la lee ni la reescribe. La plantilla `templates/SOUL.md` es ahora
+   la personalidad base de los bots, sin nombre (ver [PANEL_ONLY.md](PANEL_ONLY.md) §5).
 8. Ahora mismo **no existen** `~/.alfred-bots` ni `~/.alfred-shared` (sí `~/.alfred-test`,
    `~/.alfred-test-bots`, `~/.alfred-test.env` y `~/.alfred-test.old-code`, de la instancia de
    pruebas). No hay extensiones en `~/.alfred/extensions` ni entradas de `alfred` en el crontab.
@@ -152,10 +157,11 @@ copia del plist).
   comentarios y docstrings, `description` de `pyproject.toml`, `displayName` del plugin, plantillas
   del repo en lo que es nombre del proyecto. **Sin tocar** paquete, comando, variables, rutas,
   servicio, nombre del plugin (`alfred:*`), `SOUL.md` ni los ficheros generados del home.
-- **Convención**: *Consiglieri* es el proyecto y el conjunto de agentes; *Alfred* sigue siendo el
-  agente principal (el mayordomo). Los textos que nombran el sistema («el panel de control de
-  Alfred», «los bots que creó Alfred», «el home de Alfred», «el código de Alfred») pasan a
-  Consiglieri; los que nombran al agente principal como personaje («I'm Alfred») se quedan.
+- **Convención**: *Consiglieri* es el proyecto y el conjunto de agentes. Los textos que nombran el
+  sistema («el panel de control de Alfred», «los bots que creó Alfred», «el home de Alfred», «el
+  código de Alfred») pasan a Consiglieri. (Al principio la fase 1 dejó «Alfred» como nombre del agente
+  principal; al eliminarse el agente principal, esos textos se cambiaron por «tus otros bots» y
+  similares.)
 - **Riesgo**: bajo. El código no cambia de comportamiento; los tests que comparan texto se ajustan.
 - **Prueba**: suite completa; `grep -rn '\bAlfred\b'` revisado a mano (solo deben quedar el
   personaje y los nombres técnicos); `scripts/check_old_name.sh` para ver el recuento.
@@ -166,16 +172,15 @@ copia del plist).
   plantillas del repo (`CLAUDE.md`, `AGENTS.md`, `BOT.md`) y plugin base (`displayName`,
   `description`, `author`, skill `extensions`); comentarios y docstrings; README, `.env.example` y
   `description` de `pyproject.toml`; documentos de diseño; notas de investigación (commit aparte,
-  ver decisión abierta 4). La palabra `Alfred` pasa de 321 líneas a 34, todas el agente principal,
-  el ejemplo de perfil de Chrome, la identidad git del home o la historia («the first version of
-  Alfred»). `scripts/check_old_name.sh` baja de 1.083 a 836 líneas: lo que queda es comando,
+  ver decisión abierta 4). La palabra `Alfred` pasa de 321 líneas a 34, y tras quitar el agente
+  principal a menos: quedan el ejemplo de perfil de Chrome, la identidad git de los autoguardados, el
+  nombre anterior del proyecto en el README y en las docs, y los fixtures `AlfredPanelBot`. `scripts/check_old_name.sh` baja de 1.083 a 836 líneas: lo que queda es comando,
   variables, rutas, paquete y skills, de las fases 2 a 4. Los 289 tests pasan, con el paquete
   importado desde este worktree.
-- **Sin tocar, a propósito**: `SOUL.md` de la plantilla («Your name is Alfred.»), el título
-  «Alfred: operating manual» de `CLAUDE.md`, «I'm Alfred» de `/start`, el nombre «Alfred» del
-  agente principal en las listas de otros agentes y en `alfred chat`, el perfil de Chrome de ejemplo,
-  `user.name=Alfred` de los autoguardados, los fixtures `AlfredPanelBot` de los tests, y todo lo que
-  es código: `alfred`, `ALFRED_*`, `~/.alfred*`, `$alfred_home`, `alfred:<skill>`, servicio.
+- **Sin tocar, a propósito**: el perfil de Chrome de ejemplo, `user.name=Alfred` de los
+  autoguardados, los fixtures `AlfredPanelBot` de los tests, y todo lo que es código: `alfred`,
+  `ALFRED_*`, `~/.alfred*`, `$alfred_home`, `alfred:<skill>`, servicio. Ya no existen la plantilla
+  `CLAUDE.md` del agente principal ni «I'm Alfred»; `SOUL.md` es otra cosa (ver hallazgo 7).
 
 ### Fase 2: paquete y comando, con `alfred` como alias
 
@@ -187,7 +192,7 @@ copia del plist).
     `consiglieri.cli.main`), para que `python -m alfred run` del plist actual y del lanzador viejo
     sigan funcionando. Se borra en la fase 4, después de reinstalar el servicio.
   - El lanzador del home escribe `bin/consiglieri` y `bin/alfred` (el mismo script, con `-m consiglieri`).
-  - `prog="consiglieri"` y mensajes `consiglieri: …`; `--bot main|alfred|consiglieri` para el agente principal.
+  - `prog="consiglieri"` y mensajes `consiglieri: …`. (Ya no hay `--bot main|alfred`: no hay agente principal.)
   - **Reglas de permisos para los dos nombres**: `ALWAYS_DENIED`, `USAGE_RULES`, `excludedCommands`,
     `Bash(<cmd> *)`, `Bash(<cmd> schedule *)`, `Bash(<cmd> bots *)` generadas desde una lista
     `COMMAND_NAMES = ("consiglieri", "alfred")`. Test parametrizado: para cada nombre, `run`,
@@ -289,19 +294,16 @@ copia del plist).
 - **Telegram**: `consiglieri_bot` y `consiglieribot` están cogidos; hay que usar un sufijo
   (`consiglieri_panel_bot`, `consiglieri_hq_bot`).
 - **Gramática**: el plural nombra bien al conjunto («los consiglieri del usuario») pero no a un
-  agente suelto: un bot no puede decir «soy Consiglieri». Por eso el agente principal conserva un
-  nombre propio (Alfred) y cada bot el suyo; *Consiglieri* es el sistema.
+  agente suelto: un bot no puede decir «soy Consiglieri». Por eso cada bot tiene su propio nombre;
+  *Consiglieri* es el sistema y el panel.
 - **Pronunciación**: *con-si-LLIE-ri* (/konsiʎˈʎɛːri/). Para hispanohablantes es natural.
-- **Qué se pierde**: la referencia al mayordomo (que sobrevive como personaje si se mantiene
-  Alfred) y la brevedad del comando.
+- **Qué se pierde**: la referencia al mayordomo (salvo que el usuario recree a Alfred como uno de sus
+  bots, ver [PANEL_ONLY.md](PANEL_ONLY.md) §6) y la brevedad del comando.
 
 ## Decisiones abiertas
 
-1. **¿El agente principal sigue llamándose Alfred, como personaje dentro de Consiglieri?** La fase 1
-   lo asume así (sugerencia del usuario): no se tocan «You are Alfred» de la plantilla de
-   `CLAUDE.md`, «Your name is Alfred.» de la plantilla de `SOUL.md`, ni «I'm Alfred» de `/start`.
-   Si se decide otro nombre, son pocos cambios en las plantillas y en `telegram_bot.py`, y el
-   usuario edita su `~/.alfred/SOUL.md` (el código nunca lo sobrescribe).
+1. ~~¿El agente principal sigue llamándose Alfred?~~ **Resuelta:** no hay agente principal. Recrear el
+   asistente personal como un bot más queda como decisión abierta en [PANEL_ONLY.md](PANEL_ONLY.md) §6.
 2. ¿Nombre visible del bot del panel en Telegram: «Consiglieri»? ¿Username nuevo o el actual?
 3. ¿Cuánto tiempo vive el alias `alfred` (comando y lectura de `ALFRED_*`)? Propuesta: hasta que
    el servicio real lleve una semana con la fase 4 sin incidencias.
@@ -314,9 +316,9 @@ copia del plist).
 7. Cómo se presenta un bot: la fase 1 usa el plural como nombre común en su manual («one of the
    user's Consiglieri: a Telegram bot created for one job») y «a Consiglieri bot» en su `/help`.
    ¿Se queda así o se prefiere otra fórmula?
-8. En los avisos de permisos («read the memory of the other bots and of Alfred») el agente principal
-   aparece como «Alfred». Si el usuario no asocia ese nombre al agente principal, cambiar a «the
-   main agent (Alfred)».
+8. ~~Los avisos de permisos nombraban a Alfred~~ **Resuelta:** ahora dicen «your other bots».
+9. Las decisiones sobre varios usuarios (memoria compartida, auditoría, personalidad base) están en
+   [PANEL_ONLY.md](PANEL_ONLY.md) §9.
 
 ## Anexo: `scripts/check_old_name.sh`
 

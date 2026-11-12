@@ -5,6 +5,10 @@ The `agent-chats` branch turns the main bot into a control panel that creates on
 each with its own settings, permissions, memory, tools and session; see
 [AGENT_CHATS_RESEARCH.md](AGENT_CHATS_RESEARCH.md), section 6.
 
+Since then the main agent is gone: the main bot is only the control panel, its Python process does all the
+managing, and every agent is a bot of one of the allowed users. The premises and phases below describe the
+single-agent design they started from; [PANEL_ONLY.md](PANEL_ONLY.md) has the current one.
+
 ## Premises
 
 1. Consiglieri is a usable personal bot reachable from anywhere through Telegram.

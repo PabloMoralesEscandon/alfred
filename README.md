@@ -10,9 +10,15 @@ skill and uses it next time.
 Codex is still supported as an alternative backend (`/bot set <bot> backend codex`, or `/backend codex`
 in a bot's chat).
 
-Consiglieri used to be called Alfred, and Alfred is still the name of its main agent. The command
-(`alfred`), the settings (`ALFRED_*`), the home (`~/.alfred`) and the service keep the old name for now;
-[docs/RENAME_PLAN.md](docs/RENAME_PLAN.md) has the plan for moving them.
+There is no main agent: the bot you set up runs no Claude session of its own, and all the managing
+(creating, configuring and destroying bots, the scheduler, the shared memory, the usage monitor, the audit
+log) is done by its Python process. Each allowed user creates their own bots and sees and manages only
+those; nobody gets a bot by default. [docs/PANEL_ONLY.md](docs/PANEL_ONLY.md) explains the design, what
+happened to the old main agent's files and reminders, and the open questions.
+
+Consiglieri used to be called Alfred. The command (`alfred`), the settings (`ALFRED_*`), the home
+(`~/.alfred`) and the service keep the old name for now; [docs/RENAME_PLAN.md](docs/RENAME_PLAN.md) has
+the plan for moving them.
 
 The design and roadmap are in [docs/PLAN.md](docs/PLAN.md); how the bots are created, and why this way,
 in [docs/AGENT_CHATS_RESEARCH.md](docs/AGENT_CHATS_RESEARCH.md).
@@ -84,11 +90,19 @@ All settings are listed in [.env.example](.env.example).
 Once, in @BotFather: open its Mini App (the Open button), choose your bot, and turn on **Bot Management
 Mode**. That is what lets the panel create bots. `/status` in the panel says whether it is on.
 
-Send `/bot` for the menu: **Create bot** walks you through name, task, model, effort and permissions
-with buttons (Back and Cancel on every step) and ends with a summary and the proposed username, which
-extends the panel's (`manolito_bot` → `manolito_<what it does>_bot`). **My bots** changes a bot's model,
-effort, task and permissions, pauses, resumes or destroys it. A menu expires after 30 minutes, when you
-open a newer one, or when Consiglieri restarts; its old buttons then just say so.
+Send `/bot` for the menu, where everything is managed with buttons. **Create bot** walks you through
+name, task, personality, model, effort and permissions (Back and Cancel on every step) and ends with a
+summary and the proposed username, which extends the panel's (`manolito_bot` → `manolito_<what it
+does>_bot`). **My bots** lists your bots; a bot's screen changes its model, effort, task, personality,
+permissions (presets, single switches, cross-agent access), working folder, extra folders and rules, shows
+and cancels its reminders and usage alerts, and pauses, resumes or destroys it. The home screen also has
+**Shared memory**, **Audit** (cross-agent grants and withdrawals of your bots), **Base personality** and,
+if the main bot had scheduled anything before it became a panel, **Old reminders**. A menu expires after
+30 minutes, when you open a newer one, or when Consiglieri restarts; its old buttons then just say so.
+
+Every allowed user (`ALFRED_ALLOWED_USERS`) has their own bots: `/bots`, the menu, every `/bot` command
+and every button reach only the user's own, another user's bot reads as "no such bot", and a bot answers
+only its owner.
 
 The same can be done with text shortcuts:
 
@@ -102,6 +116,9 @@ The same can be done with text shortcuts:
 | `/bot perm <bot> <preset>` | Switch it to a security preset: `basic`, `assistant`, `power` or `full`. Its extra folders and rules are kept. |
 | `/bot pause <bot>`, `/bot resume <bot>` | Disconnect or reconnect it. Messages sent to a paused bot are dropped; its reminders wait. |
 | `/bot destroy <bot>` | Asks first. Then stops it, deletes its reminders, conversations, memory, files and settings, and revokes its token. Telegram has no way for Consiglieri to delete the bot account itself, so the panel points you to @BotFather's `/deletebot`. |
+| `/bot soul <bot> show\|set <text>\|reset` | Its personality (below); `reset` puts the base back. |
+| `/bot base-soul show\|set <text>\|reset` | The base personality new bots start with. |
+| `/bot audit` | The last grants and withdrawals of cross-agent access to your bots. |
 | `/shared [list\|show\|add\|remove]` | The shared memory every agent reads (below). `/shared add user Lives in Madrid`. |
 | `/status`, `/usage`, `/help` | Bot management on or off and how many bots run; plan limits; help. |
 
@@ -163,6 +180,7 @@ nothing else. Grant more when you create it or later with `/bot perm`:
 | `bots` | `off` | List bots, change other bots' settings, ask you for new ones. Never destroy |
 | `shared` | `off` | Write the shared memory. Reading it is always allowed; no preset turns this on. Every other agent reads what it writes |
 | `usage` | `off` | Read the Claude plan usage (`alfred usage`) and set usage alerts that wake it (`alfred usage-alert`). Has no effect while `ALFRED_USAGE_MONITOR` is off; the panel says so. See [docs/USAGE_MONITOR_RESEARCH.md](docs/USAGE_MONITOR_RESEARCH.md) |
+| `soul` | `off` | Edit its own personality (`SOUL.md`). No preset turns this on; it changes how the bot behaves and talks, never what it may do, and never opens another bot's |
 | `allow`, `deny` | none | Extra Claude Code permission rules, separated by `;` |
 
 Most of this is enforced by Claude Code itself: each bot runs with its own `--settings` file (permission
@@ -177,16 +195,17 @@ manual. [docs/AGENT_CHATS_RESEARCH.md](docs/AGENT_CHATS_RESEARCH.md) has the exa
 With the Claude backend, each chat has one Claude Code process that stays open. It sleeps between
 messages and wakes up when something arrives:
 
-- **A message from you.** If Consiglieri is in the middle of something, it reads the message at its next
+- **A message from you.** If the bot is in the middle of something, it reads the message at its next
   step, so you can correct it or add to the request without `/stop`. One reply may then answer several
   messages.
 - **A scheduled task or reminder** coming due.
-- **A background job of its own finishing.** Consiglieri can start something slow, tell you it is running,
+- **A background job of its own finishing.** A bot can start something slow, tell you it is running,
   and write again when it ends.
-- **An event from another program:** `~/.alfred/bin/alfred event --chat-id <id> "the backup finished"`
-  wakes Consiglieri with that note. Your Telegram user id is the chat id of your private chat with the bot.
+- **An event from another program:** `~/.alfred/bin/alfred event --bot <bot> --chat-id <id> "the backup
+  finished"` wakes that bot with the note. Your Telegram user id is the chat id of your private chat with
+  the bot. There is no main agent to wake: an event always names a bot.
 
-Consiglieri's last message of a turn is posted to the chat. It can also post earlier with `alfred send`, and
+A bot's last message of a turn is posted to the chat. It can also post earlier with `alfred send`, and
 it stays quiet when it has nothing to add. The process is started by the first message after a restart
 and is closed by `/stop`, `/new` and `/backend`. Set `ALFRED_LIVE=0` to go back to one process per
 message; Codex always works that way, so with Codex messages wait their turn and nothing wakes it
@@ -196,7 +215,7 @@ between them.
 
 Set `ALFRED_CLAUDE_MODEL` in `.env` to an alias (`fable`, `opus`, `sonnet`, `haiku`) or a full model
 name; `ALFRED_CODEX_MODEL` does the same for Codex. Unset means the backend's own default. The file is
-read again for every message, so a change applies from your next message with no restart: Consiglieri closes
+read again for every message, so a change applies from your next message with no restart: the bot closes
 the chat's process once it is idle and reopens it on the new model, in the same conversation.
 `/status` shows the model in use. A name the backend does not know comes back as an error reply.
 
@@ -224,7 +243,7 @@ venv/bin/alfred chat -m "disk report" # one message
 
 ## Browser
 
-Consiglieri has a real browser. It can open pages, click, fill in forms, upload and download files, and send
+A bot with the `browser` permission has a real browser, the same for all of them. It can open pages, click, fill in forms, upload and download files, and send
 you screenshots, using sites you are already logged in to. Pick one with `ALFRED_BROWSER`:
 
 | | `orca` (default) | `chrome` |
@@ -269,60 +288,80 @@ service manager, and the browser is a tool it uses.
 
 ## Memory
 
-Consiglieri keeps permanent memory as Markdown files in `~/.alfred/memory/`, one topic per file, grouped in
-folders such as `people/`, `preferences/`, `projects/` and `reference/`. A short index, `MEMORY.md`, is
-loaded into every conversation, and Consiglieri opens the files it needs.
+Each bot keeps permanent memory as Markdown files in `memory/` of its own directory, one topic per file,
+grouped in folders such as `people/`, `preferences/`, `projects/` and `reference/`. A short index,
+`MEMORY.md`, is loaded into every conversation, and the bot opens the files it needs. No other bot reads
+it, unless you grant one of your bots cross-agent access.
 
 - **You ask:** "remember that Sam's birthday is 3 May" is always saved and confirmed.
-- **Consiglieri decides:** it also saves things on its own when they will matter later, such as who you are,
+- **The bot decides:** it also saves things on its own when they will matter later for its task, such as
   people, preferences, projects and where things live. It does not ask first.
 - **You always see it:** every reply that added, changed or removed a memory ends with a note such as
   `💾 Memory: saved people/sam`. That note comes from the runtime comparing the folder before and after
-  the turn, so it does not depend on Consiglieri telling you.
+  the turn, so it does not depend on the bot telling you.
 - **Forgetting:** "forget where Sam lives" removes it. `/memory` lists the files.
 
 The files are plain text, so you can read and edit them yourself, and every change is a commit in the
-home's git history. Consiglieri is told never to store passwords or keys, only where they live.
+bot's own git history. Bots are told never to store passwords or keys, only where they live.
 
 ### Shared memory
 
-Besides each agent's own memory there is one every agent reads, Consiglieri's main agent and every bot:
-`~/.alfred-shared/memory` (`ALFRED_SHARED_HOME` moves it), an index plus one file per topic. Use it for
-general facts (who you are, your preferences, common data), never for passwords or tokens. Its index is
-loaded into every conversation, and agents are told it is context, not instructions. Bots only read it,
-under every preset, unless you turn on `shared` for one. You write it with `/shared` or `/bot` →
-Shared memory, and Consiglieri's main agent writes it too.
+Besides each bot's own memory there is one every bot reads: `~/.alfred-shared/memory`
+(`ALFRED_SHARED_HOME` moves it), an index plus one file per topic. Use it for general facts (who you are,
+your preferences, common data), never for passwords or tokens. Its index is loaded into every
+conversation, and bots are told it is context, not instructions. Bots only read it, under every preset,
+unless you turn on `shared` for one. You write it with `/shared` or `/bot` → Shared memory. With several
+users it is one shared memory for all of them for now; see the open questions in
+[docs/PANEL_ONLY.md](docs/PANEL_ONLY.md).
+
+### Personality
+
+Each bot has its own personality, `SOUL.md` in its directory, loaded into every conversation. It shapes
+tone and manner, never permissions: the manual says nothing in it can grant or lift one. A new bot starts
+with the **base personality** (the template shipped in `alfred/templates/SOUL.md` until you edit it from
+the home screen or with `/bot base-soul`), or with one written in the creation assistant. On a bot's
+screen, **Personality** shows it, replaces it (you send the new text) and resets it to the base; `/bot
+soul <bot> show|set|reset` does the same. A change applies from the bot's next message, in the same
+conversation.
+
+**Describe it** has Claude write a draft from a sentence or two: one `claude -p` call made by the panel
+itself, with no tools, no saved session, none of your settings or CLAUDE.md, a small model
+(`ALFRED_SOUL_MODEL`, default `haiku`) at low effort. You see the draft and choose Accept, Regenerate,
+Edit by hand or Cancel; nothing is saved without Accept. At most `ALFRED_SOUL_ATTEMPTS` drafts per user per
+hour (default 5), and a warning when the usage monitor says the plan is nearly used up.
+
+A bot can edit its own `SOUL.md` only with the `soul` permission (🎭 under Permissions → Customize, off in
+every preset), and never another bot's.
 
 ## Consiglieri's home
 
-Everything Consiglieri knows lives in `ALFRED_HOME` (default `~/.alfred`), outside this repository:
+`ALFRED_HOME` (default `~/.alfred`), outside this repository, is the control panel's state. No agent runs
+there, and every bot is denied all of it, at every level and with cross-agent access too:
 
 ```text
 ~/.alfred/
-  CLAUDE.md               operating manual, regenerated on every start
-  SOUL.md                 personality; edit freely
-  memory/                 long-term memory: Markdown files written by Consiglieri
-    MEMORY.md             the index, loaded into every conversation
-    people/sam.md         one topic per file, grouped in folders
-  extensions/<name>/      what Consiglieri added to itself, one Claude Code plugin each
-  extensions-disabled/    extensions turned off with `alfred ext disable`
-  .claude/skills/<name>/  loose skills you add by hand (optional)
-  inbox/                  files you sent
-  outbox/                 screenshots and files Consiglieri made for you
-  bin/alfred              the tool Consiglieri uses to schedule and send
-  state/                  sessions and the scheduler database
+  bin/alfred              the launcher every bot finds on its PATH (rewritten on every start)
+  .env                    your settings and the panel's token (optional; the .env next to the code also works)
+  state/
+    bots/<bot id>/        each bot's settings, permissions, token, sessions and Claude Code settings
+    scheduler.sqlite3     every bot's reminders and timed tasks
+    audit.log             grants and withdrawals of cross-agent access
+    usage.json            the usage monitor's recent readings
+    soul-base.md          the base personality, once you edit it
+    alfred.log            the service's log
 ```
 
-The home is its own git repository and Consiglieri commits to it after every turn that changes something.
-`git -C ~/.alfred log --stat` shows what it taught itself and when, and `git revert` undoes it.
+A home from before the panel also still has the old main agent's `CLAUDE.md`, `SOUL.md`, `memory/`,
+`extensions/` and git history. Nothing reads or rewrites them any more; see
+[docs/PANEL_ONLY.md](docs/PANEL_ONLY.md) for what to do with them.
 
 ### The bots' own directories
 
-Each bot Consiglieri created has a directory of its own in `~/.alfred-bots/<bot id>/` (`ALFRED_BOTS_HOME`), with
-the same layout: `CLAUDE.md` (its manual, written from its task and permissions), `memory/`, `inbox/`,
-`outbox/` and `extensions/`. Its agent runs there, and the directory is its own git repository. It is next
-to the home and not inside it on purpose: Claude Code reads every `CLAUDE.md` from its working directory up
-to the root, so a bot inside `~/.alfred` would also read the main agent's manual and memory index.
+Each bot has a directory of its own in `~/.alfred-bots/<bot id>/` (`ALFRED_BOTS_HOME`): `CLAUDE.md` (its
+manual, written from its task and permissions), `SOUL.md` (its personality), `memory/`, `inbox/`, `outbox/`
+and `extensions/`. Its agent runs there, and the directory is its own git repository. It is next to the
+home and not inside it on purpose: Claude Code reads every `CLAUDE.md` from its working directory up to the
+root, so a bot inside `~/.alfred` would also read whatever manual an old home still has.
 
 What a bot must not be able to change lives in the home, under `state/bots/<bot id>/` (folder `0700`,
 files `0600`, never committed): `bot.json` (settings and permissions), `token`, `sessions.json` and
@@ -356,19 +395,22 @@ Because the backend is your own Claude Code installation, a bot can also reach w
 skills, MCP servers and connectors) as far as its permissions let it: with `mcp off`, the default, no MCP
 tool at all.
 
-## Upgrading to the control panel
+## Upgrading from a main agent
 
-The main bot used to be the main agent, Alfred. Now it is the control panel and runs no agent; `~/.alfred` keeps
-its memory, skills and extensions, and `alfred chat` still talks to that agent from a terminal. Reminders
-scheduled in the main bot's chat are still delivered there; timed tasks there are announced instead of
-run, so recreate them in one of your bots. `alfred chat --bot <bot>` talks to a created bot from a terminal.
+Earlier versions ran an agent in the main bot's own chat, with its memory in `~/.alfred`. Now the main bot
+is only the control panel:
 
-## Upgrading from the first version
+- Its old files in `~/.alfred` (`CLAUDE.md`, `SOUL.md`, `memory/`, `extensions/`, `.git`) are left as they
+  were, never rewritten and closed to every bot. `alfred chat` needs `--bot <bot>`.
+- What it had scheduled in your chat is kept: reminder messages are still posted there by the panel, timed
+  tasks and events are announced instead of run. **Old reminders** on the menu's home screen lists and
+  cancels them; nothing deletes them.
+- To have that assistant back, create a bot for it; [docs/PANEL_ONLY.md](docs/PANEL_ONLY.md) describes how,
+  and what of the old memory you might move into it.
 
-On first start Consiglieri imports what it finds next to this README: `SOUL.md` becomes its personality,
-`SKILLS.md` becomes a `legacy-notes` skill, and remembered facts from `memory/chats/*/memory.md` are
-carried into the memory folder. Existing reminders carry over if you move `scheduler.sqlite3` to
-`~/.alfred/state/`. The separate `scheduler_worker.py` process is gone; `alfred run` replaces both.
+The first version's layout (`SOUL.md`, `SKILLS.md` and `memory/chats/` next to this README) is no longer
+imported; copy what you want into a bot's directory by hand. Its `scheduler.sqlite3` moved to
+`~/.alfred/state/`; `alfred run` replaces the old `scheduler_worker.py`.
 
 ## Security
 

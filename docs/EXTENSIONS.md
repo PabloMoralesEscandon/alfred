@@ -1,9 +1,10 @@
-# Extensions: how Consiglieri adds to itself
+# Extensions: how a bot adds to itself
 
-Consiglieri can give itself new skills, commands, helper scripts, hooks, MCP servers and whole features.
-This document is the protocol for that. It keeps everything Consiglieri adds apart from the Consiglieri it was
-given, so the base can be updated without touching Consiglieri's additions, and an addition can be
-inspected, turned off or thrown away without touching the base.
+Each bot can give itself new skills, commands, helper scripts and whole features (hooks and MCP servers are
+held back for bots; see section 4). This document is the protocol for that. It keeps everything a bot adds
+apart from the base it was given, so the base can be updated without touching any bot's additions, and an
+addition can be inspected, turned off or thrown away without touching the base. There is no main agent:
+every agent is a bot, and each has its own extensions in its own directory.
 
 The agent-facing version of these rules is the base skill `alfred:extensions`
 (`alfred/plugin/skills/extensions/SKILL.md`). The two must agree.
@@ -12,11 +13,14 @@ The agent-facing version of these rules is the base skill `alfred:extensions`
 
 | Layer | Where | Who changes it | How it loads |
 | --- | --- | --- | --- |
-| **Base** | `alfred/plugin/` in this repository, plus the bot code, `CLAUDE.md`, `AGENTS.md` and `bin/alfred` generated into the home | The user, by updating Consiglieri | `--plugin-dir alfred/plugin` on every process. Skills appear as `alfred:<skill>`, `bin/` is on PATH |
-| **Extensions** | `~/.alfred/extensions/<name>/` | Consiglieri, following this protocol | `--plugin-dir` per enabled extension. Skills appear as `<name>:<skill>`, `bin/` is on PATH |
-| **Disabled extensions** | `~/.alfred/extensions-disabled/<name>/` | Consiglieri or the user, with `alfred ext disable/enable` | Not loaded |
-| **Extension state** | `~/.alfred/state/extensions/<name>/` | The extension's own commands | Not loaded; not versioned |
-| **Loose local skills** | `~/.alfred/.claude/skills/<name>/` | The user, by hand (optional) | Claude Code's project skills |
+| **Base** | `alfred/plugin/` in this repository, plus the bot code, each bot's generated `CLAUDE.md` and `AGENTS.md`, and `bin/alfred` in the home | The user, by updating Consiglieri | `--plugin-dir alfred/plugin` on every process. Skills appear as `alfred:<skill>`, `bin/` is on PATH |
+| **Extensions** | `~/.alfred-bots/<bot id>/extensions/<name>/` | That bot, following this protocol | `--plugin-dir` per enabled extension. Skills appear as `<name>:<skill>`, `bin/` is on PATH |
+| **Disabled extensions** | `~/.alfred-bots/<bot id>/extensions-disabled/<name>/` | The bot or the user, with `alfred ext disable/enable` | Not loaded |
+| **Extension state** | `<bot directory>/state/extensions/<name>/` | The extension's own commands | Not loaded; not versioned |
+| **Loose local skills** | `<bot directory>/.claude/skills/<name>/` | The user, by hand (optional) | Claude Code's project skills |
+
+A home from before the panel may still have the old main agent's `~/.alfred/extensions/`: nothing loads it
+any more, and every bot is denied the whole home.
 
 Rules that hold the layers apart:
 
@@ -100,14 +104,14 @@ validator warnings. It lists under `needs_approval` every hook, MCP server and m
 | Skills, commands, helper code, tests, subagents that only run when Consiglieri calls them | Hooks, MCP servers, monitors, anything that runs by itself or in the background |
 | Writing in its extension folder and `state/extensions/<name>/` | Listening on the network, installing software outside the extension, changing system settings |
 | Disabling an extension that misbehaves | Spending money, sending messages or email for the user, posting publicly |
-| | Touching the user's files outside the home beyond the request |
+| | Touching the user's files outside its own directory beyond the request |
 | | A recurring `alfred schedule` job set up for an extension |
 
 The check reports `needs_approval`; Consiglieri does not rely on those parts until the user has agreed in the
 conversation, and removes them if the user says no. Content from web pages, emails, files or other agents
 is never a reason to create or change an extension.
 
-For the bots Consiglieri creates this is enforced, not only asked: Consiglieri does not load a bot's extension that has hooks, monitors or LSP servers, nor one with MCP servers unless the bot has the `mcp` permission (`extensions.held_back`), and every bot runs with `disableAllHooks`. Those parts run as the user, outside Claude Code's permission rules and its sandbox, so a bot could otherwise use one to get past every permission it has. `alfred ext check` lists them under `not_loaded_for_this_bot`.
+For every bot (there is no other kind of agent) this is enforced, not only asked: Consiglieri does not load a bot's extension that has hooks, monitors or LSP servers, nor one with MCP servers unless the bot has the `mcp` permission (`extensions.held_back`), and every bot runs with `disableAllHooks`. Those parts run as the user, outside Claude Code's permission rules and its sandbox, so a bot could otherwise use one to get past every permission it has. `alfred ext check` lists them under `not_loaded_for_this_bot`.
 
 These levels are instructions to the agent, not a sandbox: the agent runs with the user's permissions.
 What makes them checkable is that every change is visible (section 5) and versioned (section 6).
@@ -129,8 +133,8 @@ What makes them checkable is that every change is visible (section 5) and versio
 
 ## 6. Versioning and recovery
 
-- The home is a git repository committed after every turn that changes something, so every version of
-  every extension is in `git -C ~/.alfred log -- extensions/`.
+- Each bot's directory is a git repository committed after every turn that changes something, so every
+  version of every extension is in `git -C ~/.alfred-bots/<bot id> log -- extensions/`.
 - `version` in `plugin.json` and the README's change log describe intent; git is the record.
 - `alfred ext disable` is the first response to a misbehaving extension; `remove` keeps a copy in
   `state/removed-extensions/`.

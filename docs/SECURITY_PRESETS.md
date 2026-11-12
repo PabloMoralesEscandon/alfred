@@ -17,7 +17,8 @@ does not name keeps its default.
 | 🔓 **Full access** ⚠️⚠️ | Anything your user can do on this Mac, without asking | Almost nothing: an unsandboxed shell gets around the remaining rules | everything `on`, `shell full`, `sandbox off`, `mode bypassPermissions` |
 
 Above the four presets is ⚠️ **Cross-agent access** (from the security-control work): on top of its
-preset, the bot may read the memory of the other bots and of the main agent (Alfred) and use their tools. It is not a set of
+preset, the bot may read the memory of its owner's other bots and use their tools (never another user's bots, and
+never Consiglieri's home, which also holds what an old home kept of the former main agent). It is not a set of
 permissions. It is a flag on the bot (`BotRecord.cross_agent`), granted only to a bot that exists, only from
 the control panel, after a warning, and every grant and withdrawal goes to the audit log (`/bot audit`). It can
 sit on top of any preset, and choosing a preset never changes it.
@@ -81,6 +82,14 @@ A preset is applied in one write by `BotPool.set_permissions` (`alfred/telegram_
 - `/bot show` ends with `Preset: ...`, including cross-agent access when the bot has it.
 - `/bot perm <bot> cross on|off` is security-control's command, unchanged; `/bot perm <bot> preset cross` is
   refused, since no preset grants it.
+
+## The personality under every preset
+
+Each bot's `SOUL.md` is its owner's to change, from the panel. No preset lets a bot edit it: that needs the
+`soul` switch under Customize, which opens only the bot's own `SOUL.md` (`Edit` allowed, out of the sandbox's
+`denyWrite`), never another bot's. Without it, `Edit` of the file is denied, the sandbox's `denyWrite` covers
+it, and with an open shell `Bash(*SOUL.md*)` is denied too. As with everything else, a bot with an
+unsandboxed shell (Full access) can get around the text rules.
 
 ## The shared memory under every preset
 
