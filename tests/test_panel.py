@@ -237,6 +237,17 @@ class PanelTests(unittest.TestCase):
 
         self.play(scenario)
 
+    def test_a_bot_given_away_to_someone_else_is_let_go(self) -> None:
+        async def scenario() -> None:
+            await self.create(RESEARCH, "research_bot", "Research", "/bot new Research")
+            await self.pool.on_managed_bot({"id": STRANGER}, {"id": RESEARCH, "username": "research_bot"})
+            self.assertNotIn(RESEARCH, self.pool.frontends)
+            self.assertIsNone(self.pool.registry.token(RESEARCH))
+            self.assertFalse(self.pool.registry.get(RESEARCH).enabled)
+            self.assertIn("belongs to someone else", self.panel_bot.texts[-1])
+
+        self.play(scenario)
+
     def test_bot_management_off_explains_how_to_turn_it_on(self) -> None:
         async def scenario() -> None:
             self.pool.can_manage = False

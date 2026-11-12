@@ -897,12 +897,21 @@ class BotPool:
         creator_id = int(creator["id"])
         bot_id = int(bot["id"])
         username = str(bot.get("username") or "")
+        existing = self.registry.get(bot_id)
         if not self.config.is_allowed(creator_id, creator.get("username")):
+            if existing is not None:
+                # One of our bots now belongs to someone else (ownership was transferred): let go of it.
+                log.warning("%s now belongs to unauthorized user id=%s; disconnecting it", existing.handle, creator_id)
+                await self.pause(existing)
+                self.registry.delete_token(bot_id)
+                await self._notify(existing.notify_chat_id or existing.owner_id,
+                                   "%s now belongs to someone else, so I disconnected it and forgot its token. "
+                                   "/bot destroy %s removes what is left of it here." % (existing.handle, existing.username))
+                return None
             # Anyone who knows Alfred's username can open a creation link. Their bot is never taken over.
             log.warning("ignored managed bot %s created by unauthorized user id=%s", bot_id, creator_id)
             return None
         manager = self.main.bot
-        existing = self.registry.get(bot_id)
         if existing is not None:
             return await self._token_changed(existing, creator_id)
 

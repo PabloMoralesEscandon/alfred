@@ -624,7 +624,8 @@ real en esos casos, Alfred debería correr con un usuario propio o en una VM.
   (`drop_pending_updates`). Sus tareas programadas se posponen 5 minutos cada vez hasta que vuelva, en
   vez de darse por fallidas.
 - **Un cambio de token** (el dueño hace `/token` en BotFather) llega como `managed_bot`. El panel pide el
-  token nuevo y reconecta el bot. Un cambio de propietario a alguien no permitido hace que se ignore.
+  token nuevo y reconecta el bot. Si el bot pasa a ser de alguien fuera de la lista de permitidos
+  (transferencia en BotFather), el panel lo desconecta, borra su token y avisa al dueño anterior.
 - **Al destruir un bot** se borran su directorio (memoria, ficheros, extensiones), su estado (ajustes,
   sesiones, token, permisos) y sus tareas programadas. Las de los demás bots no se tocan.
 - **El home `~/.alfred`** se conserva: el agente antiguo sigue accesible con `alfred chat`. Los
@@ -634,8 +635,8 @@ real en esos casos, Alfred debería correr con un usuario propio o en una VM.
 
 ### 6.6 Qué se probó
 
-`PYTHONPATH=tests venv/bin/python -m unittest discover -s tests` pasa **168 tests**: los 125 que había y
-43 nuevos. Se ejecutaron en un venv con Python 3.9.6 y python-telegram-bot 22.5, con stand-ins para
+`PYTHONPATH=tests venv/bin/python -m unittest discover -s tests` pasa **169 tests**: los 125 que había y
+44 nuevos. Se ejecutaron en un venv con Python 3.9.6 y python-telegram-bot 22.5, con stand-ins para
 `claude`, `codex`, `orca` y Telegram.
 
 Uno de los 125 (`test_a_turn_with_no_sign_of_life_is_stopped`) ya fallaba antes de estos cambios en esta
@@ -658,11 +659,12 @@ límite de 0,4 s del test. Se subió a 1,5 s en un commit aparte.
   - `event`;
   - `bots list|set|new` con sus límites;
   - extensiones por bot.
-- **`tests/test_panel.py` (13):**
+- **`tests/test_panel.py` (14):**
   - creación completa sin reiniciar: el bot nuevo contesta con su propio token y su modelo;
   - un bot creado por un desconocido se ignora sin pedir su token;
   - un bot no solicitado queda con permisos mínimos;
   - reconexión por cambio de token;
+  - un bot transferido a otra persona se desconecta y se olvida su token;
   - aviso cuando el modo gestor está apagado;
   - bots registrados que se conectan al arrancar;
   - el panel no tiene agente;
