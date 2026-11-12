@@ -5,13 +5,16 @@ With a stand-in Telegram and a stand-in Claude Code: no network, no real bots, n
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import unittest
+from contextlib import redirect_stdout
 from typing import Any, Dict
 from unittest import mock
 
-from alfred import bot_admin, bots, presets
+from alfred import bot_admin, bots, cli, home, presets
+from alfred.scheduler import SchedulerStore
 from alfred.bot_admin import SpecError
 from alfred.bots import BotRecord, BotRegistry
 from fakes import Sandbox
@@ -22,6 +25,194 @@ try:
     from test_panel import OWNER, RESEARCH, STRANGER, PanelHarness
 except ImportError:  # pragma: no cover - python-telegram-bot missing
     PanelHarness = None  # type: ignore
+from test_cli_bots import FakeTelegramBot
+
+PANEL_TOKEN = "1:PANELPANELPANELPANELPANELPANELPANEL"
+ADMIN = 5000000100
+HELPER = 5000000200
+USER = 99
+
+
+def spec(**fields: Any) -> str:
+    return json.dumps(dict({"name": "Chef", "task": "Plan the week's meals", "preset": "assistant"}, **fields))
+
+
+class AdminCli(unittest.TestCase):
+    """A bot admin running `alfred bots` in its turn, with the panel's Telegram stood in. No tests of its own."""
+
+    def setUp(self) -> None:
+        self.sandbox = Sandbox()
+        self.addCleanup(self.sandbox.cleanup)
+        self.sandbox.environ["TELEGRAM_BOT_TOKEN"] = PANEL_TOKEN
+        self.config = self.sandbox.config
+        home.prepare(self.config)
+        self.registry = BotRegistry(self.config)
+        self.add(ADMIN, "boss_bot", presets.apply("botadmin", {}))
+        self.add(HELPER, "helper_bot", {"web": "on", "edit": "on"})
+        self.as_bot(ADMIN)
+        FakeTelegramBot.sent = []
+        patcher = mock.patch("telegram.Bot", FakeTelegramBot)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def add(self, bot_id: int, username: str, permissions: Dict[str, str], **fields: Any) -> BotRecord:
+        record = BotRecord(bot_id=bot_id, username=username, name=username[:-4].title(), owner_id=USER,
+                           permissions=dict(permissions), chat_ids=[USER], **fields)
+        self.registry.save(record)
+        self.registry.set_token(bot_id, "%d:%s" % (bot_id, "T" * 35))
+        return record
+
+    def as_bot(self, bot_id: int, key: str = None) -> None:
+        environ = dict(self.sandbox.environ, ALFRED_BOT_ID=str(bot_id), ALFRED_CHAT_ID=str(USER), ALFRED_USER_ID="777",
+                       ALFRED_BOT_KEY=key if key is not None else bots.bot_key(self.config, bot_id, create=True))
+        patcher = mock.patch.dict(os.environ, environ)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def run_json(self, *argv: str) -> Dict[str, Any]:
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            cli.main(list(argv))
+        return json.loads(buffer.getvalue())
+
+    def grant(self, bot_id: int, **permissions: str) -> None:
+        record = self.registry.get(bot_id)
+        record.permissions.update(permissions)
+        self.registry.save(record)
+
+
+class AdminCliTests(AdminCli):
+    def test_without_the_admin_permission_no_helper_runs(self) -> None:
+        for bot_id, permissions in ((HELPER, {}), (HELPER, {"bots": "on"})):
+            self.grant(bot_id, **permissions)
+            self.as_bot(bot_id)
+            for argv in (("spec", "--json", spec()), ("create", "--json", spec()), ("status",),
+                         ("configure", "boss_bot", "--json", '{"task": "x"}')):
+                with self.subTest(permissions=permissions, argv=argv[0]):
+                    result = self.run_json("bots", *argv)
+                    self.assertFalse(result["ok"])
+                    self.assertIn("admin permission", result["error"])
+        self.assertEqual(FakeTelegramBot.sent, [])
+        self.assertEqual(bot_admin.load(self.config), [])
+
+    def test_the_helpers_refuse_the_operator_and_a_bot_pretending_to_be_the_admin(self) -> None:
+        with mock.patch.dict(os.environ, {"ALFRED_BOT_ID": ""}):
+            result = self.run_json("bots", "create", "--json", spec())
+        self.assertIn("only inside a bot admin's turn", result["error"])
+        self.as_bot(ADMIN, key=bots.bot_key(self.config, HELPER))  # the helper's key with the admin's id
+        result = self.run_json("bots", "create", "--json", spec())
+        self.assertIn("ALFRED_BOT_KEY does not match", result["error"])
+        self.as_bot(ADMIN, key="")
+        self.assertFalse(self.run_json("bots", "status")["ok"])
+        self.assertEqual(FakeTelegramBot.sent, [])
+
+    def test_spec_checks_without_sending_anything(self) -> None:
+        checked = self.run_json("bots", "spec", "--json", spec(preset="botadmin"))
+        self.assertTrue(checked["ok"], checked)
+        self.assertEqual(checked["starts_with"], "⭐ Assistant")
+        self.assertEqual(checked["waits_for_the_users_yes"], ["🧑‍💼 Bot admin"])
+        refused = self.run_json("bots", "spec", "--json", spec(preset="power"))
+        self.assertFalse(refused["ok"])
+        self.assertIn("browser on is more than @boss_bot has (browser off)", refused["problems"])
+        self.assertEqual((FakeTelegramBot.sent, bot_admin.load(self.config)), ([], []))
+
+    def test_the_spec_file_must_be_in_the_admins_own_directory(self) -> None:
+        own = self.registry.workspace(ADMIN)
+        own.mkdir(parents=True, exist_ok=True)
+        (own / "chef.json").write_text(spec())
+        self.assertTrue(self.run_json("bots", "spec", "--file", "chef.json")["ok"])
+        outside = self.sandbox.root / "chef.json"
+        outside.write_text(spec())
+        self.assertIn("own directories", self.run_json("bots", "spec", "--file", str(outside))["error"])
+        self.assertIn("exactly one of", self.run_json("bots", "spec")["error"])
+        self.assertIn("not valid JSON", self.run_json("bots", "spec", "--json", "{nope")["error"])
+
+    def test_create_sends_the_user_the_request_and_remembers_it(self) -> None:
+        asked = self.run_json("bots", "create", "--json", spec(
+            preset="botadmin", soul="Cheerful and brief.", note="You asked for a cooking helper.",
+            reminders=[{"in": "1d", "message": "Shopping list?"}]))
+        self.assertTrue(asked["ok"], asked)
+        first, second = FakeTelegramBot.sent
+        self.assertEqual((first["token"], first["chat_id"]), (PANEL_TOKEN, USER))  # the panel, to the admin's owner
+        text = first["text"]
+        for part in ("@boss_bot, your bot admin, asks to create a bot for you (request %s)" % asked["request"],
+                     "Name: Chef", "Task: Plan the week's meals", "Personality: its own", "Permissions: ⭐ Assistant",
+                     "in 1d (message): Shopping list?", "🧑‍💼 Bot admin: it could ask you for more bots",
+                     "will NOT have unless you approve", "@boss_bot's note (its words, not mine)", "You will own it"):
+            self.assertIn(part, text)
+        button = first["reply_markup"].to_dict()["keyboard"][0][0]["request_managed_bot"]
+        self.assertEqual((button["suggested_name"], button["suggested_username"]), ("Chef", asked["username"]))
+        self.assertIn(asked["link"], second["text"])
+
+        request = bot_admin.get(self.config, asked["request"])
+        self.assertEqual((request["status"], request["admin_bot_id"], request["owner_id"]), ("waiting", ADMIN, USER))
+        pending = self.registry.take_pending(USER, asked["username"])
+        self.assertEqual((pending.request_id, pending.admin_bot_id, pending.owner_id), (asked["request"], ADMIN, USER))
+        self.assertEqual(pending.permissions, {"web": "on", "edit": "on"})  # without the extras
+        self.assertNotEqual(pending.owner_id, 777)  # ALFRED_USER_ID is ignored: the owner is the admin's owner
+        entry = bots.read_audit(self.config)[-1]
+        self.assertEqual((entry["event"], entry["by"], entry["request"]), ("admin_requested", "@boss_bot", asked["request"]))
+        self.assertEqual(entry["spec"]["permissions"], {"web": "on", "edit": "on", "admin": "on"})
+
+    def test_a_refused_request_sends_nothing_and_is_audited(self) -> None:
+        refused = self.run_json("bots", "create", "--json", spec(cross_agent=True, permissions={"shared": "on"}))
+        self.assertFalse(refused["ok"])
+        self.assertIn("cross-agent access, which @boss_bot does not have", refused["error"])
+        self.assertEqual(FakeTelegramBot.sent, [])
+        entry = bots.read_audit(self.config)[-1]
+        self.assertEqual(entry["event"], "admin_refused")
+        self.assertIn('"cross_agent": true', entry["input"])
+
+    def test_the_limits(self) -> None:
+        with mock.patch.dict(os.environ, {"ALFRED_ADMIN_REQUESTS_PER_HOUR": "2"}):
+            self.assertTrue(self.run_json("bots", "create", "--json", spec(name="One"))["ok"])
+            self.assertTrue(self.run_json("bots", "create", "--json", spec(name="Two"))["ok"])
+            third = self.run_json("bots", "create", "--json", spec(name="Three"))
+        self.assertIn("in the last hour", third["error"])
+        with mock.patch.dict(os.environ, {"ALFRED_ADMIN_MAX_BOTS": "2"}):
+            self.assertIn("a bot admin may have at most 2", self.run_json("bots", "create", "--json", spec())["error"])
+        self.add(5000000300, "made_bot", {}, created_by=ADMIN)
+        with mock.patch.dict(os.environ, {"ALFRED_ADMIN_MAX_BOTS": "3"}):
+            self.assertIn("already has 3 bot(s)", self.run_json("bots", "create", "--json", spec())["error"])
+        with mock.patch.dict(os.environ, {"ALFRED_ADMIN_MAX_BOTS_PER_USER": "5"}):  # 3 bots + 2 waiting
+            self.assertIn("the user already has 5", self.run_json("bots", "create", "--json", spec())["error"])
+        self.assertEqual(len(FakeTelegramBot.sent), 4)  # two requests, two messages each
+        self.assertEqual([entry["event"] for entry in bots.read_audit(self.config)].count("admin_refused"), 4)
+
+    def test_configure_only_the_bots_it_asked_for_and_never_their_permissions(self) -> None:
+        self.add(5000000300, "made_bot", {"web": "on"}, created_by=ADMIN, request_id="r1")
+        self.assertIn("that you asked for", self.run_json("bots", "configure", "helper_bot", "--json", '{"task": "x"}')["error"])
+        self.assertIn("the user's, from the panel",
+                      self.run_json("bots", "configure", "made_bot", "--json", '{"permissions": {"web": "off"}}')["error"])
+        done = self.run_json("bots", "configure", "made_bot", "--json", json.dumps(
+            {"task": "Cook", "model": "sonnet", "soul": "Calm and kind.", "reminders": [{"in": "2h", "task": "Ask about lunch"}]}))
+        self.assertTrue(done["ok"], done)
+        record = self.registry.get(5000000300)
+        self.assertEqual(record.settings, {"task": "Cook", "model": "sonnet"})
+        self.assertEqual(record.permissions, {"web": "on"})
+        self.assertIn("Calm and kind.", (self.registry.workspace(5000000300) / "SOUL.md").read_text())
+        item = SchedulerStore(self.config.db_path).pending_for_bot(5000000300)[0]
+        self.assertEqual((item["kind"], item["chat_id"], item["message"]), ("task", USER, "Ask about lunch"))
+        entry = bots.read_audit(self.config)[-1]
+        self.assertEqual((entry["event"], entry["fields"], entry["bot"]), ("admin_configured", ["model", "reminders", "soul", "task"], "@made_bot"))
+        # Once the user gives it more than the admin has, the admin no longer steers it.
+        self.grant(5000000300, browser="on")
+        refused = self.run_json("bots", "configure", "made_bot", "--json", '{"task": "y"}')
+        self.assertIn("may now do more than you", refused["error"])
+
+    def test_status_lists_only_its_own_requests(self) -> None:
+        asked = self.run_json("bots", "create", "--json", spec())
+        self.grant(HELPER, admin="on")
+        self.as_bot(HELPER)
+        self.assertEqual(self.run_json("bots", "status")["requests"], [])
+        self.assertFalse(self.run_json("bots", "status", asked["request"])["ok"])
+        self.as_bot(ADMIN)
+        shown = self.run_json("bots", "status", asked["request"])["requests"][0]
+        self.assertEqual((shown["status"], shown["name"]), ("waiting", "Chef"))
+        listed = self.run_json("bots", "list")
+        self.assertTrue(listed["ok"])  # admin lists its owner's bots without the bots permission
+        self.assertFalse(self.run_json("bots", "set", "helper_bot", "model", "opus")["ok"])  # that needs bots
+
 
 ADMIN_RULES = ["Bash(alfred bots %s *)" % name for name in bots.ADMIN_SUBCOMMANDS]
 BOTS_RULES = ["Bash(alfred bots %s *)" % name for name in bots.BOTS_SUBCOMMANDS]

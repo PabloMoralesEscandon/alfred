@@ -683,3 +683,39 @@ def reminder_due(reminder: Dict[str, Any]) -> datetime:
     if reminder.get("in") is not None:
         return utc_now() + timedelta(seconds=int(reminder["in"]))
     return parse_time(reminder["at"])
+
+
+def schedule_reminders(config: Config, record: BotRecord, reminders: List[Dict[str, Any]]) -> List[str]:
+    """Schedule reminders for a bot, in its owner's chat with it. Returns their ids."""
+    from .scheduler import KIND_MESSAGE, KIND_TASK, SchedulerStore
+
+    store = SchedulerStore(config.db_path)
+    ids = []
+    for reminder in reminders:
+        item = store.add(chat_id=int(record.owner_id), due=reminder_due(reminder), text=reminder["text"],
+                         kind=KIND_TASK if reminder["kind"] == "task" else KIND_MESSAGE,
+                         repeat_seconds=reminder.get("every"), user_id=int(record.owner_id), bot_id=record.bot_id)
+        ids.append(item["id"])
+    return ids
+
+
+def creation_messages(intro: str, name: str, username: str, link: str) -> List[Tuple[str, Any]]:
+    """The two messages that create a bot, as (text, reply_markup): first Telegram's own creation button on a
+    keyboard (KeyboardButtonRequestManagedBot, with Cancel), then the creation link as the second option.
+    python-telegram-bot 22.5 has no class for the button, so it carries the Bot API's own JSON."""
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
+
+    request = {"request_id": bots.new_request_id(), "suggested_name": name[:64], "suggested_username": username}
+    keyboard = ReplyKeyboardMarkup(
+        [[KeyboardButton("Create @%s" % username, api_kwargs={"request_managed_bot": request})],
+         [KeyboardButton(CANCEL_CREATION)]],
+        resize_keyboard=True, one_time_keyboard=True,
+    )
+    return [
+        (intro, keyboard),
+        ("Second option, the link: %s" % link,
+         InlineKeyboardMarkup([[InlineKeyboardButton("Create @%s by link" % username, url=link)]])),
+    ]
+
+
+CANCEL_CREATION = "Cancel"  # the second key of the creation keyboard

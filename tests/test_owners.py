@@ -230,7 +230,8 @@ class TwoUsersTests(PanelHarness):  # type: ignore[misc,valid-type]
             await self.pool.set_permission(self.pool.registry.get(MINE), "bots", "on")
 
         self.play(scenario)
-        environ = dict(self.sandbox.environ, ALFRED_BOT_ID=str(MINE), ALFRED_CHAT_ID=str(OWNER))
+        environ = dict(self.sandbox.environ, ALFRED_BOT_ID=str(MINE), ALFRED_CHAT_ID=str(OWNER),
+                       ALFRED_BOT_KEY=bots.bot_key(self.config, MINE, create=True))
         with mock.patch.dict(os.environ, environ):
             buffer = io.StringIO()
             with redirect_stdout(buffer):

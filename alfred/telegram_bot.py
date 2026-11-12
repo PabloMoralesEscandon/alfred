@@ -38,7 +38,7 @@ from telegram.ext import (
     filters,
 )
 
-from . import bots, home, menus, orca, presets, shared_memory, soul, soul_writer, usage, usage_monitor
+from . import bot_admin, bots, home, menus, orca, presets, shared_memory, soul, soul_writer, usage, usage_monitor
 from .agent import Agent, Chat, Listener
 from .backends import BACKENDS, BackendError, RunResult
 from .bots import BotError, BotRecord, BotRegistry
@@ -81,7 +81,7 @@ ATTACHMENT_KINDS = (("document", ""), ("voice", ".ogg"), ("audio", ".mp3"), ("vi
 MAIN_UPDATES = ["message", "callback_query", "managed_bot"]
 BOT_UPDATES = ["message", "callback_query"]
 CONFIRM_SECONDS = 300
-CANCEL_CREATION = "Cancel"  # the second key of the creation keyboard
+CANCEL_CREATION = bot_admin.CANCEL_CREATION  # the second key of the creation keyboard
 BOT_USAGE = """I am the Consiglieri control panel. There is no main agent: I create and run your bots, each with its own chat, task, model, permissions, memory, tools and Claude session. You see and manage only your own.
 
 /bot - the menu, where everything is managed with buttons: create a bot step by step; in My bots change its settings, permissions, folders and rules, see and cancel its reminders and usage alerts, pause, resume or destroy it; the shared memory; the audit log
@@ -749,29 +749,15 @@ class ControlPanel:
         """Ask Telegram to create a bot: a keyboard button, then the link. Returns the suggested username."""
         link, username = await self.pool.request_creation(user_id, chat_id, name, settings, permissions, soul_text)
         draft = bots.BotRecord(bot_id=0, username=username, name=name, owner_id=0, settings=settings, permissions=permissions)
-        # First way: a keyboard button that asks Telegram to create the bot (KeyboardButtonRequestManagedBot).
-        # python-telegram-bot 22.5 has no class for it, so the button carries the Bot API's own JSON.
-        request = {"request_id": bots.new_request_id(), "suggested_name": name[:64], "suggested_username": username}
-        keyboard = ReplyKeyboardMarkup(
-            [[KeyboardButton("Create @%s" % username, api_kwargs={"request_managed_bot": request})],
-             [KeyboardButton(CANCEL_CREATION)]],
-            resize_keyboard=True, one_time_keyboard=True,
-        )
-        await self.bot.send_message(
-            chat_id=chat_id,
-            text="To create it, tap \"Create @%s\" on the keyboard below and confirm in the window Telegram opens. "
+        intro = (
+            "To create it, tap \"Create @%s\" on the keyboard below and confirm in the window Telegram opens. "
             "You can change the name and username there. When it exists I connect to it and tell you here.\n\n"
             "If the keyboard doesn't show or the button does nothing (an older Telegram app), use the link in the "
             "next message instead.\n\nIt will start with %s (change it any time from /bot or with /bot perm):\n%s"
-            % (username, presets.name_of(permissions), bots.permission_summary(draft, for_owner=True)),
-            reply_markup=keyboard,
+            % (username, presets.name_of(permissions), bots.permission_summary(draft, for_owner=True))
         )
-        # Second way: the creation link. It works where the Telegram app opens t.me/newbot links itself.
-        await self.bot.send_message(
-            chat_id=chat_id,
-            text="Second option, the link: %s" % link,
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Create @%s by link" % username, url=link)]]),
-        )
+        for text, markup in bot_admin.creation_messages(intro, name, username, link):
+            await self.bot.send_message(chat_id=chat_id, text=text, reply_markup=markup)
         return username
 
     async def _bot_set(self, update: Update, record: BotRecord, rest: str) -> None:
