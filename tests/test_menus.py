@@ -339,6 +339,82 @@ class MenuTests(PanelHarness):  # type: ignore[misc,valid-type]
 
         self.play(scenario)
 
+    # -- cross-agent access --
+
+    def test_menu_cross_agent_access_needs_a_warning_is_audited_and_stands_out(self) -> None:
+        async def scenario() -> None:
+            from alfred import bots
+
+            # Never offered at creation, whatever the preset.
+            await self.walk_to_summary()
+            await self.tap("Back")
+            for preset in ("Minimal", "Standard", "Broad"):
+                await self.tap(preset)
+                self.assertFalse([label for label in self.labels() if "ross-agent" in label], preset)
+            self.assertIn("granted only to a bot that exists", self.text)
+
+            await self.create(RESEARCH, "alfredpanel_research_bot", "Research", "/bot new Research")
+            await self.open()
+            await self.tap("My bots")
+            await self.tap("Research")
+            await self.tap("Permissions")
+            self.assertIn("🔒 Cross-agent access: off (above full access)", self.labels())
+            self.assertIn("cannot read the memory of other agents", self.text)
+            await self.tap("Cross-agent access")
+            self.assertIn("⚠️ Cross-agent access for Research", self.text)
+            self.assertIn("audit log", self.text)
+            await self.tap("No, back")
+            self.assertIn("Permissions of", self.text)
+            self.assertFalse(self.pool.registry.get(RESEARCH).cross_agent)
+            self.assertEqual(bots.read_audit(self.config), [])
+
+            # The presets and switches never touch it, before or after it is granted.
+            await self.tap("Broad")
+            self.assertFalse(self.pool.registry.get(RESEARCH).cross_agent)
+            await self.tap("Cross-agent access")
+            await self.tap("Yes, grant cross-agent access")
+            self.assertTrue(self.pool.registry.get(RESEARCH).cross_agent)
+            self.assertIn("Cross-agent access granted", self.text)
+            self.assertIn("⚠️ CROSS-AGENT ACCESS ON · withdraw", self.labels())
+            self.assertIn("⚠️ CROSS-AGENT ACCESS: it reads the memory", self.text)
+            await self.tap("Minimal")
+            self.assertTrue(self.pool.registry.get(RESEARCH).cross_agent)
+
+            await self.tap("Back")
+            self.assertIn("CROSS-AGENT ACCESS ON since", self.text)  # the bot's own screen
+            await self.tap("Back")
+            self.assertIn("Research @alfredpanel_research_bot ⚠️ CROSS-AGENT", self.labels())  # the list
+            await self.tap("Research")
+            await self.tap("Permissions")
+            await self.tap("withdraw")
+            self.assertFalse(self.pool.registry.get(RESEARCH).cross_agent)
+            self.assertIn("withdrawn", self.text)
+            entries = bots.read_audit(self.config)
+            self.assertEqual([(entry["event"], entry["via"], entry["by"], entry["bot_id"]) for entry in entries],
+                             [("cross_agent_granted", "menu", OWNER, RESEARCH), ("cross_agent_revoked", "menu", OWNER, RESEARCH)])
+
+        self.play(scenario)
+
+    def test_menu_cross_agent_buttons_fit_and_a_stranger_cannot_grant(self) -> None:
+        async def scenario() -> None:
+            await self.create(RESEARCH, "alfredpanel_research_bot", "Research", "/bot new Research")
+            await self.open()
+            for label in ("My bots", "Research", "Permissions", "Cross-agent access"):
+                await self.tap(label)
+            for row in self.rows:
+                for _, data in row:
+                    self.assertLessEqual(len(data.encode("utf-8")), 64, data)
+            grant = self.data("Yes, grant cross-agent access")
+            await self.tap("", user_id=STRANGER, data=grant)
+            self.assertFalse(self.pool.registry.get(RESEARCH).cross_agent)
+            # Granting goes through the warning screen: the action from another screen only shows it.
+            await self.tap("No, back")
+            await self.tap("", data=grant)
+            self.assertFalse(self.pool.registry.get(RESEARCH).cross_agent)
+            self.assertIn("⚠️ Cross-agent access for Research", self.text)
+
+        self.play(scenario)
+
 
 if __name__ == "__main__":
     unittest.main()

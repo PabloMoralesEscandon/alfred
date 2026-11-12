@@ -166,5 +166,33 @@ class BotCliTests(unittest.TestCase):
         self.assertEqual([extension["name"] for extension in self.run_json("ext", "list")["extensions"]], [])
 
 
+    def test_no_bot_can_grant_cross_agent_access_to_itself_or_another(self) -> None:
+        self.grant(RESEARCH, bots="on")
+        for target in ("research_bot", "chef_bot"):
+            for word in ("cross", "cross_agent", "cross-agent"):
+                for value in ("on", "true"):
+                    result = self.run_json("bots", "set", target, word, value)
+                    self.assertFalse(result["ok"], (target, word, result))
+        self.assertFalse(self.registry.get(RESEARCH).cross_agent)
+        self.assertFalse(self.registry.get(CHEF).cross_agent)
+        # Nor the operator's own `alfred` outside a bot's turn: only the control panel grants it.
+        with mock.patch.dict(os.environ, {"ALFRED_BOT_ID": ""}):
+            self.assertFalse(self.run_json("bots", "set", "chef_bot", "cross", "on")["ok"])
+        self.assertFalse(self.registry.get(CHEF).cross_agent)
+        # A bot that asks for a new bot can't smuggle it in: the request carries no cross-agent access.
+        asked = self.run_json("bots", "new", "Spy", "+cross", "cross=on")
+        self.assertTrue(asked["ok"], asked)
+        pending = self.registry.take_pending(99, "alfredpanel_spy_bot")
+        self.assertEqual(pending.permissions, {})
+        self.assertNotIn("cross_agent", vars(pending))
+        # Changing another bot's setting keeps that bot's cross-agent state as it was.
+        record = self.registry.get(CHEF)
+        record.cross_agent = True
+        self.registry.save(record)
+        self.assertTrue(self.run_json("bots", "set", "chef_bot", "model", "opus")["ok"])
+        self.assertTrue(self.registry.get(CHEF).cross_agent)
+        self.assertFalse(self.registry.get(RESEARCH).cross_agent)
+
+
 if __name__ == "__main__":
     unittest.main()

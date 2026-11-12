@@ -109,6 +109,16 @@ MEMORY_PARTS = ("memory", ".git")  # .git: the autosaved history of its memory
 TOOL_PARTS = ("extensions", "extensions-disabled", ".claude")  # plugins and their bin/, skills, agents, settings
 SHARED_PARTS = ("memory", "extensions", ".claude/skills")  # what cross-agent access lets it read
 AUDIT_FILE = "audit.log"  # in <home>/state/
+# What the control panel shows before granting cross-agent access, in the menu and for /bot perm <bot> cross on.
+CROSS_AGENT_WARNING = (
+    "⚠️ Cross-agent access for {name} ({handle})?\n\n"
+    "This is above full access. {handle} will be able to read the memory of every other bot and of Alfred "
+    "(what they know about you, your people, your projects) and use their tools: their skills, extensions "
+    "and scripts. It can't change them, and their tokens, conversations and inboxes stay closed.\n\n"
+    "Whatever those memories hold reaches this bot and whoever can talk to it, and a mistake or a "
+    "malicious text it reads can now act on all of it. Grant it only to a bot you trust with everything.\n\n"
+    "This grant is written to the audit log. Withdraw it any time with /bot perm {username} cross off."
+)
 
 
 class BotError(Exception):

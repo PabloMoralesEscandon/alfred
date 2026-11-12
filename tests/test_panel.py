@@ -495,5 +495,93 @@ class PanelTests(PanelHarness):
         self.play(scenario)
 
 
+    # -- cross-agent access ---------------------------------------------------
+
+    def test_cross_agent_access_from_the_text_commands_asks_first_and_is_audited(self) -> None:
+        async def scenario() -> None:
+            await self.create(RESEARCH, "research_bot", "Research", "/bot new Research")
+            await self.create(CHEF, "chef_bot", "Chef", "/bot new Chef")
+            chef = self.pool.registry.workspace(CHEF)
+            await self.tell(RESEARCH, "hi")
+            deny = "Read(//%s/**)" % str(chef).lstrip("/")
+            rules = json.loads(self.pool.registry.settings_file(RESEARCH).read_text())["permissions"]
+            self.assertIn(deny, rules["deny"])
+
+            refused = await self.command("/bot new Spy +cross Read everything")
+            self.assertIn("never given at creation", refused[0]["text"])
+            asked = await self.command("/bot perm research_bot cross on")
+            self.assertIn("⚠️ Cross-agent access for Research (@research_bot)?", asked[0]["text"])
+            self.assertIn("audit log", asked[0]["text"])
+            grant, cancel = asked[0]["reply_markup"].inline_keyboard[0]
+            self.assertFalse(self.pool.registry.get(RESEARCH).cross_agent)  # nothing before the answer
+
+            stranger = self.button(grant.callback_data, user_id=STRANGER)
+            await self.pool.main._on_button(stranger, SimpleNamespace(bot=self.panel_bot))
+            self.assertFalse(self.pool.registry.get(RESEARCH).cross_agent)
+            # A destroy button can't be turned into a grant, nor a grant button into a destroy.
+            destroy_asked = await self.command("/bot destroy chef_bot")
+            destroy = destroy_asked[0]["reply_markup"].inline_keyboard[0][0]
+            forged = self.button("bot:crossgrant:%s" % destroy.callback_data.split(":")[2])
+            await self.pool.main._on_button(forged, SimpleNamespace(bot=self.panel_bot))
+            self.assertFalse(self.pool.registry.get(CHEF).cross_agent)
+            forged = self.button("bot:destroy:%s" % grant.callback_data.split(":")[2])
+            await self.pool.main._on_button(forged, SimpleNamespace(bot=self.panel_bot))
+            self.assertIsNotNone(self.pool.registry.get(RESEARCH))
+
+            pressed = self.button(grant.callback_data)
+            await self.pool.main._on_button(pressed, SimpleNamespace(bot=self.panel_bot))
+            self.assertTrue(self.pool.registry.get(RESEARCH).cross_agent)
+            self.assertIn("Cross-agent access granted to @research_bot", pressed.edits[-1])
+            again = self.button(grant.callback_data)
+            await self.pool.main._on_button(again, SimpleNamespace(bot=self.panel_bot))
+            self.assertIn("expired", again.edits[-1])
+
+            await self.tell(RESEARCH, "what does chef know?")
+            rules = json.loads(self.pool.registry.settings_file(RESEARCH).read_text())["permissions"]
+            self.assertNotIn(deny, rules["deny"])
+            self.assertIn(str(chef / "memory"), rules["additionalDirectories"])
+            self.assertIn("cross-agent access", (self.pool.registry.workspace(RESEARCH) / "CLAUDE.md").read_text())
+            chef_rules = json.loads(self.pool.registry.settings_file(CHEF).read_text())["permissions"]
+            self.assertIn("Read(//%s/**)" % str(self.pool.registry.workspace(RESEARCH)).lstrip("/"), chef_rules["deny"])
+
+            await self.command("/bots")
+            self.assertIn("Research @research_bot ⚠️ CROSS-AGENT ACCESS", self.panel_bot.texts[-1])
+            self.assertNotIn("Chef @chef_bot ⚠️", self.panel_bot.texts[-1])
+            shown = await self.command("/bot show research_bot")
+            self.assertIn("CROSS-AGENT ACCESS ON since", shown[0]["text"])
+
+            withdrawn = await self.command("/bot perm research_bot cross off")
+            self.assertIn("withdrawn", withdrawn[0]["text"])
+            self.assertFalse(self.pool.registry.get(RESEARCH).cross_agent)
+            await self.tell(RESEARCH, "and now?")
+            rules = json.loads(self.pool.registry.settings_file(RESEARCH).read_text())["permissions"]
+            self.assertIn(deny, rules["deny"])
+
+            # Granted once more, then destroyed: the destruction withdraws it in the log too.
+            asked = await self.command("/bot perm research_bot cross on")
+            await self.pool.main._on_button(self.button(asked[0]["reply_markup"].inline_keyboard[0][0].callback_data),
+                                            SimpleNamespace(bot=self.panel_bot))
+            await self.pool.destroy(self.pool.registry.get(RESEARCH))
+            entries = bots.read_audit(self.config)
+            self.assertEqual([(entry["event"], entry["via"], entry["by"]) for entry in entries], [
+                ("cross_agent_granted", "command", OWNER), ("cross_agent_revoked", "command", OWNER),
+                ("cross_agent_granted", "command", OWNER), ("cross_agent_revoked", "destroy", None)])
+            audit = await self.command("/bot audit")
+            self.assertIn("granted @research_bot by %d (command)" % OWNER, audit[0]["text"])
+            self.assertIn("withdrawn @research_bot by None (destroy)", audit[0]["text"])
+
+        self.play(scenario)
+
+    def test_a_bot_given_away_loses_cross_agent_access(self) -> None:
+        async def scenario() -> None:
+            record = await self.create(RESEARCH, "research_bot", "Research", "/bot new Research")
+            await self.pool.set_cross_agent(record, True, OWNER, "command")
+            await self.pool.on_managed_bot({"id": STRANGER, "username": "eve"}, {"id": RESEARCH, "username": "research_bot"})
+            self.assertFalse(self.pool.registry.get(RESEARCH).cross_agent)
+            self.assertEqual(bots.read_audit(self.config)[-1]["event"], "cross_agent_revoked")
+
+        self.play(scenario)
+
+
 if __name__ == "__main__":
     unittest.main()
