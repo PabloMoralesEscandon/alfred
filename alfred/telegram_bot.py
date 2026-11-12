@@ -93,7 +93,7 @@ Text shortcuts:
 
 Settings: %s.
 Permissions: %s.
-Options for /bot new: +web +browser +shell +edit +mcp +contact +bots +bypass, -schedule, -sandbox, and setting=value or permission=value (for example model=sonnet folders=~/notes).
+Options for /bot new: +web +browser +shell +edit +mcp +contact +bots +usage +bypass, -schedule, -sandbox, and setting=value or permission=value (for example model=sonnet folders=~/notes).
 A new bot starts with the least: its own directory, the alfred command, reminders, nothing else.
 <bot> is its @username, its name or its id.""" % (", ".join(bots.SETTING_NAMES), ", ".join(bots.PERMISSION_NAMES))
 
@@ -656,7 +656,8 @@ class ControlPanel:
                     await reply("Which bot? Give its @username, name or id. /bots lists them.")
                     return
                 if action == "show":
-                    await reply(bots.describe(record, self.pool.is_running(record.bot_id)))
+                    note = usage_monitor.permission_note(self.config, record)
+                    await reply(bots.describe(record, self.pool.is_running(record.bot_id)) + ("\n\n" + note if note else ""))
                 elif action == "set":
                     await self._bot_set(update, record, rest)
                 elif action == "perm":
@@ -735,10 +736,11 @@ class ControlPanel:
                 "Which permission? One of: %s" % ", ".join(bots.PERMISSION_NAMES))
             return
         updated = await self.pool.set_permission(record, name, value)
+        note = usage_monitor.permission_note(self.config, updated)
         await update.effective_message.reply_text(
-            "%s of %s: %s. It applies from its next message.\n\n%s" % (
+            "%s of %s: %s. It applies from its next message.\n\n%s%s" % (
                 name.lower(), record.handle, updated.permission(name.lower()) or "none",
-                bots.permission_summary(updated, for_owner=True))
+                bots.permission_summary(updated, for_owner=True), "\n\n" + note if note else "")
         )
 
     async def _bot_destroy_ask(self, update: Update, record: BotRecord) -> None:

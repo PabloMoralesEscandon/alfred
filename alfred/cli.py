@@ -459,9 +459,28 @@ def cmd_browser_setup(config: Config, args: argparse.Namespace) -> int:
     return 0 if all(ok for _, ok, _ in steps) else 1
 
 
+def require_usage(config: Config, record) -> None:
+    """A bot reads usage and sets usage alerts only with the usage permission and with the monitor switched on."""
+    if record is None:
+        return  # the operator at a terminal
+    require(record, "usage")
+    from . import usage_monitor
+
+    if not usage_monitor.is_enabled(config):
+        raise CommandError(
+            "the usage monitor is off (%s), so the usage permission has no effect yet; ask the user to switch "
+            "it on" % usage_monitor.ENABLE_SETTING
+        )
+
+
 def cmd_usage(config: Config, args: argparse.Namespace) -> int:
     from . import usage
 
+    try:
+        require_usage(config, calling_bot(config))
+    except CommandError as exc:
+        print("alfred: %s" % exc, file=sys.stderr)
+        return 1
     print(asyncio.run(usage.fetch(config, dict(os.environ))))
     return 0
 

@@ -16,7 +16,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
-from . import bots
+from . import bots, usage_monitor
 from .bots import BotError, BotRecord, DEFAULT_PERMISSIONS
 
 SESSION_SECONDS = 30 * 60
@@ -48,6 +48,7 @@ SWITCH_LABELS = (
     ("schedule", "⏰ Reminders and tasks"),
     ("contact", "✉️ Write to other chats"),
     ("bots", "🤖 List and request bots"),
+    ("usage", "📊 Plan usage and alerts"),
 )
 
 WIZARD = ("new_name", "new_task", "new_model", "new_effort", "new_perms", "new_summary")
@@ -457,6 +458,9 @@ class Menus:
     def _permission_text(self, record: BotRecord) -> str:
         lines = [bots.permission_summary(record, for_owner=True)]
         warnings = permission_warnings(record)
+        note = usage_monitor.permission_note(self.pool.config, record) if self.pool is not None else ""
+        if note:
+            warnings.append(note)
         if warnings:
             lines += [""] + warnings
         return "\n".join(lines)

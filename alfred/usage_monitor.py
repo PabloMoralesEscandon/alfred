@@ -293,6 +293,17 @@ def is_enabled(config: Config) -> bool:
     return config.get_bool(ENABLE_SETTING, False)
 
 
+def permission_note(config: Config, record: Any) -> str:
+    """What the panel says about a bot's usage permission when the monitor itself is off; empty otherwise."""
+    if record is None or not record.allows("usage") or is_enabled(config):
+        return ""
+    return (
+        "ℹ️ Plan usage is on for %s, but the usage monitor is off (%s=0), so the permission has no effect: "
+        "it can't read usage or set alerts until you put %s=1 in .env and restart Alfred."
+        % (record.handle, ENABLE_SETTING, ENABLE_SETTING)
+    )
+
+
 @dataclass
 class MonitorSettings:
     """Monitor settings. Only `enabled` has an effect today; the rest are for the rules to come."""

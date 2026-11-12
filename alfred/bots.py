@@ -80,12 +80,13 @@ PERMISSIONS = (
     ("schedule", "on", "reminders and timed tasks with alfred schedule"),
     ("contact", "off", "post or schedule messages to chats other than its owner's"),
     ("bots", "off", "list bots, change their settings and ask for new ones (never destroy)"),
+    ("usage", "off", "read the Claude plan usage and set usage alerts; needs ALFRED_USAGE_MONITOR on"),
     ("allow", "", "extra Claude Code allow rules, separated by ;"),
     ("deny", "", "extra Claude Code deny rules, separated by ;"),
 )
 PERMISSION_NAMES = tuple(name for name, _, _ in PERMISSIONS)
 DEFAULT_PERMISSIONS = {name: default for name, default, _ in PERMISSIONS}
-SWITCHES = ("sandbox", "edit", "web", "browser", "mcp", "schedule", "contact", "bots")
+SWITCHES = ("sandbox", "edit", "web", "browser", "mcp", "schedule", "contact", "bots", "usage")
 # `+name` / `-name` when creating a bot: on and off, or for shell: full and alfred.
 SHORTHANDS = {"bypass": ("mode", "bypassPermissions")}
 
@@ -96,6 +97,10 @@ ALWAYS_DENIED = ("Bash(alfred run)", "Bash(alfred run *)", "Bash(alfred service 
 # the bot's permissions themselves.
 UNSANDBOXED_ALFRED = ("alfred send *", "alfred schedule *", "alfred event *", "alfred skills", "alfred bots *")
 BROWSER_RULES = ("Bash(orca *)", "mcp__claude-in-chrome__*")
+# The usage permission: the commands it opens, as deny rules when it is off and as sandbox exclusions when on
+# (they need Alfred's state and Claude Code's own login).
+USAGE_RULES = ("Bash(alfred usage)", "Bash(alfred usage *)", "Bash(alfred usage-alert)", "Bash(alfred usage-alert *)")
+USAGE_UNSANDBOXED = ("alfred usage", "alfred usage-alert *")
 
 
 class BotError(Exception):
@@ -535,7 +540,8 @@ def permission_summary(record: BotRecord, for_owner: bool = False) -> str:
     for name, phrase in (("web", "search and fetch web pages"), ("browser", "use the browser"),
                          ("mcp", "use MCP tools"), ("schedule", "schedule reminders and tasks"),
                          ("contact", "message chats other than %s owner's" % ("its" if for_owner else "your")),
-                         ("bots", "list, configure and request bots")):
+                         ("bots", "list, configure and request bots"),
+                         ("usage", "read the Claude plan usage and set usage alerts (`alfred usage`, `alfred usage-alert`)")):
         (can if record.allows(name) else cannot).append(phrase)
     subject = "It" if for_owner else "You"
     text = "%s can %s." % (subject, "; ".join(can))
@@ -570,6 +576,8 @@ def claude_settings(config: Config, record: BotRecord) -> Dict[str, Any]:
         deny.append("Bash(alfred schedule *)")
     if not record.allows("bots"):
         deny.append("Bash(alfred bots *)")
+    if not record.allows("usage"):
+        deny += list(USAGE_RULES)
     if record.allows("web"):
         allow += ["WebFetch", "WebFetch(domain:*)", "WebSearch"]  # the domain form also opens the sandbox's network
     else:
@@ -607,7 +615,8 @@ def claude_settings(config: Config, record: BotRecord) -> Dict[str, Any]:
             "enabled": True,
             "allowUnsandboxedCommands": False,
             "failIfUnavailable": True,
-            "excludedCommands": [command for command in UNSANDBOXED_ALFRED if record.allows("bots") or "bots" not in command],
+            "excludedCommands": [command for command in UNSANDBOXED_ALFRED if record.allows("bots") or "bots" not in command]
+            + (list(USAGE_UNSANDBOXED) if record.allows("usage") else []),
             "filesystem": {"denyRead": [str(config.home)] + [str(path) for path in config.env_files] + others},
         }
     return settings
