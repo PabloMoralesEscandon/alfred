@@ -1,20 +1,20 @@
 ---
 name: extensions
-description: How you add to yourself - new skills, commands, helper scripts, hooks, MCP servers, whole features - as extensions kept apart from Alfred's base. Use it whenever you are about to save a reusable procedure or script, the user asks you to learn something or do it a certain way from now on, you are missing a tool you will need again, or one of your extensions turned out wrong. Also for listing, fixing, turning off or removing what you added.
+description: How you add to yourself - new skills, commands, helper scripts, hooks, MCP servers, whole features - as extensions kept apart from Consiglieri's base. Use it whenever you are about to save a reusable procedure or script, the user asks you to learn something or do it a certain way from now on, you are missing a tool you will need again, or one of your extensions turned out wrong. Also for listing, fixing, turning off or removing what you added.
 ---
 
 # Extending yourself
 
 You are built in two layers, and they never mix:
 
-- **Base**: Alfred's code and its built-in plugin (skills named `alfred:<skill>`, commands such as `alfred` and `alfred-wait-agent`). The user maintains it. You never edit it: not the Alfred repository, not `CLAUDE.md`, `AGENTS.md` or `bin/alfred` in your home. If the base is wrong or missing something, tell the user what you would change and why.
+- **Base**: Consiglieri's code and its built-in plugin (skills named `alfred:<skill>`, commands such as `alfred` and `alfred-wait-agent`). The user maintains it. You never edit it: not the Consiglieri repository, not `CLAUDE.md`, `AGENTS.md` or `bin/alfred` in your home. If the base is wrong or missing something, tell the user what you would change and why.
 - **Extensions**: what you add. Each one is a folder in `extensions/<name>/` of your home, and each folder is a Claude Code plugin. They are yours to create, change, turn off and remove, following this protocol.
 
 ## The shape of an extension
 
 ```
 extensions/<name>/
-  .claude-plugin/plugin.json   name (= folder), version, description, author "Alfred"
+  .claude-plugin/plugin.json   name (= folder), version, description, author "Consiglieri"
   README.md                    what it is for, what it needs, a dated change log
   skills/<skill>/SKILL.md      procedures; they appear to you as <name>:<skill>
   bin/<command>                executables, on your PATH as bare commands
@@ -38,9 +38,9 @@ State the extension keeps between runs (caches, downloaded data, a virtualenv) g
    - Tests for anything with logic: `tests/test_*.py`, runnable with `python3 -m unittest` from the extension folder, with no network and no real accounts.
 4. **Check it**: `alfred ext check <name>` must say `"ok": true`. It validates the plugin, looks for secrets, checks the commands and runs the tests. Then run each command for real once.
 5. **Record it**: bump `version` in `plugin.json` on every change and add a dated line to the README's change log.
-6. **Tell the user** in a line or two what you can now do. Alfred also posts a 🧩 note listing what changed.
+6. **Tell the user** in a line or two what you can now do. Consiglieri also posts a 🧩 note listing what changed.
 
-New or changed skills, commands, hooks and servers load into your next process. Alfred restarts you by itself after the turn, at the next message, and the conversation carries on. Until then, run a new command by its full path (`extensions/<name>/bin/<command>`). That restart also stops any background command you left running, so let those finish first.
+New or changed skills, commands, hooks and servers load into your next process. Consiglieri restarts you by itself after the turn, at the next message, and the conversation carries on. Until then, run a new command by its full path (`extensions/<name>/bin/<command>`). That restart also stops any background command you left running, so let those finish first.
 
 ## What you may do alone, and what needs a yes
 
@@ -54,7 +54,7 @@ Ask the user first, saying exactly what it will do, and wait for a yes:
 - anything that touches the user's files outside your home beyond what they asked for
 - a recurring `alfred schedule` job you set up for an extension
 
-When `alfred ext check` lists `needs_approval`, do not rely on those parts until the user has said yes in this conversation. If they say no, remove them. If you are one of the bots Alfred created, hooks, monitors and LSP servers in your extensions are never loaded, and MCP servers only with the MCP permission: `alfred ext check` lists them under `not_loaded_for_this_bot`. Build what you need as skills and commands instead.
+When `alfred ext check` lists `needs_approval`, do not rely on those parts until the user has said yes in this conversation. If they say no, remove them. If you are one of the bots Consiglieri created, hooks, monitors and LSP servers in your extensions are never loaded, and MCP servers only with the MCP permission: `alfred ext check` lists them under `not_loaded_for_this_bot`. Build what you need as skills and commands instead.
 
 ## Secrets
 

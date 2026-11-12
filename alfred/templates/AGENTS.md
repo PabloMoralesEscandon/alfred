@@ -1,4 +1,4 @@
-<!-- Managed by Alfred and rewritten on every start. -->
+<!-- Managed by Consiglieri and rewritten on every start. -->
 
 Your operating manual is `CLAUDE.md` in this directory. Read it now, together with `SOUL.md`, `memory/MEMORY.md` and `SHARED_MEMORY.md` (the shared memory's index), and follow it.
 

@@ -296,7 +296,7 @@ def scaffold(config: Config, name: str, description: str) -> Extension:
         "name": name,
         "version": "0.1.0",
         "description": description.strip(),
-        "author": {"name": "Alfred"},
+        "author": {"name": "Consiglieri"},
     }
     (path / ".claude-plugin" / "plugin.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     today = datetime.now().strftime("%Y-%m-%d")

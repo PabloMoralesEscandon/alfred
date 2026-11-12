@@ -1,7 +1,7 @@
 {
   "name": "alfred",
-  "displayName": "Alfred base",
+  "displayName": "Consiglieri base",
   "version": "0.2.0",
-  "description": "Alfred's built-in skills and helpers. Shipped with Alfred's code; Alfred does not edit it.",
-  "author": {"name": "Alfred"}
+  "description": "Consiglieri's built-in skills and helpers. Shipped with Consiglieri's code; its agents do not edit it.",
+  "author": {"name": "Consiglieri"}
 }
