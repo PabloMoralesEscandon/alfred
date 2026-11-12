@@ -42,6 +42,7 @@ SWITCH_LABELS = (
     ("schedule", "⏰ Reminders and tasks"),
     ("contact", "✉️ Write to other chats"),
     ("bots", "🤖 List and request bots"),
+    ("admin", "🧑‍💼 Create bots for you (bot admin)"),
     ("usage", "📊 Plan usage and alerts"),
     ("shared", "🧠 Write the shared memory"),
     ("soul", "🎭 Edit its own personality"),
@@ -157,6 +158,9 @@ def permission_warnings(record: BotRecord, backend: str = "claude") -> List[str]
     if record.allows("shared"):
         warnings.append("⚠️ Shared memory: every other agent will read what it writes there, and that text could "
                         "carry instructions to them.")
+    if record.allows("admin"):
+        warnings.append("⚠️ Bot admin: it can send you requests for new bots and set up the ones you create, with up "
+                        "to its own permissions. Anything more needs your separate yes; it can't destroy bots.")
     if record.allows("soul"):
         warnings.append("⚠️ Personality: it can rewrite its own SOUL.md, and with it how it behaves and talks "
                         "(never what it may do). A text it reads could push it to change it.")
@@ -545,9 +549,12 @@ class Menus:
             if argument not in bots.SWITCHES:
                 raise BotError("unknown switch %r" % argument)
             changes[argument] = "off" if record.allows(argument) else "on"
+        if editing and changes.get("admin") == "on":  # becoming a bot admin always goes through the warning
+            session.pending = "switch:admin"
+            return self.go(session, "bot_perms_confirm")
         if editing:
             for key, value in changes.items():
-                await self.pool.set_permission(record, key, value)
+                await self.pool.set_permission(record, key, value, by=session.user_id, via="menu")
         else:
             for key, value in changes.items():
                 session.permissions[key] = bots.clean_permission(self.pool.config, key, value)
@@ -557,7 +564,14 @@ class Menus:
     async def _pick(self, session: Session, key: str, confirmed: bool = False) -> Screen:
         """A preset button. In the assistant it is chosen and the summary follows; on a bot it is applied,
         after a confirmation when it grants anything the bot does not have yet."""
-        if key not in presets.PRESET_PERMISSIONS:
+        if key == "switch:admin" and session.screen.startswith("bot_"):
+            session.pending = ""
+            record = self._record(session)
+            if confirmed:
+                await self.pool.set_permission(record, "admin", "on", by=session.user_id, via="menu")
+                session.notice = "%s is now a bot admin. It applies from its next message." % record.handle
+            return self.go(session, "bot_perms_custom")
+        if not presets.is_choice(key):
             raise BotError("unknown preset %r" % key)
         session.pending = ""
         if not session.screen.startswith("bot_"):
@@ -571,7 +585,7 @@ class Menus:
         if presets.gains(record.permissions, target) and not confirmed:
             session.pending = key
             return self.go(session, "bot_perms_confirm")
-        await self.pool.set_permissions(record, target)
+        await self.pool.set_permissions(record, target, by=session.user_id, via="menu")
         session.notice = "%s now has %s. It applies from its next message." % (record.handle, presets.title(key))
         return self.go(session, "bot_perms")
 
@@ -806,13 +820,13 @@ class Menus:
         """One button per preset, the current one marked, then Customize."""
         current = presets.detect(permissions)[0]
         rows: List[Row] = [[("%s%s" % ("● " if key == current else "", presets.title(key, recommended_mark=True)), "pick:%s" % key)]
-                           for key in presets.keys()]
+                           for key in presets.choices()]
         rows.append([("%s Customize" % presets.CUSTOM_ICON, "custom")])
         return rows
 
     @staticmethod
     def _preset_cards() -> str:
-        return "\n\n".join(presets.card(key) for key in presets.keys())
+        return "\n\n".join(presets.card(key) for key in presets.choices())
 
     def _screen_new_perms(self, session: Session) -> Screen:
         return Screen(
@@ -941,11 +955,18 @@ class Menus:
         if record is None:
             return self._screen_list(session)
         key = session.pending
-        gained = presets.gains(record.permissions, presets.apply(key, record.permissions))
+        if key == "switch:admin":
+            return Screen(bots.ADMIN_WARNING.format(handle=record.handle),
+                          [[("✅ Yes, make it a bot admin", "pickok")], [("⬅️ No, back", "back")]])
+        if not presets.is_choice(key):
+            return self._screen_bot_perms(session)
+        target = presets.apply(key, record.permissions)
+        gained = presets.gains(record.permissions, target)
+        admin = "\n\n" + bots.ADMIN_WARNING.format(handle=record.handle) if target.get("admin") == "on" and not record.allows("admin") else ""
         return Screen(
-            "Give %s more permissions?\n\nFrom: %s\nTo: %s\nIt gains: %s\n\n%s"
-            % (record.handle, presets.name_of(record.permissions), presets.title(key), ", ".join(gained), presets.card(key)),
-            [[("✅ Yes, switch to %s" % presets.PRESET_INFO[key].label, "pickok")], [("⬅️ No, back", "back")]],
+            "Give %s more permissions?\n\nFrom: %s\nTo: %s\nIt gains: %s\n\n%s%s"
+            % (record.handle, presets.name_of(record.permissions), presets.title(key), ", ".join(gained), presets.card(key), admin),
+            [[("✅ Yes, switch to %s" % presets.info(key).label, "pickok")], [("⬅️ No, back", "back")]],
         )
 
     def _screen_bot_cross(self, session: Session) -> Screen:

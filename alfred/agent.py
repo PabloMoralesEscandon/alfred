@@ -408,6 +408,10 @@ class Agent:
         env = {key: value for key, value in orca.detached_env(os.environ).items() if key != "TELEGRAM_BOT_TOKEN"}
         env["ALFRED_HOME"] = str(self.config.home)
         env["ALFRED_BOT_ID"] = str(self.config.bot_id)
+        # Proves to `alfred bots` that the caller is this bot: another bot can't compute it (docs/BOT_ADMIN.md).
+        from .bots import bot_key
+
+        env["ALFRED_BOT_KEY"] = bot_key(self.config, self.config.bot_id, create=True)
         env["ALFRED_CHAT_ID"] = str(int(chat))
         env["ALFRED_THREAD_ID"] = str(chat.thread_id or "")
         workdir = self.config.workdir

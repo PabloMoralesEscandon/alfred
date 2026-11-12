@@ -801,8 +801,15 @@ class ControlPanel:
         if name.lower() == "preset" and key is None:
             await update.effective_message.reply_text("Which preset? One of: %s." % ", ".join(presets.keys()))
             return
+        target = presets.apply(key, record.permissions) if key is not None else None
+        if target is None and name.lower() == "admin" and value.strip().lower() in bots.ON_WORDS:
+            target = dict(record.permissions, admin="on")
+        if target is not None and target.get("admin") == "on" and not record.allows("admin"):
+            await self._ask_admin(update, record, target)  # becoming a bot admin asks first, as cross-agent access
+            return
         if key is not None:
-            updated = await self.pool.set_permissions(record, presets.apply(key, record.permissions))
+            updated = await self.pool.set_permissions(record, presets.apply(key, record.permissions),
+                                                      by=update.effective_user.id)
             backend = updated.settings.get("backend") or self.config.default_backend
             warnings = menus.permission_warnings(updated, backend)
             await update.effective_message.reply_text(
@@ -811,7 +818,7 @@ class ControlPanel:
                     "".join("\n" + warning for warning in warnings))
             )
             return
-        updated = await self.pool.set_permission(record, name, value)
+        updated = await self.pool.set_permission(record, name, value, by=update.effective_user.id)
         note = usage_monitor.permission_note(self.config, updated)
         await update.effective_message.reply_text(
             "%s of %s: %s. It applies from its next message.\n\n%s%s" % (
@@ -844,6 +851,16 @@ class ControlPanel:
         ]])
         await reply(bots.CROSS_AGENT_WARNING.format(name=record.name, handle=record.handle, username=record.username),
                     reply_markup=markup)
+
+    async def _ask_admin(self, update: Update, record: BotRecord, target: Dict[str, str]) -> None:
+        nonce = self.pool.ask_confirmation(record.bot_id, update.effective_user.id, "admingrant", payload=target)
+        markup = InlineKeyboardMarkup([[
+            InlineKeyboardButton("🧑‍💼 Make it a bot admin", callback_data="bot:admingrant:%s" % nonce),
+            InlineKeyboardButton("Cancel", callback_data="bot:cancel:%s" % nonce),
+        ]])
+        await update.effective_message.reply_text(
+            "%s\n\nIt would have: %s" % (bots.ADMIN_WARNING.format(handle=record.handle), presets.name_of(target)),
+            reply_markup=markup)
 
     def _audit_text(self, user_id: int) -> str:
         """The audit lines about the user's own bots (docs/PANEL_ONLY.md: the open question of a global view)."""
@@ -925,15 +942,18 @@ class ControlPanel:
             await query.answer()
             return
         _, action, nonce = (query.data.split(":", 2) + ["", ""])[:3]
+        payload = self.pool.confirmation_payload(nonce)
         taken = self.pool.take_confirmation(nonce, update.effective_user.id, None if action == "cancel" else action)
         await query.answer()
         if taken is None:
-            ask = "/bot perm <bot> cross on" if action == "crossgrant" else "/bot destroy"
-            await query.edit_message_text("That button has expired. Ask again with %s." % ask)
+            ask = {"crossgrant": "Ask again with /bot perm <bot> cross on.",
+                   "admingrant": "Ask again with /bot perm <bot> admin on.",
+                   }.get(action, "Ask again with /bot destroy.")
+            await query.edit_message_text("That button has expired. %s" % ask)
             return
         bot_id, asked = taken
         if action == "cancel":
-            await query.edit_message_text("Nothing was granted." if asked == "crossgrant" else "Nothing was destroyed.")
+            await query.edit_message_text("Nothing was destroyed." if asked == "destroy" else "Nothing was granted.")
             return
         record = self.pool.registry.get(bot_id)
         if record is None:
@@ -946,6 +966,13 @@ class ControlPanel:
             updated = await self.pool.set_cross_agent(record, True, update.effective_user.id, "command")
             await query.edit_message_text("Cross-agent access granted to %s. It applies from its next message.\n\n%s"
                                           % (record.handle, bots.cross_agent_line(updated)))
+            return
+        if action == "admingrant":
+            updated = await self.pool.set_permissions(record, payload or dict(record.permissions, admin="on"),
+                                                      by=update.effective_user.id, via="command")
+            await query.edit_message_text("%s is now a bot admin (%s). It applies from its next message.\n\n%s"
+                                          % (record.handle, presets.level_name(updated),
+                                             bots.permission_summary(updated, for_owner=True)))
             return
         await query.edit_message_text("Destroying %s…" % record.handle)
         await self._send(context.bot, chat_of(update), await self.pool.destroy(record))
@@ -973,6 +1000,7 @@ class BotPool:
         self.manager_username = ""
         self.can_manage: Optional[bool] = None
         self._confirmations: Dict[str, Tuple[int, int, float, str]] = {}  # nonce -> bot, user, expiry, action
+        self._payloads: Dict[str, Any] = {}  # nonce -> what a confirmation applies (the permissions it sets)
         self._scheduler: Optional["asyncio.Future[None]"] = None
         # One per process, not one per bot: the plan limits belong to the Claude account all the bots share.
         self.usage_monitor: Optional[usage_monitor.UsageMonitor] = None
@@ -1246,12 +1274,15 @@ class BotPool:
                 await self._sync_profile(record)
         return record
 
-    async def set_permission(self, record: BotRecord, permission: str, value: str) -> BotRecord:
+    async def set_permission(self, record: BotRecord, permission: str, value: str, by: Optional[int] = None,
+                             via: str = "command") -> BotRecord:
         cleaned = bots.clean_permission(self.config, permission, value)
         record = self.registry.get(record.bot_id) or record
+        was_admin = record.allows("admin")
         record.permissions[permission.strip().lower()] = cleaned
         self.registry.save(record)
         record = self.registry.get(record.bot_id) or record
+        self._audit_admin(record, was_admin, by, via)
         frontend = self.frontends.get(record.bot_id)
         if frontend is not None:
             frontend.record = record
@@ -1259,17 +1290,27 @@ class BotPool:
             # command line and manual change). A turn in progress finishes under the old rules.
         return record
 
-    async def set_permissions(self, record: BotRecord, permissions: Dict[str, str]) -> BotRecord:
+    async def set_permissions(self, record: BotRecord, permissions: Dict[str, str], by: Optional[int] = None,
+                              via: str = "command") -> BotRecord:
         """Replace all of a bot's permissions at once (a preset): checked, then saved in one write."""
         cleaned = {name: bots.clean_permission(self.config, name, value) for name, value in permissions.items()}
         record = self.registry.get(record.bot_id) or record
+        was_admin = record.allows("admin")
         record.permissions = cleaned
         self.registry.save(record)
         record = self.registry.get(record.bot_id) or record
+        self._audit_admin(record, was_admin, by, via)
         frontend = self.frontends.get(record.bot_id)
         if frontend is not None:
             frontend.record = record  # applies from its next message, as with set_permission
         return record
+
+    def _audit_admin(self, record: BotRecord, was_admin: bool, by: Optional[int], via: str) -> None:
+        """Becoming a bot admin, or ceasing to be one, goes to the audit log like cross-agent access."""
+        if record.allows("admin") != was_admin:
+            event = "admin_permission_granted" if record.allows("admin") else "admin_permission_revoked"
+            bots.audit(self.config, event, record, by, via)
+            log.warning("%s %s", event.replace("_", " "), record.handle)
 
     async def set_soul(self, record: BotRecord, text: Optional[str]) -> str:
         """Replace a bot's personality, or with None put the base back. Its next message reopens its process
@@ -1298,12 +1339,20 @@ class BotPool:
 
     # -- destroying -----------------------------------------------------------
 
-    def ask_confirmation(self, bot_id: int, user_id: int, action: str = "destroy") -> str:
+    def ask_confirmation(self, bot_id: int, user_id: int, action: str = "destroy", payload: Any = None,
+                         seconds: float = CONFIRM_SECONDS) -> str:
         now = time.time()
         self._confirmations = {key: value for key, value in self._confirmations.items() if value[2] > now}
+        self._payloads = {key: value for key, value in self._payloads.items() if key in self._confirmations}
         nonce = secrets.token_urlsafe(9)
-        self._confirmations[nonce] = (int(bot_id), int(user_id), now + CONFIRM_SECONDS, action)
+        self._confirmations[nonce] = (int(bot_id), int(user_id), now + seconds, action)
+        if payload is not None:
+            self._payloads[nonce] = payload
         return nonce
+
+    def confirmation_payload(self, nonce: str) -> Any:
+        """What a confirmation applies; read it before take_confirmation, which forgets the button."""
+        return self._payloads.get(nonce)
 
     def take_confirmation(self, nonce: str, user_id: int, action: Optional[str] = None) -> Optional[Tuple[int, str]]:
         """(bot, action) of a confirmation button, if it is fresh, pressed by the person who asked, and (when
