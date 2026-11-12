@@ -19,7 +19,7 @@ except ImportError:  # pragma: no cover
     BotPool = None  # type: ignore
     PANEL_COMMANDS = []
 
-from alfred import bots, home, scheduler
+from alfred import bots, home, scheduler, shared_memory
 from alfred.agent import Chat
 from alfred.bots import BotRecord
 from alfred.scheduler import Postpone
@@ -381,6 +381,42 @@ class PanelTests(PanelHarness):
             await self.pool.resume(self.pool.registry.get(CHEF))
             self.assertIn(CHEF, self.pool.frontends)
             self.assertTrue(self.pool.dropped[-1])  # what it was sent while paused is not answered now
+
+        self.play(scenario)
+
+    def test_every_bot_loads_the_shared_memory_and_writes_it_only_with_the_permission(self) -> None:
+        async def scenario() -> None:
+            shared = self.config.shared_memory_dir
+            edit = "Edit(//%s/**)" % str(shared).lstrip("/")
+            shared_memory.add(self.config, "user", "Lives in Madrid")
+            await self.create(RESEARCH, "research_bot", "Research", "/bot new Research")
+            workspace = self.pool.registry.workspace(RESEARCH)
+            for preset in ("basic", "assistant", "power", "full"):
+                await self.command("/bot perm research_bot %s" % preset)
+                lines = claude_lines("ok", "sess-%s" % preset)
+                self.sandbox.fake_cli("claude", {"fresh": lines[:1] + [{"_run": "cp SHARED_MEMORY.md seen.txt"}] + lines[1:],
+                                                 "resume": lines[:1] + [{"_run": "cp SHARED_MEMORY.md seen.txt"}] + lines[1:]})
+                await self.tell(RESEARCH, "what do you know about me?")
+                seen = (workspace / "seen.txt").read_text()
+                self.assertIn("- [user](user.md):", seen, preset)
+                self.assertIn("read-only for you", seen, preset)
+                self.assertIn("@SHARED_MEMORY.md", (workspace / "CLAUDE.md").read_text(), preset)
+                argv = self.sandbox.calls("claude")[-1]["argv"]
+                self.assertIn(str(shared), argv, preset)
+                rules = json.loads(self.pool.registry.settings_file(RESEARCH).read_text())["permissions"]
+                self.assertIn(str(shared), rules["additionalDirectories"], preset)
+                self.assertIn(edit, rules["deny"], preset)
+                self.assertNotIn(edit, rules["allow"], preset)
+
+            replies = await self.command("/bot perm research_bot shared on")
+            self.assertIn("It can", replies[0]["text"])
+            await self.tell(RESEARCH, "remember for everyone that I like tea")
+            rules = json.loads(self.pool.registry.settings_file(RESEARCH).read_text())["permissions"]
+            self.assertIn(edit, rules["allow"])
+            self.assertNotIn(edit, rules["deny"])
+            self.assertIn("Every other agent will read what you write", (workspace / "SHARED_MEMORY.md").read_text())
+            shown = await self.command("/bot show research_bot")
+            self.assertIn("Preset: 🎛 Custom (from 🔓 Full access: + shared-memory writes)", shown[0]["text"])
 
         self.play(scenario)
 

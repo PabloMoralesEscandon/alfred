@@ -81,6 +81,8 @@ class ClaudeBackend(Backend):
             command += ["--resume", session_id]
         for directory in config.add_dirs:
             command += ["--add-dir", str(directory)]
+        if config.shared_memory_dir.is_dir():  # every agent reads the shared memory
+            command += ["--add-dir", str(config.shared_memory_dir)]
         if config.claude_settings_file is not None:
             # A bot's permissions. Your own ~/.claude/settings.json is left out, so its allow rules never widen them.
             command += ["--settings", str(config.claude_settings_file), "--setting-sources", "project,local"]
@@ -96,6 +98,8 @@ class ClaudeBackend(Backend):
         return self.command(None, live=True) + [
             "#extensions=%s" % extensions.fingerprint(self.config),
             "#manual=%s" % _fingerprint(Path(self.config.workspace) / "CLAUDE.md"),
+            # The shared memory's index is loaded at the start of a process, like the manual.
+            "#shared=%s" % _fingerprint(Path(self.config.workspace) / "SHARED_MEMORY.md"),
             # A bot's permissions live in the --settings file: new rules need a new process too.
             "#permissions=%s" % (_fingerprint(self.config.claude_settings_file) if self.config.claude_settings_file else "-"),
         ]

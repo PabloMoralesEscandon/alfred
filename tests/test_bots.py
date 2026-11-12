@@ -8,6 +8,7 @@ import os
 import stat
 import time
 import unittest
+from pathlib import Path
 from typing import Any, Dict, List
 
 from alfred import bots, extensions, home
@@ -296,7 +297,8 @@ class PermissionTests(BotsTestCase):
         self.assertTrue(rules["blockReadsOutsideWorkingDirectories"])
         self.assertTrue(rules["blockWritesOutsideWorkingDirectories"])
         self.assertTrue(rules["denyInsteadOfPrompting"])
-        self.assertEqual(rules["additionalDirectories"], [str(self.work)])
+        self.assertEqual(rules["additionalDirectories"], [str(self.work), str(self.config.shared_memory_dir)])
+        self.assertIn("Edit(//%s/**)" % str(self.config.shared_memory_dir).lstrip("/"), rules["deny"])  # read only
         self.assertNotIn("Edit(//%s/**)" % str(self.work).lstrip("/"), rules["allow"])  # read only
 
     def test_granted_permissions_become_allow_rules_and_a_sandbox(self) -> None:
@@ -388,7 +390,9 @@ class BlacklistTests(BotsTestCase):
         self.assertIn("Bash(*../%d/memory/*)" % self.CHEF, rules["deny"], level)
         for directory in rules["additionalDirectories"]:
             self.assertNotIn(str(self.config.bots_home / str(self.CHEF)), directory, level)
-            self.assertFalse(directory.startswith(str(self.config.home)), level)
+            inside = Path(directory) == self.config.home or self.config.home in Path(directory).parents
+            self.assertFalse(inside, level)
+        self.assert_shared_readable(settings, level)
         self.assertTrue(rules["blockReadsOutsideWorkingDirectories"], level)
         self.assertTrue(settings["disableAllHooks"], level)
         if "sandbox" in settings:
@@ -397,8 +401,45 @@ class BlacklistTests(BotsTestCase):
                 self.assertIn(str(path), filesystem["denyRead"], level)
                 self.assertIn(str(path), filesystem["denyWrite"], level)
             self.assertIn(str(self.config.bots_home), filesystem["denyRead"], level)  # bots created later too
-            self.assertEqual(filesystem["allowRead"], [str(self.config.bots_home / str(self.RESEARCH))], level)
+            self.assertEqual(filesystem["allowRead"], [str(self.config.bots_home / str(self.RESEARCH)),
+                                                       str(self.config.shared_memory_dir)], level)
             self.assertFalse(settings["sandbox"]["autoAllowBashIfSandboxed"], level)
+
+    def assert_shared_readable(self, settings: Dict[str, Any], level: str) -> None:
+        """The shared memory: a working directory no deny rule covers, written only with `shared` on."""
+        shared = self.config.shared_memory_dir
+        rules = settings["permissions"]
+        writable = self.rule("Edit", shared) in rules["allow"]
+        self.assertIn(str(shared), rules["additionalDirectories"], level)
+        for rule in rules["deny"]:
+            if rule.startswith("Read(//"):
+                denied = Path("/" + rule[len("Read(//"):-1].removesuffix("/**").removesuffix("/*.jsonl"))
+                self.assertFalse(denied == shared or denied in shared.parents, "%s: %s" % (level, rule))
+        self.assertNotEqual(writable, self.rule("Edit", shared) in rules["deny"], level)  # exactly one of the two
+        if "sandbox" in settings:
+            filesystem = settings["sandbox"]["filesystem"]
+            self.assertIn(str(shared), filesystem["allowRead"], level)
+            for path in filesystem["denyRead"]:
+                self.assertFalse(Path(path) == shared or Path(path) in shared.parents, "%s: %s" % (level, path))
+            self.assertEqual(str(shared) in filesystem["denyWrite"], not writable, level)
+            self.assertEqual(filesystem.get("allowWrite", []), [str(shared)] if writable else [], level)
+
+    def test_the_shared_memory_is_readable_at_every_level_and_written_only_with_the_permission(self) -> None:
+        from alfred import presets
+
+        shared = self.config.shared_memory_dir
+        for cross in (False, True):
+            for level, permissions in self.levels().items():
+                settings = self.settings(permissions, cross=cross)
+                self.assert_shared_readable(settings, level)
+                if level in presets.keys():  # no preset writes it, Full access included
+                    self.assertIn(self.rule("Edit", shared), settings["permissions"]["deny"], level)
+            for base in ({}, {"shell": "full"}):
+                settings = self.settings(dict(base, shared="on"), cross=cross)
+                self.assertIn(self.rule("Edit", shared), settings["permissions"]["allow"])
+                self.assertNotIn(self.rule("Edit", shared), settings["permissions"]["deny"])
+        # The blacklist still closes the other agents' private memory, with the shared memory open.
+        self.assert_closed(self.settings({"shared": "on", "shell": "full"}), "shared on")
 
     def test_the_blacklist_is_there_at_every_level(self) -> None:
         for level, permissions in self.levels().items():
@@ -511,8 +552,14 @@ class WorkspaceTests(BotsTestCase):
         self.assertIn("Summarize new papers on protein folding.", manual)
         self.assertIn("Your working directory for this task is `%s`" % self.work, manual)
         self.assertIn("You cannot", manual)
-        self.assertTrue(manual.rstrip().endswith("@memory/MEMORY.md"))
+        self.assertIn("\n@memory/MEMORY.md\n", manual)
+        self.assertTrue(manual.rstrip().endswith("@SHARED_MEMORY.md"))
         self.assertNotIn("@memory", (folder / "AGENTS.md").read_text())
+        self.assertNotIn("@SHARED", (folder / "AGENTS.md").read_text())
+        self.assertIn("Read SHARED_MEMORY.md at the start", (folder / "AGENTS.md").read_text())
+        copy = (folder / "SHARED_MEMORY.md").read_text()
+        self.assertIn("read-only for you", copy)
+        self.assertEqual(self.config.shared_memory_dir.joinpath("MEMORY.md").read_text(), "# Shared memory index\n\n")
         self.assertTrue((folder / "memory" / "MEMORY.md").is_file())
         self.assertTrue((folder / ".git").is_dir())
         settings_file = self.registry.settings_file(5000000001)

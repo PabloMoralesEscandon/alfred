@@ -96,6 +96,7 @@ ALIASES: Dict[str, str] = {
 WORDS: Dict[str, str] = {
     "edit": "file edits", "web": "web", "browser": "browser", "mcp": "connectors (MCP)",
     "schedule": "reminders", "contact": "other chats", "bots": "other bots", "sandbox": "sandbox",
+    "shared": "shared-memory writes",
     "usage": "plan usage",
 }
 # Permission modes from the tightest to the loosest, for telling whether a change grants more.

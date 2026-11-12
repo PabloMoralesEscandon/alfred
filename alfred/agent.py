@@ -390,6 +390,10 @@ class Agent:
             from . import bots
 
             bots.prepare_workspace(self.config)
+        else:  # Alfred's main agent: only its copy of the shared memory's index changes between turns
+            from . import shared_memory
+
+            shared_memory.refresh_copy(self.config, self.config.home, shared_memory.MAIN)
 
     def _context(self, source: str, chat_id: int, user_id: Optional[int], username: Optional[str]) -> str:
         return context_line(source, chat_id, user_id, username, bot=self.bot_username)

@@ -43,6 +43,7 @@ SWITCH_LABELS = (
     ("contact", "✉️ Write to other chats"),
     ("bots", "🤖 List and request bots"),
     ("usage", "📊 Plan usage and alerts"),
+    ("shared", "🧠 Write the shared memory"),
 )
 
 WIZARD = ("new_name", "new_task", "new_model", "new_effort", "new_perms", "new_summary")
@@ -125,6 +126,9 @@ def permission_warnings(record: BotRecord, backend: str = "claude") -> List[str]
         warnings.append("⚠️ Browser: it uses the sessions you are logged in to there.")
     if record.allows("contact"):
         warnings.append("⚠️ Other chats: it can message people other than you.")
+    if record.allows("shared"):
+        warnings.append("⚠️ Shared memory: every other agent will read what it writes there, and that text could "
+                        "carry instructions to them.")
     if record.permission("mode") == "auto":
         warnings.append("ℹ️ auto: a classifier model decides what runs without asking.")
     return warnings

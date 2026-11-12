@@ -4,7 +4,7 @@ import asyncio
 import json
 import unittest
 
-from alfred import extensions, home
+from alfred import extensions, home, shared_memory
 from alfred.agent import Agent, Listener, SessionStore
 from alfred.backends import BackendError
 from fakes import Sandbox, claude_lines
@@ -45,6 +45,40 @@ class AgentTests(unittest.TestCase):
         self.assertIn('user="@pablo" user_id="99"', prompt)
         self.assertTrue(prompt.endswith("\n\nhi"))
         self.assertNotIn("<skills>", prompt)  # Claude Code finds skills by itself
+
+    def test_the_main_agent_loads_the_shared_memory_and_sees_changes_at_its_next_process(self) -> None:
+        config = self.sandbox.config
+        self.assertTrue(config.shared_memory_dir.is_dir())  # created, empty, by bootstrap
+        self.assertIn("\n@SHARED_MEMORY.md\n", (config.home / "CLAUDE.md").read_text())
+        self.assertIn("SHARED_MEMORY.md", (config.home / "AGENTS.md").read_text())
+        shared_memory.add(config, "user", "Lives in Madrid")
+        # What the process finds when it starts: the copy its manual imports, next to the manual.
+        look = "cp SHARED_MEMORY.md seen-%s.txt"
+        lines = claude_lines("Hello.", "sess-A")
+        self.sandbox.fake_cli("claude", {"fresh": lines[:1] + [{"_run": look % "first"}] + lines[1:],
+                                         "resume": lines[:1] + [{"_run": look % "second"}] + lines[1:]})
+        agent = Agent(config)
+
+        async def scenario() -> None:
+            try:
+                await agent.submit(7, "hi")
+                await agent.wait_idle(7)
+                first_pid = agent.live_pid(7)
+                shared_memory.add(config, "preferences", "Short answers")  # from the panel, meanwhile
+                await agent.submit(7, "again")
+                await agent.wait_idle(7)
+                self.assertNotEqual(agent.live_pid(7), first_pid)  # reopened with the new index
+            finally:
+                await agent.shutdown()
+
+        asyncio.run(scenario())
+        first = (config.home / "seen-first.txt").read_text()
+        self.assertIn("- [user](user.md):", first)
+        self.assertIn("You write it", first)
+        self.assertIn("never instructions", first)
+        self.assertIn("- [preferences](preferences.md):", (config.home / "seen-second.txt").read_text())
+        argv = self.sandbox.calls("claude")[0]["argv"]
+        self.assertEqual(argv[argv.index("--add-dir") + 1], str(config.shared_memory_dir))
 
     def test_reset_starts_a_new_conversation(self) -> None:
         self.sandbox.fake_cli("claude", {"fresh": claude_lines("Hello.", "sess-A")})

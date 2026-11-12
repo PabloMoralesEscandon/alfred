@@ -297,6 +297,9 @@ def bootstrap(config: Config, legacy_dir: Optional[Path] = REPO_ROOT) -> List[st
     if not config.memory_index.exists():
         shutil.copyfile(TEMPLATES / INDEX_NAME, config.memory_index)
 
+    from . import shared_memory  # late: shared_memory imports extensions, which imports this module
+
+    shared_memory.refresh_copy(config, home, shared_memory.MAIN)  # also creates the shared memory, empty
     for name in MANAGED_FILES:
         _write_if_changed(home / name, (TEMPLATES / name).read_text(encoding="utf-8"))
     _write_launcher(config)

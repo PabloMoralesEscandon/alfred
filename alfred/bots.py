@@ -42,7 +42,7 @@ from string import Template
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote_plus
 
-from . import home
+from . import home, shared_memory
 from .config import Config
 
 TOKEN_PATTERN = re.compile(r"^\d{5,15}:[A-Za-z0-9_-]{30,}$")
@@ -81,12 +81,13 @@ PERMISSIONS = (
     ("contact", "off", "post or schedule messages to chats other than its owner's"),
     ("bots", "off", "list bots, change their settings and ask for new ones (never destroy)"),
     ("usage", "off", "read the Claude plan usage and set usage alerts; needs ALFRED_USAGE_MONITOR on"),
+    ("shared", "off", "write the shared memory every agent reads (reading it is always allowed)"),
     ("allow", "", "extra Claude Code allow rules, separated by ;"),
     ("deny", "", "extra Claude Code deny rules, separated by ;"),
 )
 PERMISSION_NAMES = tuple(name for name, _, _ in PERMISSIONS)
 DEFAULT_PERMISSIONS = {name: default for name, default, _ in PERMISSIONS}
-SWITCHES = ("sandbox", "edit", "web", "browser", "mcp", "schedule", "contact", "bots", "usage")
+SWITCHES = ("sandbox", "edit", "web", "browser", "mcp", "schedule", "contact", "bots", "usage", "shared")
 # `+name` / `-name` when creating a bot: on and off, or for shell: full and alfred.
 SHORTHANDS = {"bypass": ("mode", "bypassPermissions")}
 
@@ -594,6 +595,8 @@ def permission_summary(record: BotRecord, for_owner: bool = False) -> str:
                          ("bots", "list, configure and request bots"),
                          ("usage", "read the Claude plan usage and set usage alerts (`alfred usage`, `alfred usage-alert`)")):
         (can if record.allows(name) else cannot).append(phrase)
+    can.append("read the shared memory every agent reads")
+    (can if record.allows("shared") else cannot).append("write the shared memory")
     subject = "It" if for_owner else "You"
     text = "%s can %s." % (subject, "; ".join(can))
     if cannot:
@@ -796,7 +799,15 @@ def claude_settings(config: Config, record: BotRecord) -> Dict[str, Any]:
     others = blacklist(config, record)
     deny += others["deny"]
     # The bot's manual and settings are rewritten by Alfred.
-    deny += ["Edit(%s)" % absolute(workspace / name) for name in ("CLAUDE.md", "AGENTS.md", ".claude/settings.json", ".claude/settings.local.json")]
+    deny += ["Edit(%s)" % absolute(workspace / name) for name in ("CLAUDE.md", "AGENTS.md", shared_memory.COPY_NAME,
+                                                                  ".claude/settings.json", ".claude/settings.local.json")]
+    # The shared memory: readable at every level and with or without cross-agent access (it is outside
+    # everything the blacklist denies); written only with the `shared` permission.
+    shared = config.shared_memory_dir
+    if record.allows("shared"):
+        allow.append("Edit(%s/**)" % absolute(shared))
+    else:
+        deny.append("Edit(%s/**)" % absolute(shared))
     allow.append("Bash" if shell_full else "Bash(alfred *)")
     allow += others["allow"]
     if not record.allows("schedule"):
@@ -830,7 +841,7 @@ def claude_settings(config: Config, record: BotRecord) -> Dict[str, Any]:
             "deny": deny,
             # Its working directory and extra folders; with cross-agent access, also the other agents'
             # memory and tools (read-only: their Edit deny rules stay).
-            "additionalDirectories": [str(path) for path in record.working_dirs()] + others["directories"],
+            "additionalDirectories": [str(path) for path in record.working_dirs()] + [str(shared)] + others["directories"],
             # The file tools refuse anything outside its own directory and the ones above, in every mode.
             "blockReadsOutsideWorkingDirectories": True,
             "blockWritesOutsideWorkingDirectories": True,
@@ -845,7 +856,12 @@ def claude_settings(config: Config, record: BotRecord) -> Dict[str, Any]:
         # The OS sandbox (Seatbelt on macOS) holds for every process the shell starts, which the rules
         # above, matching only the text of a command, cannot promise.
         filesystem: Dict[str, Any] = {"denyRead": others["denyRead"], "denyWrite": others["denyWrite"]}
-        filesystem["allowRead"] = others["allowRead"]  # its own directory, and with cross-agent access the shared parts
+        filesystem["allowRead"] = others["allowRead"] + [str(shared)]  # its own directory, the shared memory, and
+        # with cross-agent access the other agents' shared parts
+        if record.allows("shared"):
+            filesystem["allowWrite"] = [str(shared)]
+        else:
+            filesystem["denyWrite"] = others["denyWrite"] + [str(shared)]
         settings["sandbox"] = {
             "enabled": True,
             "allowUnsandboxedCommands": False,
@@ -923,12 +939,14 @@ def prepare_workspace(config: Config) -> Path:
     folder = config.workspace
     for directory in (folder, config.memory_dir, config.inbox_dir, folder / "outbox", config.skills_dir, config.extensions_dir):
         directory.mkdir(parents=True, exist_ok=True)
+    shared_memory.refresh_copy(config, folder, shared_memory.WRITER if record.allows("shared") else shared_memory.READER)
     manual = render_manual(config, record)
     home._write_if_changed(folder / "CLAUDE.md", manual)
-    # Codex reads AGENTS.md and does not follow @imports, so it is told to open the index itself.
+    # Codex reads AGENTS.md and does not follow @imports, so it is told to open the indexes itself.
     home._write_if_changed(
         folder / "AGENTS.md",
-        manual.replace("@memory/MEMORY.md", "Read memory/MEMORY.md at the start of every conversation."),
+        manual.replace("@memory/MEMORY.md", "Read memory/MEMORY.md at the start of every conversation.")
+        .replace("@%s" % shared_memory.COPY_NAME, "Read %s at the start of every conversation." % shared_memory.COPY_NAME),
     )
     settings_text = json.dumps(claude_settings(config, record), indent=2, sort_keys=True) + "\n"
     settings_path = registry.settings_file(record.bot_id)
