@@ -1,6 +1,6 @@
-# Alfred
+# Consiglieri
 
-Alfred is a personal agent you reach from anywhere through Telegram. The bot you set up is a **control
+Consiglieri is a set of personal agents you reach from anywhere through Telegram. The bot you set up is a **control
 panel**: it has no agent of its own, and it creates and manages the bots that do the work. Each of those
 is a Telegram bot of its own, with its own chat, task, model, effort, permissions, memory, tools and
 [Claude Code](https://claude.com/claude-code) session, running headless in its own directory. A bot ships
@@ -9,6 +9,10 @@ skill and uses it next time.
 
 Codex is still supported as an alternative backend (`/bot set <bot> backend codex`, or `/backend codex`
 in a bot's chat).
+
+Consiglieri used to be called Alfred, and Alfred is still the name of its main agent. The command
+(`alfred`), the settings (`ALFRED_*`), the home (`~/.alfred`) and the service keep the old name for now;
+[docs/RENAME_PLAN.md](docs/RENAME_PLAN.md) has the plan for moving them.
 
 The design and roadmap are in [docs/PLAN.md](docs/PLAN.md); how the bots are created, and why this way,
 in [docs/AGENT_CHATS_RESEARCH.md](docs/AGENT_CHATS_RESEARCH.md).
@@ -68,7 +72,7 @@ allow-list or the backend CLI is missing, so it cannot end up in a restart loop.
 
 Conversations survive restarts by themselves: each chat's session id is stored in
 `~/.alfred/state/sessions.json` and resumed on the next message, and reminders that were due while the
-bot was down are delivered when it comes back. Background commands Alfred had running do not survive a
+bot was down are delivered when it comes back. Background commands Consiglieri had running do not survive a
 restart.
 
 All settings are listed in [.env.example](.env.example).
@@ -84,7 +88,7 @@ Send `/bot` for the menu: **Create bot** walks you through name, task, model, ef
 with buttons (Back and Cancel on every step) and ends with a summary and the proposed username, which
 extends the panel's (`manolito_bot` → `manolito_<what it does>_bot`). **My bots** changes a bot's model,
 effort, task and permissions, pauses, resumes or destroys it. A menu expires after 30 minutes, when you
-open a newer one, or when Alfred restarts; its old buttons then just say so.
+open a newer one, or when Consiglieri restarts; its old buttons then just say so.
 
 The same can be done with text shortcuts:
 
@@ -97,7 +101,7 @@ The same can be done with text shortcuts:
 | `/bot perm <bot> <permission> <value>` | Change a permission (below). |
 | `/bot perm <bot> <preset>` | Switch it to a security preset: `basic`, `assistant`, `power` or `full`. Its extra folders and rules are kept. |
 | `/bot pause <bot>`, `/bot resume <bot>` | Disconnect or reconnect it. Messages sent to a paused bot are dropped; its reminders wait. |
-| `/bot destroy <bot>` | Asks first. Then stops it, deletes its reminders, conversations, memory, files and settings, and revokes its token. Telegram has no way for Alfred to delete the bot account itself, so the panel points you to @BotFather's `/deletebot`. |
+| `/bot destroy <bot>` | Asks first. Then stops it, deletes its reminders, conversations, memory, files and settings, and revokes its token. Telegram has no way for Consiglieri to delete the bot account itself, so the panel points you to @BotFather's `/deletebot`. |
 | `/shared [list\|show\|add\|remove]` | The shared memory every agent reads (below). `/shared add user Lives in Madrid`. |
 | `/status`, `/usage`, `/help` | Bot management on or off and how many bots run; plan limits; help. |
 
@@ -152,7 +156,7 @@ nothing else. Grant more when you create it or later with `/bot perm`:
 | `edit` | `off` | Edit files in its working directory and extra folders (its own directory, always) |
 | `folders` | none | Extra folders it may read, and edit with `edit on`, separated by commas |
 | `web` | `off` | WebSearch and WebFetch |
-| `browser` | `off` | Alfred's browser (Orca's, or Chrome) |
+| `browser` | `off` | Consiglieri's browser (Orca's, or Chrome) |
 | `mcp` | `off` | MCP tools: your connectors and servers, and its extensions'. Off removes them all |
 | `schedule` | `on` | Reminders and timed tasks |
 | `contact` | `off` | Post or schedule messages to chats other than yours |
@@ -173,16 +177,16 @@ manual. [docs/AGENT_CHATS_RESEARCH.md](docs/AGENT_CHATS_RESEARCH.md) has the exa
 With the Claude backend, each chat has one Claude Code process that stays open. It sleeps between
 messages and wakes up when something arrives:
 
-- **A message from you.** If Alfred is in the middle of something, it reads the message at its next
+- **A message from you.** If Consiglieri is in the middle of something, it reads the message at its next
   step, so you can correct it or add to the request without `/stop`. One reply may then answer several
   messages.
 - **A scheduled task or reminder** coming due.
-- **A background job of its own finishing.** Alfred can start something slow, tell you it is running,
+- **A background job of its own finishing.** Consiglieri can start something slow, tell you it is running,
   and write again when it ends.
 - **An event from another program:** `~/.alfred/bin/alfred event --chat-id <id> "the backup finished"`
-  wakes Alfred with that note. Your Telegram user id is the chat id of your private chat with the bot.
+  wakes Consiglieri with that note. Your Telegram user id is the chat id of your private chat with the bot.
 
-Alfred's last message of a turn is posted to the chat. It can also post earlier with `alfred send`, and
+Consiglieri's last message of a turn is posted to the chat. It can also post earlier with `alfred send`, and
 it stays quiet when it has nothing to add. The process is started by the first message after a restart
 and is closed by `/stop`, `/new` and `/backend`. Set `ALFRED_LIVE=0` to go back to one process per
 message; Codex always works that way, so with Codex messages wait their turn and nothing wakes it
@@ -192,7 +196,7 @@ between them.
 
 Set `ALFRED_CLAUDE_MODEL` in `.env` to an alias (`fable`, `opus`, `sonnet`, `haiku`) or a full model
 name; `ALFRED_CODEX_MODEL` does the same for Codex. Unset means the backend's own default. The file is
-read again for every message, so a change applies from your next message with no restart: Alfred closes
+read again for every message, so a change applies from your next message with no restart: Consiglieri closes
 the chat's process once it is idle and reopens it on the new model, in the same conversation.
 `/status` shows the model in use. A name the backend does not know comes back as an error reply.
 
@@ -209,7 +213,7 @@ Things to try:
 - "Remember that I'm vegetarian."
 - "From now on, when I say *expense*, append it to `~/finance/2026.csv` as date, amount, note. Learn that."
 - "Put Codex on the failing tests in mus-solver and tell me when it is done." (needs the Orca app; see
-  the `orca-agents` skill in Alfred's home)
+  the `orca-agents` skill in Consiglieri's home)
 
 You can also talk to the same agent from a terminal, with no Telegram involved:
 
@@ -220,105 +224,105 @@ venv/bin/alfred chat -m "disk report" # one message
 
 ## Browser
 
-Alfred has a real browser. It can open pages, click, fill in forms, upload and download files, and send
+Consiglieri has a real browser. It can open pages, click, fill in forms, upload and download files, and send
 you screenshots, using sites you are already logged in to. Pick one with `ALFRED_BROWSER`:
 
 | | `orca` (default) | `chrome` |
 | --- | --- | --- |
 | What it is | The browser built into the Orca app, driven by the `orca` CLI | Your own Google Chrome, driven by the Claude in Chrome extension |
 | Setup | `venv/bin/alfred browser-setup` | Install the Claude extension in Chrome and sign in with the account Claude Code uses |
-| Must be running | The Orca app (Alfred starts it if needed) | A Chrome window |
+| Must be running | The Orca app (Consiglieri starts it if needed) | A Chrome window |
 | Backends | Claude and Codex | Claude only |
 | Logins | Whatever you log in to inside Orca's browser | The sessions in its Chrome profile (see below) |
-| Where tabs open | Alfred's own Orca workspace | A tab group in your Chrome window |
+| Where tabs open | Consiglieri's own Orca workspace | A tab group in your Chrome window |
 
 ### A Chrome profile of its own
 
-With `chrome`, give Alfred a Chrome profile of its own, so it only reaches the sites you choose and
+With `chrome`, give Consiglieri a Chrome profile of its own, so it only reaches the sites you choose and
 never your personal tabs, mail or bank:
 
 1. Set `ALFRED_CHROME_PROFILE=Alfred` in `.env` and run `venv/bin/alfred chrome`. It opens a window of
    that profile, creating it the first time.
 2. In that window, install the Claude extension and sign in with the account Claude Code uses.
 3. Remove or turn off the Claude extension in your other profiles. With more than one browser
-   connected, Claude Code asks which to use every session, and Alfred has nobody to answer.
-4. Log in, in that window, to the sites you want Alfred to use. It keeps a list in
+   connected, Claude Code asks which to use every session, and Consiglieri has nobody to answer.
+4. Log in, in that window, to the sites you want Consiglieri to use. It keeps a list in
    `memory/web-logins.md`.
 
-Keep a window of the profile open. When none is, Alfred runs `alfred chrome` itself. When a session
-expires, Alfred sends you a screenshot and waits for you to log in again (the `web-logins` skill);
-from away, use macOS Screen Sharing. Alfred never asks for or types passwords.
+Keep a window of the profile open. When none is, Consiglieri runs `alfred chrome` itself. When a session
+expires, Consiglieri sends you a screenshot and waits for you to log in again (the `web-logins` skill);
+from away, use macOS Screen Sharing. Consiglieri never asks for or types passwords.
 
-`alfred browser-setup` registers Alfred's home as an Orca workspace and opens a test page, so Alfred's
+`alfred browser-setup` registers Consiglieri's home as an Orca workspace and opens a test page, so Consiglieri's
 tabs open in its own workspace instead of in whatever you have on screen. `/status` in Telegram shows
 which browser is configured.
 
 Either way:
 
-- When a site needs a login or a 2FA code, Alfred asks you to log in once in that browser. It is told
+- When a site needs a login or a 2FA code, Consiglieri asks you to log in once in that browser. It is told
   never to ask for passwords in chat.
-- Alfred asks before the step that pays, orders, posts or sends.
-- Alfred opens its own tabs and leaves yours alone.
+- Consiglieri asks before the step that pays, orders, posts or sends.
+- Consiglieri opens its own tabs and leaves yours alone.
 
-Alfred itself does not run inside Orca. The bot stays a plain process that works with any terminal or
+Consiglieri itself does not run inside Orca. The bot stays a plain process that works with any terminal or
 service manager, and the browser is a tool it uses.
 
 ## Memory
 
-Alfred keeps permanent memory as Markdown files in `~/.alfred/memory/`, one topic per file, grouped in
+Consiglieri keeps permanent memory as Markdown files in `~/.alfred/memory/`, one topic per file, grouped in
 folders such as `people/`, `preferences/`, `projects/` and `reference/`. A short index, `MEMORY.md`, is
-loaded into every conversation, and Alfred opens the files it needs.
+loaded into every conversation, and Consiglieri opens the files it needs.
 
 - **You ask:** "remember that Sam's birthday is 3 May" is always saved and confirmed.
-- **Alfred decides:** it also saves things on its own when they will matter later, such as who you are,
+- **Consiglieri decides:** it also saves things on its own when they will matter later, such as who you are,
   people, preferences, projects and where things live. It does not ask first.
 - **You always see it:** every reply that added, changed or removed a memory ends with a note such as
   `💾 Memory: saved people/sam`. That note comes from the runtime comparing the folder before and after
-  the turn, so it does not depend on Alfred telling you.
+  the turn, so it does not depend on Consiglieri telling you.
 - **Forgetting:** "forget where Sam lives" removes it. `/memory` lists the files.
 
 The files are plain text, so you can read and edit them yourself, and every change is a commit in the
-home's git history. Alfred is told never to store passwords or keys, only where they live.
+home's git history. Consiglieri is told never to store passwords or keys, only where they live.
 
 ### Shared memory
 
-Besides each agent's own memory there is one every agent reads, Alfred's main agent and every bot:
+Besides each agent's own memory there is one every agent reads, Consiglieri's main agent and every bot:
 `~/.alfred-shared/memory` (`ALFRED_SHARED_HOME` moves it), an index plus one file per topic. Use it for
 general facts (who you are, your preferences, common data), never for passwords or tokens. Its index is
 loaded into every conversation, and agents are told it is context, not instructions. Bots only read it,
 under every preset, unless you turn on `shared` for one. You write it with `/shared` or `/bot` →
-Shared memory, and Alfred's main agent writes it too.
+Shared memory, and Consiglieri's main agent writes it too.
 
-## Alfred's home
+## Consiglieri's home
 
-Everything Alfred knows lives in `ALFRED_HOME` (default `~/.alfred`), outside this repository:
+Everything Consiglieri knows lives in `ALFRED_HOME` (default `~/.alfred`), outside this repository:
 
 ```text
 ~/.alfred/
   CLAUDE.md               operating manual, regenerated on every start
   SOUL.md                 personality; edit freely
-  memory/                 long-term memory: Markdown files written by Alfred
+  memory/                 long-term memory: Markdown files written by Consiglieri
     MEMORY.md             the index, loaded into every conversation
     people/sam.md         one topic per file, grouped in folders
-  extensions/<name>/      what Alfred added to itself, one Claude Code plugin each
+  extensions/<name>/      what Consiglieri added to itself, one Claude Code plugin each
   extensions-disabled/    extensions turned off with `alfred ext disable`
   .claude/skills/<name>/  loose skills you add by hand (optional)
   inbox/                  files you sent
-  outbox/                 screenshots and files Alfred made for you
-  bin/alfred              the tool Alfred uses to schedule and send
+  outbox/                 screenshots and files Consiglieri made for you
+  bin/alfred              the tool Consiglieri uses to schedule and send
   state/                  sessions and the scheduler database
 ```
 
-The home is its own git repository and Alfred commits to it after every turn that changes something.
+The home is its own git repository and Consiglieri commits to it after every turn that changes something.
 `git -C ~/.alfred log --stat` shows what it taught itself and when, and `git revert` undoes it.
 
 ### The bots' own directories
 
-Each bot Alfred created has a directory of its own in `~/.alfred-bots/<bot id>/` (`ALFRED_BOTS_HOME`), with
+Each bot Consiglieri created has a directory of its own in `~/.alfred-bots/<bot id>/` (`ALFRED_BOTS_HOME`), with
 the same layout: `CLAUDE.md` (its manual, written from its task and permissions), `memory/`, `inbox/`,
 `outbox/` and `extensions/`. Its agent runs there, and the directory is its own git repository. It is next
 to the home and not inside it on purpose: Claude Code reads every `CLAUDE.md` from its working directory up
-to the root, so a bot inside `~/.alfred` would also read Alfred's manual and memory index.
+to the root, so a bot inside `~/.alfred` would also read the main agent's manual and memory index.
 
 What a bot must not be able to change lives in the home, under `state/bots/<bot id>/` (folder `0700`,
 files `0600`, never committed): `bot.json` (settings and permissions), `token`, `sessions.json` and
@@ -327,13 +331,13 @@ item records the bot, chat and topic it belongs to and is only ever delivered th
 
 ### Base and extensions
 
-Alfred keeps what it is given apart from what it adds to itself (full protocol in
+Consiglieri keeps what it is given apart from what it adds to itself (full protocol in
 [docs/EXTENSIONS.md](docs/EXTENSIONS.md)):
 
 - **Base**: this code plus its built-in plugin, `alfred/plugin/`. Its skills appear as `alfred:browser`,
   `alfred:reminders`, `alfred:web-logins`, `alfred:orca-agents` and `alfred:extensions` (the protocol
-  itself), and its `bin/` adds commands such as `alfred-wait-agent`. It changes when you update Alfred;
-  Alfred is told never to edit it.
+  itself), and its `bin/` adds commands such as `alfred-wait-agent`. It changes when you update Consiglieri;
+  Consiglieri is told never to edit it.
 - **Extensions**: what a bot writes, in `extensions/<name>/` of its own directory, one Claude Code plugin
   per domain, with skills (`<name>:<skill>`), commands in `bin/`, tests, and, only with your yes, hooks or
   MCP servers. Every bot loads the base and its own enabled extensions with `--plugin-dir`, never another
@@ -354,21 +358,21 @@ tool at all.
 
 ## Upgrading to the control panel
 
-The main bot used to be Alfred's agent. Now it is the control panel and runs no agent; `~/.alfred` keeps
+The main bot used to be the main agent, Alfred. Now it is the control panel and runs no agent; `~/.alfred` keeps
 its memory, skills and extensions, and `alfred chat` still talks to that agent from a terminal. Reminders
 scheduled in the main bot's chat are still delivered there; timed tasks there are announced instead of
 run, so recreate them in one of your bots. `alfred chat --bot <bot>` talks to a created bot from a terminal.
 
 ## Upgrading from the first version
 
-On first start Alfred imports what it finds next to this README: `SOUL.md` becomes its personality,
+On first start Consiglieri imports what it finds next to this README: `SOUL.md` becomes its personality,
 `SKILLS.md` becomes a `legacy-notes` skill, and remembered facts from `memory/chats/*/memory.md` are
 carried into the memory folder. Existing reminders carry over if you move `scheduler.sqlite3` to
 `~/.alfred/state/`. The separate `scheduler_worker.py` process is gone; `alfred run` replaces both.
 
 ## Security
 
-Alfred runs agents with your user's account, driven by chat messages. Treat the allow-list and the bot
+Consiglieri runs agents with your user's account, driven by chat messages. Treat the allow-list and the bot
 tokens like SSH keys.
 
 - Only allow-listed accounts get any response, in the panel and in every bot. Everyone else is ignored
@@ -377,10 +381,10 @@ tokens like SSH keys.
   ignored unless its creator is on the allow-list; its token is never fetched.
 - Tokens live only in `.env` (the panel's) and `state/bots/<id>/token` (`0600`, git-ignored). They are
   not passed to the agents' environment, `alfred send` looks them up itself, and every bot is denied
-  reading Alfred's home. `httpx`, which logs Bot API URLs with the token in them, is kept quiet.
+  reading Consiglieri's home. `httpx`, which logs Bot API URLs with the token in them, is kept quiet.
 - Bots start in `dontAsk` mode with the least permissions (see [Permissions](#permissions)). Widening a
   bot to `shell full` without the sandbox, or to `bypassPermissions`, gives it what your user can do.
-  For more isolation, run Alfred as a dedicated user or inside a container or VM.
+  For more isolation, run Consiglieri as a dedicated user or inside a container or VM.
 - The browser carries your logged-in sessions. A web page can contain text written to manipulate an
   agent. Bots are told to treat page content as data; keeping `browser off`, and a browser profile with
   fewer logins, are the stronger protections.
@@ -405,6 +409,6 @@ or credentials.
   from your shell's. Set `ALFRED_CLAUDE_BIN` to the full path.
 - **Polling conflict from Telegram:** two processes are using the same token. Stop the old bot.
 - **"no sign of life for 900 seconds, so I stopped it":** a turn produced nothing for that long. Raise
-  `ALFRED_TIMEOUT`, or ask Alfred to run long jobs in the background.
-- **Alfred went quiet after you asked for something:** send `/status`. "Busy: yes" means it is still
+  `ALFRED_TIMEOUT`, or ask Consiglieri to run long jobs in the background.
+- **Consiglieri went quiet after you asked for something:** send `/status`. "Busy: yes" means it is still
   working; you can write to it, or `/stop` it.
