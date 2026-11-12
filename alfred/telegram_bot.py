@@ -43,7 +43,7 @@ from .agent import Agent, Chat, Listener
 from .backends import BACKENDS, BackendError, RunResult
 from .bots import BotError, BotRecord, BotRegistry
 from .config import Config
-from .scheduler import KIND_EVENT, KIND_TASK, Item, Postpone, SchedulerStore, parse_time, run_scheduler
+from .scheduler import KIND_EVENT, KIND_TASK, Item, Postpone, SchedulerStore, parse_time, run_scheduler, utc_now
 from .text import split_message
 
 log = logging.getLogger("alfred.telegram")
@@ -572,7 +572,9 @@ class ControlPanel:
             return
         if text == CANCEL_CREATION:
             if self.pool is not None:
-                self.pool.registry.take_pending(update.effective_user.id, "")
+                pending = self.pool.registry.take_pending(update.effective_user.id, "")
+                if pending is not None and pending.request_id:
+                    self.pool.admin_request_cancelled(pending, update.effective_user.id)
             await message.reply_text("Cancelled; no bot was created.", reply_markup=ReplyKeyboardRemove())
             return
         await message.reply_text(
@@ -934,10 +936,16 @@ class ControlPanel:
         if taken is None:
             ask = {"crossgrant": "Ask again with /bot perm <bot> cross on.",
                    "admingrant": "Ask again with /bot perm <bot> admin on.",
+                   "adminok": "Grant what you want yourself from /bot → My bots → Permissions.",
                    }.get(action, "Ask again with /bot destroy.")
             await query.edit_message_text("That button has expired. %s" % ask)
             return
         bot_id, asked = taken
+        if action == "cancel" and asked == "adminok":
+            record = self.pool.registry.get_owned(bot_id, update.effective_user.id)
+            await query.edit_message_text(await self.pool.answer_admin_extras(record, False, update.effective_user.id, payload or "")
+                                          if record is not None else "That bot is already gone.")
+            return
         if action == "cancel":
             await query.edit_message_text("Nothing was destroyed." if asked == "destroy" else "Nothing was granted.")
             return
@@ -952,6 +960,10 @@ class ControlPanel:
             updated = await self.pool.set_cross_agent(record, True, update.effective_user.id, "command")
             await query.edit_message_text("Cross-agent access granted to %s. It applies from its next message.\n\n%s"
                                           % (record.handle, bots.cross_agent_line(updated)))
+            return
+        if action == "adminok":
+            await query.edit_message_text(await self.pool.answer_admin_extras(record, True, update.effective_user.id,
+                                                                              payload or ""))
             return
         if action == "admingrant":
             updated = await self.pool.set_permissions(record, payload or dict(record.permissions, admin="on"),
@@ -1175,17 +1187,23 @@ class BotPool:
             bot_id=bot_id,
             username=username,
             name=str(bot.get("first_name") or (pending.name if pending else username)),
-            owner_id=creator_id,
+            owner_id=creator_id,  # always the user who confirmed it in Telegram, also when a bot admin asked for it
             settings=dict(pending.settings) if pending else {},
             # Without a request of its own, a bot gets the defaults: the least it can do.
             permissions=dict(pending.permissions) if pending else {},
             notify_chat_id=pending.chat_id if pending else creator_id,
         )
+        soul_text = pending.soul if pending is not None else ""
+        adopted = None
+        if pending is not None and pending.request_id:
+            # A bot admin asked for it: its request is checked again now, against the admin as it is now.
+            adopted = self._adopt(record, pending)
+            soul_text = adopted[2].soul if adopted[2] is not None else ""
         token = await bots.fetch_token(manager, bot_id)
         self.registry.save(record)
         self.registry.set_token(bot_id, token)
-        if pending is not None and pending.soul.strip():  # its own personality from the assistant; else the base
-            soul.write(self.registry.workspace(bot_id), pending.soul)
+        if soul_text.strip():  # its own personality from the assistant or the admin's spec; else the base
+            soul.write(self.registry.workspace(bot_id), soul_text)
         try:
             await bots.restrict_access(manager, bot_id)
         except Exception as exc:  # Consiglieri's own allow-list still guards the bot
@@ -1198,13 +1216,131 @@ class BotPool:
         lines.append(bots.permission_summary(record, for_owner=True))
         if not pending:
             lines.append("(I hadn't asked for it, but you created it with me as manager, so I took it on.)")
-        if not record.settings.get("task"):
+        if adopted is not None:
+            request, admin, checked, problems = adopted
+            if checked is None:
+                lines.append("⚠️ %s asked for it (request %s), but that request no longer holds (%s), so it starts "
+                             "with the least: 🔒 Basic, no task and the base personality. Set it up from /bot."
+                             % (request.get("admin"), request["id"], "; ".join(problems)))
+            else:
+                lines.append("Created for you at %s's request (%s). You own it; %s will finish setting it up and "
+                             "remind you to press Start." % (request.get("admin"), request["id"], request.get("admin")))
+        elif not record.settings.get("task"):
             lines.append("Give it a job with /bot set %s task <what it should do>." % record.username)
         if not running:
             lines = ["%s was created, but I could not connect to it. Try /bot resume %s." % (record.handle, record.username)]
         # This message also takes the creation keyboard away.
         await self._notify(record.notify_chat_id, "\n".join(lines), reply_markup=ReplyKeyboardRemove())
+        if adopted is not None:
+            await self._after_adoption(record, *adopted)
         return record
+
+    # -- bots a bot admin asked for (docs/BOT_ADMIN.md) -------------------------
+
+    def _adopt(self, record: BotRecord, pending: Any) -> Tuple[Dict[str, Any], Optional[BotRecord], Any, List[str]]:
+        """Fill a new bot from the bot admin's request, checked again now. A request that no longer holds (the admin
+        is gone, is no longer one, or now has less) leaves it with the least: Basic, no settings, the base soul."""
+        request = bot_admin.get(self.config, pending.request_id) or {
+            "id": pending.request_id, "admin_bot_id": pending.admin_bot_id, "owner_id": pending.owner_id, "input": None}
+        admin, checked, problems = bot_admin.revalidate(self.config, request)
+        if int(request.get("owner_id") or 0) != int(record.owner_id):
+            admin, checked, problems = admin, None, ["it was asked for another user"]
+        record.created_by = int(request.get("admin_bot_id") or 0)
+        record.request_id = request["id"]
+        if checked is None:
+            record.settings, record.permissions = {}, {}
+        else:
+            record.settings, record.permissions = dict(checked.settings), dict(checked.initial)
+        return request, admin, checked, problems
+
+    async def _after_adoption(self, record: BotRecord, request: Dict[str, Any], admin: Optional[BotRecord],
+                              checked: Any, problems: List[str]) -> None:
+        via = "bot admin request %s by %s" % (request["id"], request.get("admin"))
+        if checked is None:
+            bots.audit(self.config, "admin_request_invalid", record, record.owner_id, via, admin=request.get("admin"),
+                       request=request["id"], problems=problems)
+            bot_admin.update(self.config, request["id"], status="invalid", bot_id=record.bot_id, bot=record.handle,
+                             problems=problems)
+            self._wake_admin(admin, request, bot_admin.created_event(record, request, None, problems))
+            return
+        scheduled = bot_admin.schedule_reminders(self.config, record, checked.reminders)
+        status = "awaiting_approval" if checked.extras else "created"
+        bot_admin.update(self.config, request["id"], status=status, bot_id=record.bot_id, bot=record.handle,
+                         reminders=scheduled, skipped=checked.skipped)
+        bots.audit(self.config, "admin_bot_created", record, record.owner_id, via, admin=request.get("admin"),
+                   request=request["id"], permissions=record.permissions, settings=record.settings,
+                   soul=bool(checked.soul), reminders=len(scheduled),
+                   extras=[bot_admin.EXTRAS[key][0] for key in checked.extras])
+        if checked.extras:
+            nonce = self.ask_confirmation(record.bot_id, record.owner_id, "adminok", payload=request["id"],
+                                          seconds=bot_admin.APPROVAL_SECONDS)
+            markup = InlineKeyboardMarkup([[
+                InlineKeyboardButton("⚠️ Approve them", callback_data="bot:adminok:%s" % nonce),
+                InlineKeyboardButton("No, keep it without", callback_data="bot:cancel:%s" % nonce),
+            ]])
+            await self._notify(record.owner_id, bot_admin.approval_text(record, request), reply_markup=markup)
+        self._wake_admin(admin, request, bot_admin.created_event(record, request, checked, problems))
+
+    def _wake_admin(self, admin: Optional[BotRecord], request: Dict[str, Any], text: str) -> None:
+        """Tell the bot admin, in the chat it asked from, with an [Event]: it wakes up and carries on."""
+        if admin is None or int(admin.owner_id) != int(request.get("owner_id") or 0):
+            return
+        chat_id = int(request.get("chat_id") or admin.owner_id)
+        if chat_id not in admin.own_chats():
+            chat_id = admin.owner_id
+        self.store.add(chat_id=chat_id, due=utc_now(), text=text, kind=KIND_EVENT, user_id=admin.owner_id,
+                       bot_id=admin.bot_id, thread_id=request.get("thread_id"))
+
+    async def answer_admin_extras(self, record: BotRecord, yes: bool, by: int, request_id: str = "") -> str:
+        """The user's answer to the extras a bot admin asked for. Checked again: never above the admin as it is now."""
+        request = bot_admin.for_bot(self.config, record.bot_id)
+        if request is None or request["status"] != "awaiting_approval" or (request_id and request["id"] != request_id):
+            return "Nothing from a bot admin is waiting for your answer about %s." % record.handle
+        extras = request["spec"].get("extras", [])
+        names = [bot_admin.EXTRAS[key][0] for key in extras if key in bot_admin.EXTRAS]
+        via = "bot admin request %s by %s" % (request["id"], request.get("admin"))
+        admin = self.registry.get(int(request["admin_bot_id"]))
+        if not yes:
+            bot_admin.update(self.config, request["id"], status="declined", answered_by=by)
+            bots.audit(self.config, "admin_extras_declined", record, by, via, admin=request.get("admin"),
+                       request=request["id"], extras=names)
+            self._wake_admin(admin, request, bot_admin.answered_event(record, request, "declined"))
+            return ("Declined. %s keeps running without: %s. You can grant any of it yourself from /bot → My bots → "
+                    "Permissions." % (record.handle, ", ".join(names)))
+        values = bot_admin.extra_values(request["spec"]["permissions"], extras)
+        problems: List[str] = []
+        if admin is None or not admin.allows("admin") or int(admin.owner_id) != int(record.owner_id):
+            problems.append("the bot admin that asked is gone or no longer one")
+        else:
+            problems += bot_admin.ceiling_problems(self.config, admin, values, "cross" in extras, {})
+        if problems:
+            bot_admin.update(self.config, request["id"], status="refused", answered_by=by, problems=problems)
+            bots.audit(self.config, "admin_extras_refused", record, by, via, admin=request.get("admin"),
+                       request=request["id"], extras=names, problems=problems)
+            self._wake_admin(admin, request, bot_admin.answered_event(record, request, "refused", "; ".join(problems)))
+            return ("I can't approve that: %s. %s keeps running without it; grant it yourself from /bot if you want."
+                    % ("; ".join(problems), record.handle))
+        current = self.registry.get(record.bot_id) or record
+        updated = await self.set_permissions(current, dict(current.permissions, **values), by=by, via=via)
+        if "cross" in extras:
+            updated = await self.set_cross_agent(updated, True, by, via)
+        bot_admin.update(self.config, request["id"], status="approved", answered_by=by)
+        bots.audit(self.config, "admin_extras_approved", updated, by, via, admin=request.get("admin"),
+                   request=request["id"], extras=names)
+        self._wake_admin(admin, request, bot_admin.answered_event(updated, request, "approved"))
+        return "Approved for %s: %s. It applies from its next message. Now: %s." % (
+            record.handle, ", ".join(names), presets.level_name(updated))
+
+    def admin_request_cancelled(self, pending: Any, by: int) -> None:
+        request = bot_admin.get(self.config, pending.request_id)
+        if request is None or request["status"] != "waiting":
+            return
+        bot_admin.update(self.config, request["id"], status="cancelled", answered_by=by)
+        admin = self.registry.get(int(request["admin_bot_id"]))
+        if admin is not None:
+            bots.audit(self.config, "admin_request_cancelled", admin, by, "the Cancel key", admin=admin.handle,
+                       request=request["id"])
+        self._wake_admin(admin, request, bot_admin.answered_event(None, request, "cancelled"))
 
     async def _token_changed(self, record: BotRecord, creator_id: int) -> BotRecord:
         token = await bots.fetch_token(self.main.bot, record.bot_id)

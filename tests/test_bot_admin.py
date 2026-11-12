@@ -495,5 +495,186 @@ class AdminPermissionPanelTests(MenuDriver, PanelHarness):  # type: ignore[misc,
         self.play(scenario)
 
 
+@unittest.skipIf(PanelHarness is None, "python-telegram-bot is not installed")
+class AdminFlowTests(PanelHarness):  # type: ignore[misc,valid-type]
+    """From the admin's request to the bot set up: the user confirms in Telegram, the panel does the rest."""
+
+    button = test_panel.PanelTests.button if PanelHarness is not None else None
+    CHEF = 5000000400
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.registry = BotRegistry(self.config)
+        admin = BotRecord(bot_id=ADMIN, username="boss_bot", name="Boss", owner_id=OWNER, chat_ids=[OWNER],
+                          permissions=presets.apply("botadmin", {}))
+        self.registry.save(admin)
+        self.registry.set_token(ADMIN, "%d:%s" % (ADMIN, "B" * 35))
+        FakeTelegramBot.sent = []
+
+    def ask(self, **fields: Any) -> Dict[str, Any]:
+        """The admin's turn: `alfred bots create`, before the pool runs (the command has its own event loop)."""
+        environ = dict(self.sandbox.environ, ALFRED_BOT_ID=str(ADMIN), ALFRED_CHAT_ID=str(OWNER),
+                       ALFRED_BOT_KEY=bots.bot_key(self.config, ADMIN, create=True))
+        buffer = io.StringIO()
+        with mock.patch.dict(os.environ, environ), mock.patch("telegram.Bot", FakeTelegramBot), redirect_stdout(buffer):
+            cli.main(["bots", "create", "--json", spec(**fields)])
+        result = json.loads(buffer.getvalue())
+        self.assertTrue(result["ok"], result)
+        return result
+
+    async def confirm(self, username: str) -> BotRecord:
+        return await self.create(self.CHEF, username, "Chef")
+
+    def admin_events(self) -> list:
+        items = SchedulerStore(self.config.db_path).list(OWNER, include_done=True, bot_id=ADMIN)
+        return [item["message"] for item in items if item["kind"] == "event"]
+
+    def test_the_whole_flow_with_the_users_confirmation_and_approval(self) -> None:
+        asked = self.ask(preset="botadmin", soul="Cheerful and brief.", model="sonnet",
+                         reminders=[{"in": "1d", "every": "1d", "message": "What's for dinner?"}])
+
+        async def scenario() -> None:
+            record = await self.confirm(asked["username"])
+            # The user who confirmed owns it; the admin is only recorded as the one that asked.
+            self.assertEqual((record.owner_id, record.created_by, record.request_id), (OWNER, ADMIN, asked["request"]))
+            self.assertEqual(record.settings, {"task": "Plan the week's meals", "model": "sonnet"})
+            self.assertEqual(record.permissions, {"web": "on", "edit": "on"})  # the extra waits for the user
+            self.assertIn("Cheerful and brief.", (self.registry.workspace(self.CHEF) / "SOUL.md").read_text())
+            reminder = SchedulerStore(self.config.db_path).pending_for_bot(self.CHEF)[0]
+            self.assertEqual((reminder["chat_id"], reminder["message"], reminder["repeat_seconds"]),
+                             (OWNER, "What's for dinner?", 86400))
+            ready, approval = self.panel_bot.sent[-2:]
+            self.assertIn("Created for you at @boss_bot's request (%s)" % asked["request"], ready["text"])
+            self.assertIn("🧑‍💼 Bot admin: it could ask you for more bots", approval["text"])
+            yes, no = approval["reply_markup"].inline_keyboard[0]
+            self.assertIn("The user created @%s" % asked["username"], self.admin_events()[0])
+            self.assertIn("Waiting for the user's yes", self.admin_events()[0])
+            self.assertIn("press Start", self.admin_events()[0])
+
+            stranger = self.button(yes.callback_data, user_id=STRANGER)
+            await self.pool.main._on_button(stranger, mock.Mock(bot=self.panel_bot))
+            self.assertFalse(self.registry.get(self.CHEF).allows("admin"))
+            pressed = self.button(yes.callback_data)
+            await self.pool.main._on_button(pressed, mock.Mock(bot=self.panel_bot))
+            self.assertIn("Approved for @%s: 🧑‍💼 Bot admin" % asked["username"], pressed.edits[-1])
+            self.assertTrue(self.registry.get(self.CHEF).allows("admin"))
+            self.assertIn("approved the extra permissions", self.admin_events()[-1])
+            again = self.button(yes.callback_data)
+            await self.pool.main._on_button(again, mock.Mock(bot=self.panel_bot))
+            self.assertIn("expired", again.edits[-1])
+
+            events = [(entry["event"], entry["by"]) for entry in bots.read_audit(self.config)]
+            self.assertEqual(events, [("admin_requested", "@boss_bot"), ("admin_bot_created", OWNER),
+                                      ("admin_permission_granted", OWNER), ("admin_extras_approved", OWNER)])
+            created = bots.read_audit(self.config)[1]
+            self.assertEqual((created["admin"], created["request"]), ("@boss_bot", asked["request"]))
+            audit = await self.command("/bot audit")
+            self.assertIn("bot request sent by @boss_bot", audit[0]["text"])
+            self.assertIn("approved the extra permissions", audit[0]["text"])
+            self.assertEqual(bot_admin.get(self.config, asked["request"])["status"], "approved")
+
+        self.play(scenario)
+
+    def test_declining_keeps_the_bot_without_the_extras(self) -> None:
+        asked = self.ask(preset="botadmin")
+
+        async def scenario() -> None:
+            await self.confirm(asked["username"])
+            no = self.panel_bot.sent[-1]["reply_markup"].inline_keyboard[0][1]
+            pressed = self.button(no.callback_data)
+            await self.pool.main._on_button(pressed, mock.Mock(bot=self.panel_bot))
+            self.assertIn("Declined", pressed.edits[-1])
+            self.assertFalse(self.registry.get(self.CHEF).allows("admin"))
+            self.assertEqual(bot_admin.get(self.config, asked["request"])["status"], "declined")
+            self.assertEqual(bots.read_audit(self.config)[-1]["event"], "admin_extras_declined")
+            self.assertIn("declined", self.admin_events()[-1])
+
+        self.play(scenario)
+
+    def test_a_request_without_extras_needs_no_second_button(self) -> None:
+        asked = self.ask()
+
+        async def scenario() -> None:
+            await self.confirm(asked["username"])
+            self.assertEqual(self.panel_bot.sent[-1]["reply_markup"].to_dict(), {"remove_keyboard": True})
+            self.assertEqual(bot_admin.get(self.config, asked["request"])["status"], "created")
+
+        self.play(scenario)
+
+    def test_a_request_that_no_longer_holds_starts_the_bot_with_the_least(self) -> None:
+        asked = self.ask(soul="Grumpy.", model="opus")
+        admin = self.registry.get(ADMIN)
+        admin.permissions = presets.apply("basic", {"admin": "on"})  # the user took web and edits away meanwhile
+        self.registry.save(admin)
+
+        async def scenario() -> None:
+            record = await self.confirm(asked["username"])
+            self.assertEqual((record.permissions, record.settings), ({}, {}))
+            self.assertNotIn("Grumpy", (self.registry.workspace(self.CHEF) / "SOUL.md").read_text())
+            self.assertIn("that request no longer holds", self.panel_bot.texts[-1])
+            self.assertEqual(bot_admin.get(self.config, asked["request"])["status"], "invalid")
+            self.assertEqual(bots.read_audit(self.config)[-1]["event"], "admin_request_invalid")
+            self.assertIn("no longer held", self.admin_events()[-1])
+
+        self.play(scenario)
+
+    def test_the_users_approval_is_still_never_above_the_admin(self) -> None:
+        admin = self.registry.get(ADMIN)
+        admin.permissions["shared"] = "on"
+        self.registry.save(admin)
+        asked = self.ask(permissions={"shared": "on"})
+
+        async def scenario() -> None:
+            await self.confirm(asked["username"])
+            await self.pool.set_permission(self.registry.get(ADMIN), "shared", "off", by=OWNER)
+            yes = self.panel_bot.sent[-1]["reply_markup"].inline_keyboard[0][0]
+            pressed = self.button(yes.callback_data)
+            await self.pool.main._on_button(pressed, mock.Mock(bot=self.panel_bot))
+            self.assertIn("I can't approve that", pressed.edits[-1])
+            self.assertFalse(self.registry.get(self.CHEF).allows("shared"))
+            self.assertEqual(bots.read_audit(self.config)[-1]["event"], "admin_extras_refused")
+
+        self.play(scenario)
+
+    def test_cross_agent_access_asked_by_an_admin_that_has_it_is_granted_only_on_the_users_yes(self) -> None:
+        admin = self.registry.get(ADMIN)
+        admin.cross_agent = True
+        self.registry.save(admin)
+        asked = self.ask(cross_agent=True)
+
+        async def scenario() -> None:
+            record = await self.confirm(asked["username"])
+            self.assertFalse(record.cross_agent)
+            approval = self.panel_bot.sent[-1]
+            self.assertIn("Cross-agent access for Chef", approval["text"])
+            await self.pool.main._on_button(self.button(approval["reply_markup"].inline_keyboard[0][0].callback_data),
+                                            mock.Mock(bot=self.panel_bot))
+            self.assertTrue(self.registry.get(self.CHEF).cross_agent)
+            granted = [entry for entry in bots.read_audit(self.config) if entry["event"] == "cross_agent_granted"][0]
+            self.assertEqual((granted["by"], granted["via"]), (OWNER, "bot admin request %s by @boss_bot" % asked["request"]))
+
+        self.play(scenario)
+
+    def test_the_cancel_key_cancels_the_admins_request_and_tells_it(self) -> None:
+        asked = self.ask()
+
+        async def scenario() -> None:
+            replies = await self.command("Cancel")
+            self.assertEqual(replies[0]["text"], "Cancelled; no bot was created.")
+            self.assertEqual(bot_admin.get(self.config, asked["request"])["status"], "cancelled")
+            self.assertIn("cancelled the request", self.admin_events()[-1])
+            self.assertEqual(bots.read_audit(self.config)[-1]["event"], "admin_request_cancelled")
+
+        self.play(scenario)
+
+    def test_a_bot_admin_never_destroys_a_bot(self) -> None:
+        self.assertNotIn("destroy", bots.ADMIN_SUBCOMMANDS + bots.BOTS_SUBCOMMANDS)
+        environ = dict(self.sandbox.environ, ALFRED_BOT_ID=str(ADMIN), ALFRED_CHAT_ID=str(OWNER),
+                       ALFRED_BOT_KEY=bots.bot_key(self.config, ADMIN, create=True))
+        with mock.patch.dict(os.environ, environ), redirect_stdout(io.StringIO()), self.assertRaises(SystemExit):
+            cli.main(["bots", "destroy", "boss_bot"])
+        self.assertIsNotNone(self.registry.get(ADMIN))
+
+
 if __name__ == "__main__":
     unittest.main()
