@@ -100,6 +100,11 @@ def managed() -> List[str]:
     return [name for name in PERMISSION_NAMES if name not in FREEFORM]
 
 
+def _listed() -> List[str]:
+    """The managed permissions in the order a list of changes names them: the switches, then the rest."""
+    return [name for name in managed() if name in SWITCHES] + [name for name in managed() if name not in SWITCHES]
+
+
 def values(permissions: Mapping[str, str]) -> Dict[str, str]:
     """Every managed permission's value, from a bot's stored permissions (only what differs from the defaults)."""
     return {name: permissions.get(name) or DEFAULT_PERMISSIONS[name] for name in managed()}
@@ -152,7 +157,7 @@ def phrase(name: str, value: str) -> str:
 def differences(base: str, permissions: Mapping[str, str]) -> List[str]:
     """What these permissions change from a preset, in short words: ["+ browser", "− web"]."""
     current, target = values(permissions), resolve(base)
-    return [phrase(name, current[name]) for name in managed() if current[name] != target[name]]
+    return [phrase(name, current[name]) for name in _listed() if current[name] != target[name]]
 
 
 def looser(name: str, old: str, new: str) -> bool:
@@ -171,7 +176,7 @@ def looser(name: str, old: str, new: str) -> bool:
 def gains(current: Mapping[str, str], target: Mapping[str, str]) -> List[str]:
     """What going from one set of permissions to another newly allows. Empty when it only takes away."""
     old, new = values(current), values(target)
-    return [phrase(name, new[name]) for name in managed() if looser(name, old[name], new[name])]
+    return [phrase(name, new[name]) for name in _listed() if looser(name, old[name], new[name])]
 
 
 def title(key: str, recommended_mark: bool = False) -> str:

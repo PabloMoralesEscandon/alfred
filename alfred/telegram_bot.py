@@ -35,7 +35,7 @@ from telegram.ext import (
     filters,
 )
 
-from . import bots, home, menus, orca, usage
+from . import bots, home, menus, orca, presets, usage
 from .agent import Agent, Chat, Listener
 from .backends import BACKENDS, BackendError, RunResult
 from .bots import BotError, BotRecord, BotRegistry
@@ -1123,6 +1123,18 @@ class BotPool:
             frontend.record = record
             # The new rules are written before its next message and the process is reopened with them (its
             # command line and manual change). A turn in progress finishes under the old rules.
+        return record
+
+    async def set_permissions(self, record: BotRecord, permissions: Dict[str, str]) -> BotRecord:
+        """Replace all of a bot's permissions at once (a preset): checked, then saved in one write."""
+        cleaned = {name: bots.clean_permission(self.config, name, value) for name, value in permissions.items()}
+        record = self.registry.get(record.bot_id) or record
+        record.permissions = cleaned
+        self.registry.save(record)
+        record = self.registry.get(record.bot_id) or record
+        frontend = self.frontends.get(record.bot_id)
+        if frontend is not None:
+            frontend.record = record  # applies from its next message, as with set_permission
         return record
 
     async def pause(self, record: BotRecord) -> None:
