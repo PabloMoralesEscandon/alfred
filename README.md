@@ -80,6 +80,14 @@ All settings are listed in [.env.example](.env.example).
 Once, in @BotFather: open its Mini App (the Open button), choose your bot, and turn on **Bot Management
 Mode**. That is what lets the panel create bots. `/status` in the panel says whether it is on.
 
+Send `/bot` for the menu: **Create bot** walks you through name, task, model, effort and permissions
+with buttons (Back and Cancel on every step) and ends with a summary and the proposed username, which
+extends the panel's (`manolito_bot` → `manolito_<what it does>_bot`). **My bots** changes a bot's model,
+effort, task and permissions, pauses, resumes or destroys it. A menu expires after 30 minutes, when you
+open a newer one, or when Alfred restarts; its old buttons then just say so.
+
+The same can be done with text shortcuts:
+
 | Command | What it does |
 | --- | --- |
 | `/bot new <name> [options] [task]` | Create a bot. The panel shows a "Create @…" keyboard button: tap it and confirm in the window Telegram opens, where you can still change the name and username. A `t.me/newbot/…` link follows as a second option, for apps where the button does not show. The panel connects to the new bot at once, no restart, and removes the keyboard. |

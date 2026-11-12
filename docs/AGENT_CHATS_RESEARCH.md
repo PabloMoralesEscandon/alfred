@@ -539,9 +539,53 @@ Telegram ─► ControlPanel (TELEGRAM_BOT_TOKEN)  /bots /bot …   sin agente
 - **`alfred/scheduler.py`**: columnas `bot_id` y `thread_id` con migración; listado y cancelación por bot; `Postpone` para los bots en pausa.
 - **`alfred/templates/BOT.md`**: el manual de cada bot, con su tarea, su directorio de trabajo y un resumen de lo que puede hacer.
 
-### 6.3 Comandos
+### 6.3 Menús y comandos
 
-En el panel:
+**El menú (`/bot` sin argumentos).** Es un teclado en línea que edita siempre el mismo mensaje
+(`alfred/menus.py`, sin dependencias de Telegram):
+
+- **Crear bot** es un asistente de 6 pasos, cada uno con *Atrás* y *Cancelar*:
+  1. nombre, como texto;
+  2. tarea, como texto o *Saltar*;
+  3. modelo: Claude o Codex; para Claude, Default, Fable, Opus, Sonnet o Haiku; o escribir un nombre;
+  4. esfuerzo, con las opciones de cada backend;
+  5. permisos, con interruptores y los preajustes Mínimo, Estándar y Amplio. Las opciones peligrosas
+     llevan avisos: shell completa, sin sandbox, navegador, otros chats, `bypassPermissions`, `auto`;
+  6. resumen con el username propuesto y *Crear*.
+
+  *Crear* envía el botón de teclado y el enlace, igual que `/bot new`.
+- **Mis bots** abre cada bot: modelo, esfuerzo, tarea, permisos (cada toque se aplica), pausar o
+  reanudar, y destruir con una pantalla de confirmación.
+- **Ayuda**.
+
+Detalles de los menús:
+
+- **Estado:** en memoria, una sesión por usuario, que caduca a los 30 minutos sin uso. Un `/bot` nuevo
+  sustituye al anterior, y un reinicio las borra todas. Un botón de una sesión que ya no existe contesta
+  "This menu has expired… Send /bot" y no hace nada, así que no queda un asistente a medias que actúe
+  con elecciones viejas.
+- **Botones:** el `callback_data` es `m:<token>:<acción>`, siempre por debajo de 64 bytes, y un test lo
+  comprueba en todas las pantallas.
+- **Quién puede pulsar:** solo los usuarios permitidos, y solo quien abrió el menú.
+- **Texto libre:** el panel lo interpreta como respuesta solo mientras el menú espera un texto.
+- **Modos en el selector:** recorre `dontAsk`, `acceptEdits`, `auto` y `bypassPermissions`. `plan` y
+  `default` quedan para `/bot perm`, porque sin nadie que conteste no sirven.
+
+**Username propuesto.** Extiende el del panel: `manolito_bot` + "Gestor calendarios" →
+`manolito_gestor_calendarios_bot`.
+
+- El slug sale del nombre o, si este no tiene letras útiles, de la tarea. Se pasa a ASCII (acentos,
+  emojis, mayúsculas, espacios), solo con `[a-z0-9_]`.
+- Para no pasar de 32 caracteres se recorta el slug, nunca el prefijo, sin dejar `__` ni `_` colgando.
+- Si coincide con un bot propio, una petición pendiente o el propio panel, lleva un número
+  (`manolito_research_2_bot`).
+- La Bot API no permite comprobar si otra persona ya tiene ese username (`bots.checkUsername` es solo
+  para usuarios). En ese caso Telegram lo rechaza en su ventana, donde el usuario puede cambiar nombre
+  y username.
+- Caso límite: si el username del panel es tan largo que ni `prefijo_bot` cabe, se recorta también el
+  prefijo.
+
+**Comandos de texto (atajos)**, en el panel:
 
 - `/bot new <nombre> [opciones] [tarea]`: las opciones van antes de la tarea, por ejemplo `+web`, `+shell`, `-schedule` o `model=sonnet`.
   - **Vía principal:** un botón de teclado `KeyboardButton.request_managed_bot` con `request_id`, `suggested_name` y `suggested_username`. La 22.5 no tiene la clase, así que el botón lleva el JSON de la Bot API en `api_kwargs`. No depende de que la app abra un deep link.
@@ -639,15 +683,16 @@ real en esos casos, Alfred debería correr con un usuario propio o en una VM.
 
 ### 6.6 Qué se probó
 
-`PYTHONPATH=tests venv/bin/python -m unittest discover -s tests` pasa **170 tests**: los 125 que había y
-45 nuevos. Se ejecutaron en un venv con Python 3.9.6 y python-telegram-bot 22.5, con stand-ins para
+`PYTHONPATH=tests venv/bin/python -m unittest discover -s tests` pasa **186 tests**: los 125 que había y
+61 nuevos. Se ejecutaron en un venv con Python 3.9.6 y python-telegram-bot 22.5, con stand-ins para
 `claude`, `codex`, `orca` y Telegram.
 
 Uno de los 125 (`test_a_turn_with_no_sign_of_life_is_stopped`) ya fallaba antes de estos cambios en esta
 máquina. macOS tarda medio segundo en ejecutar por primera vez un script recién creado, más que el
 límite de 0,4 s del test. Se subió a 1,5 s en un commit aparte.
 
-- **`tests/test_bots.py` (22):**
+- **`tests/test_bots.py` (27):**
+  - usernames: prefijo del panel, acentos, espacios, mayúsculas, emojis, slug sacado de la tarea, recorte a 32 sin `__`, colisiones con número;
   - registro, token `0600` en un directorio `0700` y fuera del historial de git;
   - peticiones pendientes con caducidad;
   - cada bot con su directorio fuera del home y sus propias extensiones;
@@ -680,6 +725,18 @@ límite de 0,4 s del test. Se subió a 1,5 s en un commit aparte.
   - temas;
   - destrucción con confirmación: un desconocido no puede confirmar, un botón viejo caduca, *Cancel* no hace nada, y se borra solo lo del bot destruido.
 
+- **`tests/test_menus.py` (11):**
+  - el asistente completo hasta la petición, y el bot creado con lo elegido;
+  - *Atrás* paso a paso conservando lo escrito;
+  - *Cancelar* cierra el menú, y sus botones dejan de funcionar;
+  - un reinicio o un `/bot` nuevo caducan los botones viejos sin enviar nada;
+  - solo el dueño del menú, y solo un usuario permitido, puede pulsar;
+  - entradas inválidas que se explican y se vuelven a pedir;
+  - modelos y esfuerzos de Codex;
+  - avisos de las opciones peligrosas y preajustes;
+  - 64 bytes en todos los botones;
+  - Mis bots: modelo, esfuerzo, tarea, permisos, pausar, reanudar y destruir con confirmación.
+
 ### 6.7 Qué queda por probar en vivo
 
 Nada de lo que sigue se ha probado con Telegram ni con Claude Code reales. Los pasos asumen un bot de
@@ -710,6 +767,8 @@ pruebas y un home aparte, para no tocar `~/.alfred` ni el servicio en marcha:
    "Create", confirma en la ventana que abre Telegram y espera el mensaje "@… is ready", que también
    quita el teclado. El segundo mensaje trae el enlace `t.me/newbot/…` como alternativa. Comprueba que el update `managed_bot` llegó y que el token se guardó:
    `ls -l ~/.alfred-test/state/bots/*/` debe mostrar `token` con `-rw-------`.
+   Prueba también el menú: `/bot`, *Crear bot*, recorre los pasos con *Atrás*, y comprueba en el
+   resumen que el username extiende el del panel. Después, en *Mis bots*, cambia el modelo y un permiso.
 6. Abre el bot nuevo, pulsa *Start* y escríbele. Debe contestar él, no el panel. En su `/status` debe
    aparecer su directorio en `~/.alfred-test-bots/<id>`.
 7. Permisos con un Claude Code real. Revisa el log por avisos de Claude Code sobre los ajustes; `claude
