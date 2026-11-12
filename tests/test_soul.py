@@ -120,9 +120,17 @@ class SoulFileTests(unittest.TestCase):
         self.assertNotIn(own_rule, settings["permissions"]["deny"])
         self.assertNotIn(str(soul.path_in(self.workspace)), settings["sandbox"]["filesystem"]["denyWrite"])
         self.assertIn(other_dir_rule, settings["permissions"]["deny"])
-        self.assertIn("The user lets you edit it", bots.render_manual(self.config, record))
-        self.assertIn("edit its own personality", bots.permission_summary(record, for_owner=True))
-        self.assertIn("own personality edits", presets.name_of(record.permissions))  # Custom, from Power
+        self.assertIn("The user lets you edit it, role and mission included", bots.render_manual(self.config, record))
+        self.assertIn("edit its own SOUL.md (role, mission and personality)", bots.permission_summary(record, for_owner=True))
+        self.assertIn("own role and personality edits", presets.name_of(record.permissions))  # Custom, from Power
+        # The warning says it now reaches its mission, not only its tone.
+        from alfred import menus
+
+        warning = " ".join(menus.permission_warnings(record))
+        self.assertIn("includes its mission and scope, not only its tone", warning)
+        self.assertIn("Never what it may do", warning)
+        self.assertIn(("soul", "🎭 Edit its own role and personality"), menus.SWITCH_LABELS)
+        self.assertIn("role and mission", dict((n, d) for n, _, d in bots.PERMISSIONS)["soul"])
 
     def test_a_new_personality_reopens_the_process_with_the_same_conversation(self) -> None:
         self.sandbox.fake_cli("claude", {"fresh": claude_lines("Hi.", "sess-A")})

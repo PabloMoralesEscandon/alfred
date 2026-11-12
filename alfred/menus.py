@@ -44,7 +44,7 @@ SWITCH_LABELS = (
     ("bots", "🤖 List and request bots"),
     ("usage", "📊 Plan usage and alerts"),
     ("shared", "🧠 Write the shared memory"),
-    ("soul", "🎭 Edit its own personality"),
+    ("soul", "🎭 Edit its own role and personality"),
 )
 SHOW_LIMIT = 3000  # characters of a personality shown on a screen (Telegram's message limit is 4096)
 
@@ -172,8 +172,9 @@ def permission_warnings(record: BotRecord, backend: str = "claude") -> List[str]
         warnings.append("⚠️ Shared memory: every other agent will read what it writes there, and that text could "
                         "carry instructions to them.")
     if record.allows("soul"):
-        warnings.append("⚠️ Personality: it can rewrite its own SOUL.md, and with it how it behaves and talks "
-                        "(never what it may do). A text it reads could push it to change it.")
+        warnings.append("⚠️ Role and personality: it can rewrite its own SOUL.md, which now includes its mission and "
+                        "scope, not only its tone, so it can change what it does and how. Never what it may do: that "
+                        "stays its permissions. A text it reads could push it to change its own mission.")
     if record.permission("mode") == "auto":
         warnings.append("ℹ️ auto: a classifier model decides what runs without asking.")
     return warnings
@@ -747,7 +748,7 @@ class Menus:
                       "Claude writes a draft of its role and personality (one small call) and you see it before "
                       "anything is saved."]
         if record.allows("soul"):
-            lines += ["", "⚠️ It may edit its own personality (Permissions → Customize)."]
+            lines += ["", "⚠️ It may edit its own SOUL.md, its role and mission included (Permissions → Customize)."]
         rows: List[Row] = [[("✏️ Replace", "soulreplace"), ("✨ Describe it", "souldescribe")]]
         if session.awaiting == "soul_describe" and record.settings.get("task"):
             rows.append([("✨ Use its task: %s" % _short(record.settings["task"]), "souldefault")])

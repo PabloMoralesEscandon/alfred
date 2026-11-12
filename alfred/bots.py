@@ -85,7 +85,7 @@ PERMISSIONS = (
     ("bots", "off", "list bots, change their settings and ask for new ones (never destroy)"),
     ("usage", "off", "read the Claude plan usage and set usage alerts; needs ALFRED_USAGE_MONITOR on"),
     ("shared", "off", "write the shared memory every agent reads (reading it is always allowed)"),
-    ("soul", "off", "edit its own personality (SOUL.md); this changes how it behaves, never what it may do"),
+    ("soul", "off", "edit its own SOUL.md: its role and mission as well as its tone, so what it does; never what it may do"),
     ("allow", "", "extra Claude Code allow rules, separated by ;"),
     ("deny", "", "extra Claude Code deny rules, separated by ;"),
 )
@@ -610,7 +610,7 @@ def permission_summary(record: BotRecord, for_owner: bool = False) -> str:
         (can if record.allows(name) else cannot).append(phrase)
     can.append("read the shared memory every agent reads")
     (can if record.allows("shared") else cannot).append("write the shared memory")
-    (can if record.allows("soul") else cannot).append("edit %s own personality (SOUL.md)" % ("its" if for_owner else "your"))
+    (can if record.allows("soul") else cannot).append("edit %s own SOUL.md (role, mission and personality)" % ("its" if for_owner else "your"))
     subject = "It" if for_owner else "You"
     text = "%s can %s." % (subject, "; ".join(can))
     if cannot:
@@ -952,8 +952,9 @@ def render_manual(config: Config, record: BotRecord) -> str:
         permissions=permission_summary(record),
         agents_section=agents_section(config, record),
         soul_rule=(
-            "The user lets you edit it: change it only when they ask you to, keep it about personality and tone, "
-            "and tell them what you changed." if record.allows("soul") else
+            "The user lets you edit it, role and mission included: change it only when they ask you to, never to "
+            "widen what you do on your own, never to touch permissions, and tell them exactly what you changed."
+            if record.allows("soul") else
             "It is the user's to change, from the control panel (My bots → Personality); do not edit it."
         ),
         alfred_home=str(config.home),
