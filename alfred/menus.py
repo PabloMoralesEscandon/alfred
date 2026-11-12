@@ -16,7 +16,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
-from . import bots, presets, scheduler, shared_memory, usage_alerts, usage_monitor
+from . import bots, presets, scheduler, shared_memory, soul, usage_alerts, usage_monitor
 from .bots import BotError, BotRecord, DEFAULT_PERMISSIONS
 
 SESSION_SECONDS = 30 * 60
@@ -44,7 +44,9 @@ SWITCH_LABELS = (
     ("bots", "🤖 List and request bots"),
     ("usage", "📊 Plan usage and alerts"),
     ("shared", "🧠 Write the shared memory"),
+    ("soul", "🎭 Edit its own personality"),
 )
+SHOW_LIMIT = 3000  # characters of a personality shown on a screen (Telegram's message limit is 4096)
 
 # The typed fields of a bot's "Folders and rules" screen: name -> (label, what to send).
 ADVANCED_FIELDS = {
@@ -54,14 +56,15 @@ ADVANCED_FIELDS = {
     "deny": ("Deny rules", "Claude Code rules separated by ;"),
 }
 
-WIZARD = ("new_name", "new_task", "new_model", "new_effort", "new_perms", "new_summary")
+WIZARD = ("new_name", "new_task", "new_soul", "new_model", "new_effort", "new_perms", "new_summary")
 STEP_TITLES = {
-    "new_name": "Step 1 of 6: name",
-    "new_task": "Step 2 of 6: task",
-    "new_model": "Step 3 of 6: model",
-    "new_effort": "Step 4 of 6: effort",
-    "new_perms": "Step 5 of 6: permissions",
-    "new_summary": "Step 6 of 6: check and create",
+    "new_name": "Step 1 of 7: name",
+    "new_task": "Step 2 of 7: task",
+    "new_soul": "Step 3 of 7: personality",
+    "new_model": "Step 4 of 7: model",
+    "new_effort": "Step 5 of 7: effort",
+    "new_perms": "Step 6 of 7: permissions",
+    "new_summary": "Step 7 of 7: check and create",
 }
 
 
@@ -82,6 +85,7 @@ class Session:
     name: str = ""
     settings: Dict[str, str] = field(default_factory=dict)
     permissions: Dict[str, str] = field(default_factory=dict)
+    soul: str = ""  # the draft's own personality; empty means the base
     bot_id: int = 0  # the bot being edited
     preset: str = ""  # the preset the draft's permissions started from
     pending: str = ""  # a preset waiting for "yes" before it is applied to a bot
@@ -148,6 +152,9 @@ def permission_warnings(record: BotRecord, backend: str = "claude") -> List[str]
     if record.allows("shared"):
         warnings.append("⚠️ Shared memory: every other agent will read what it writes there, and that text could "
                         "carry instructions to them.")
+    if record.allows("soul"):
+        warnings.append("⚠️ Personality: it can rewrite its own SOUL.md, and with it how it behaves and talks "
+                        "(never what it may do). A text it reads could push it to change it.")
     if record.permission("mode") == "auto":
         warnings.append("ℹ️ auto: a classifier model decides what runs without asking.")
     return warnings
@@ -159,7 +166,7 @@ class Menus:
     def __init__(
         self,
         pool: Any,
-        request_bot: Callable[[int, int, str, Dict[str, str], Dict[str, str]], Awaitable[str]],
+        request_bot: Callable[[int, int, str, Dict[str, str], Dict[str, str], str], Awaitable[str]],
     ) -> None:
         self.pool = pool
         self.request_bot = request_bot
@@ -200,7 +207,7 @@ class Menus:
         verb, _, argument = action.partition(":")
         try:
             return await self._press(session, verb, argument)
-        except (BotError, shared_memory.SharedMemoryError) as exc:
+        except (BotError, shared_memory.SharedMemoryError, soul.SoulError) as exc:
             session.notice = "⚠️ %s" % exc
             return self.render(session)
 
@@ -215,12 +222,34 @@ class Menus:
             return self.go(session, self.parent(session.screen))
         if verb == "go":
             if argument == "new_name":
-                session.name, session.settings = "", {}
+                session.name, session.settings, session.soul = "", {}, ""
                 session.preset, session.permissions = presets.RECOMMENDED, presets.apply(presets.RECOMMENDED, {})
             return self.go(session, argument)
         if verb == "skip":  # the task is optional
             session.settings.pop("task", None)
+            return self.go(session, "new_soul")
+        if verb == "soulbase":  # the personality step: the base, as it is
+            session.soul = ""
             return self.go(session, "new_model")
+        if verb == "soulwrite":
+            session.awaiting = "soul"
+            return self.render(session)
+        if verb == "soulreplace":
+            self._record(session)
+            session.awaiting = "bot_soul"
+            return self.go(session, "bot_soul")
+        if verb == "soulreset":
+            record = self._record(session)
+            await self.pool.set_soul(record, None)
+            session.notice = "Personality reset to the base. It applies from its next message, in the same conversation."
+            return self.go(session, "bot_soul")
+        if verb == "basereplace":
+            session.awaiting = "base_soul"
+            return self.go(session, "base_soul")
+        if verb == "basereset":
+            soul.reset_base(self.pool.config)
+            session.notice = "Base personality reset to the template. Existing bots keep theirs."
+            return self.go(session, "base_soul")
         if verb == "next":
             if session.screen == "new_perms_custom":
                 return self.go(session, "new_summary")
@@ -268,7 +297,8 @@ class Menus:
             if not session.name:
                 session.notice = "⚠️ Give it a name first."
                 return self.go(session, "new_name")
-            username = await self.request_bot(session.user_id, session.chat_id, session.name, session.settings, session.permissions)
+            username = await self.request_bot(session.user_id, session.chat_id, session.name, session.settings,
+                                              session.permissions, session.soul)
             self.close(session)
             return Screen(
                 "Request sent for %s (@%s). Tap \"Create @%s\" on the keyboard I just sent and confirm in "
@@ -345,7 +375,18 @@ class Menus:
                 return self.go(session, "new_task")
             if what == "task":
                 session.settings["task"] = bots.clean_setting(self.pool.config, "task", text)
+                return self.go(session, "new_soul")
+            if what == "soul":
+                session.soul = soul.clean(text)
                 return self.go(session, "new_model")
+            if what == "bot_soul":
+                await self.pool.set_soul(self._record(session), text)
+                session.notice = "Personality replaced. It applies from its next message, in the same conversation."
+                return self.go(session, "bot_soul")
+            if what == "base_soul":
+                soul.set_base(self.pool.config, text)
+                session.notice = "Base personality replaced. New bots start with it; existing ones keep theirs."
+                return self.go(session, "base_soul")
             if what == "model":
                 session.settings["model"] = bots.clean_setting(self.pool.config, "model", text)
                 return self.go(session, "new_effort")
@@ -374,7 +415,7 @@ class Menus:
                     await self.pool.set_permission(record, name, text)
                 session.notice = "%s changed. It applies from its next message." % ADVANCED_FIELDS[name][0]
                 return self.go(session, "bot_advanced")
-        except (BotError, shared_memory.SharedMemoryError) as exc:
+        except (BotError, shared_memory.SharedMemoryError, soul.SoulError) as exc:
             session.notice = "⚠️ %s" % exc
             session.awaiting = what
         return self.render(session)
@@ -478,7 +519,7 @@ class Menus:
             return "bot_perms"
         if screen in ("shared_topic", "shared_add"):
             return "shared"
-        if screen in ("audit", "old_schedule"):
+        if screen in ("audit", "old_schedule", "base_soul"):
             return "home"
         if screen == "shared_remove":
             return "shared_topic"
@@ -511,7 +552,7 @@ class Menus:
         old = len(self.pool.store.pending_for_bot(0, chat_id=session.user_id)) if self.pool is not None else 0
         if old:  # items the main bot had scheduled in this chat before it became a panel
             rows.append([("⏰ Old reminders (%d)" % old, "go:old_schedule")])
-        rows += [[("❓ Help", "go:help")], [("✖️ Close", "cancel")]]
+        rows += [[("🎭 Base personality", "go:base_soul")], [("❓ Help", "go:help")], [("✖️ Close", "cancel")]]
         return Screen(
             "The Consiglieri control panel. There is no main agent: you create your own bots, and each has its own "
             "chat, task, model, permissions, memory and session.", rows)
@@ -556,6 +597,52 @@ class Menus:
             % (STEP_TITLES["new_task"], session.name, current),
             rows + [self._nav()],
         )
+
+    @staticmethod
+    def _shown(text: str) -> str:
+        text = text.strip()
+        if len(text) <= SHOW_LIMIT:
+            return text
+        return text[:SHOW_LIMIT] + "\n… (%d characters in all)" % len(text)
+
+    def _screen_new_soul(self, session: Session) -> Screen:
+        if session.awaiting == "soul":
+            return Screen("%s\n\nSend %s's personality as a message: tone, manner, how it talks. It shapes how it "
+                          "talks, never what it may do (that is the permissions, next)." % (STEP_TITLES["new_soul"], session.name),
+                          [self._nav()])
+        if session.soul:
+            current = "Now: its own personality (%d characters):\n\n%s" % (len(session.soul), self._shown(session.soul))
+            rows: List[Row] = [[("Keep it ➡️", "next")], [("↩️ Use the base instead", "soulbase")],
+                               [("✍️ Write another", "soulwrite")]]
+        else:
+            current = "By default it starts with the base personality:\n\n%s" % self._shown(soul.base(self.pool.config))
+            rows = [[("Use the base ➡️", "soulbase")], [("✍️ Write its own", "soulwrite")]]
+        return Screen("%s\n\nHow should %s come across? Optional.\n\n%s" % (STEP_TITLES["new_soul"], session.name, current),
+                      rows + [self._nav()])
+
+    def _screen_bot_soul(self, session: Session) -> Screen:
+        record = self._safe_record(session)
+        if record is None:
+            return self._screen_list(session)
+        current = soul.read(self.pool.registry.workspace(record.bot_id)) or soul.base(self.pool.config)
+        lines = ["Personality of %s (its SOUL.md). It shapes how it talks, never what it may do: that is its "
+                 "permissions." % record.handle, "", self._shown(current)]
+        if session.awaiting == "bot_soul":
+            lines += ["", "Send the new personality as a message. Nothing changes until you send it."]
+        if record.allows("soul"):
+            lines += ["", "⚠️ It may edit its own personality (Permissions → Customize)."]
+        rows: List[Row] = [[("✏️ Replace", "soulreplace")], [("↩️ Reset to the base", "soulreset")], [("⬅️ Back", "back")]]
+        return Screen("\n".join(lines), rows)
+
+    def _screen_base_soul(self, session: Session) -> Screen:
+        config = self.pool.config
+        state = "edited" if soul.base_is_edited(config) else "the template, not edited yet"
+        lines = ["Base personality (%s): what every new bot starts with, unless you write its own when you "
+                 "create it. Existing bots keep theirs." % state, "", self._shown(soul.base(config))]
+        if session.awaiting == "base_soul":
+            lines += ["", "Send the new base personality as a message."]
+        return Screen("\n".join(lines), [[("✏️ Replace", "basereplace")], [("↩️ Reset to the template", "basereset")],
+                                          [("⬅️ Back", "back")]])
 
     def _model_rows(self, settings: Dict[str, str], backend: str) -> List[Row]:
         choices = CODEX_MODELS if backend == "codex" else CLAUDE_MODELS
@@ -668,6 +755,7 @@ class Menus:
         lines = [STEP_TITLES["new_summary"], "", "Name: %s" % draft.name,
                  "Username: @%s (proposed; you can change both in Telegram's window)" % draft.username]
         lines += self._settings_lines(session.settings)
+        lines.append("Personality: %s" % ("its own (%d characters)" % len(session.soul) if session.soul else "the base"))
         lines += ["Permissions: %s" % presets.name_of(session.permissions, session.preset), "", self._permission_text(draft)]
         return Screen("\n".join(lines), [[("✅ Create", "create")], self._nav()])
 
@@ -697,6 +785,7 @@ class Menus:
         rows: List[Row] = [
             [("🧠 Model", "go:bot_model"), ("⚙️ Effort", "go:bot_effort")],
             [("📝 Task", "edittask"), ("🔐 Permissions", "go:bot_perms")],
+            [("🎭 Personality", "go:bot_soul")],
             [("⏰ Reminders", "go:bot_schedule"), ("📊 Usage alerts", "go:bot_alerts")],
             [("📂 Folders and rules", "go:bot_advanced")],
             [("⏸ Pause", "pause") if record.enabled else ("▶️ Resume", "resume"), ("🗑 Destroy", "destroy")],

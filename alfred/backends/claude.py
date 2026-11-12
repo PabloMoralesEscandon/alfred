@@ -98,6 +98,8 @@ class ClaudeBackend(Backend):
         return self.command(None, live=True) + [
             "#extensions=%s" % extensions.fingerprint(self.config),
             "#manual=%s" % _fingerprint(Path(self.config.workspace) / "CLAUDE.md"),
+            # So is its personality: a new SOUL.md reopens the process, resuming the same conversation.
+            "#soul=%s" % _fingerprint(Path(self.config.workspace) / "SOUL.md"),
             # The shared memory's index is loaded at the start of a process, like the manual.
             "#shared=%s" % _fingerprint(Path(self.config.workspace) / "SHARED_MEMORY.md"),
             # A bot's permissions live in the --settings file: new rules need a new process too.

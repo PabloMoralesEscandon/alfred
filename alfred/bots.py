@@ -14,6 +14,7 @@ What a bot owns, and where:
         claude-settings.json          its permissions as Claude Code settings, passed with --settings
     <home>-bots/<bot_id>/             the bot's own directory: where its agent runs
         CLAUDE.md, AGENTS.md          its manual, rewritten from its settings
+        SOUL.md                       its personality: from the base, or written for it; edited from the panel
         memory/  inbox/  outbox/      its memory and files, shared with no one
         extensions/  .claude/skills/  tools it adds to itself; no other bot loads them
 
@@ -44,7 +45,7 @@ from string import Template
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote_plus
 
-from . import home, shared_memory
+from . import home, shared_memory, soul
 from .config import Config
 
 TOKEN_PATTERN = re.compile(r"^\d{5,15}:[A-Za-z0-9_-]{30,}$")
@@ -84,12 +85,13 @@ PERMISSIONS = (
     ("bots", "off", "list bots, change their settings and ask for new ones (never destroy)"),
     ("usage", "off", "read the Claude plan usage and set usage alerts; needs ALFRED_USAGE_MONITOR on"),
     ("shared", "off", "write the shared memory every agent reads (reading it is always allowed)"),
+    ("soul", "off", "edit its own personality (SOUL.md); this changes how it behaves, never what it may do"),
     ("allow", "", "extra Claude Code allow rules, separated by ;"),
     ("deny", "", "extra Claude Code deny rules, separated by ;"),
 )
 PERMISSION_NAMES = tuple(name for name, _, _ in PERMISSIONS)
 DEFAULT_PERMISSIONS = {name: default for name, default, _ in PERMISSIONS}
-SWITCHES = ("sandbox", "edit", "web", "browser", "mcp", "schedule", "contact", "bots", "usage", "shared")
+SWITCHES = ("sandbox", "edit", "web", "browser", "mcp", "schedule", "contact", "bots", "usage", "shared", "soul")
 # `+name` / `-name` when creating a bot: on and off, or for shell: full and alfred.
 SHORTHANDS = {"bypass": ("mode", "bypassPermissions")}
 
@@ -233,6 +235,7 @@ class Pending:
     settings: Dict[str, str]
     created: float
     permissions: Dict[str, str] = field(default_factory=dict)
+    soul: str = ""  # its own personality from the creation assistant; empty means the base
 
 
 class BotRegistry:
@@ -398,9 +401,10 @@ class BotRegistry:
 
     def add_pending(
         self, owner_id: int, chat_id: int, name: str, username: str, settings: Dict[str, str],
-        permissions: Optional[Dict[str, str]] = None,
+        permissions: Optional[Dict[str, str]] = None, soul_text: str = "",
     ) -> Pending:
-        pending = Pending(int(owner_id), int(chat_id), name, username, dict(settings), time.time(), dict(permissions or {}))
+        pending = Pending(int(owner_id), int(chat_id), name, username, dict(settings), time.time(), dict(permissions or {}),
+                          soul_text)
         self._save_pending([item for item in self._pending() if item.username.lower() != username.lower()] + [pending])
         return pending
 
@@ -606,6 +610,7 @@ def permission_summary(record: BotRecord, for_owner: bool = False) -> str:
         (can if record.allows(name) else cannot).append(phrase)
     can.append("read the shared memory every agent reads")
     (can if record.allows("shared") else cannot).append("write the shared memory")
+    (can if record.allows("soul") else cannot).append("edit %s own personality (SOUL.md)" % ("its" if for_owner else "your"))
     subject = "It" if for_owner else "You"
     text = "%s can %s." % (subject, "; ".join(can))
     if cannot:
@@ -844,6 +849,11 @@ def claude_settings(config: Config, record: BotRecord) -> Dict[str, Any]:
     # The bot's manual and settings are rewritten by Consiglieri.
     deny += ["Edit(%s)" % absolute(workspace / name) for name in ("CLAUDE.md", "AGENTS.md", shared_memory.COPY_NAME,
                                                                   ".claude/settings.json", ".claude/settings.local.json")]
+    # Its personality: the user's to change from the panel; the bot itself only with the `soul` permission.
+    if not record.allows("soul"):
+        deny.append("Edit(%s)" % absolute(soul.path_in(workspace)))
+        if shell_is_open(record):
+            deny.append("Bash(*%s*)" % soul.FILE_NAME)  # the obvious spellings; the sandbox covers the rest
     # The shared memory: readable at every level and with or without cross-agent access (it is outside
     # everything the blacklist denies); written only with the `shared` permission.
     shared = config.shared_memory_dir
@@ -905,6 +915,8 @@ def claude_settings(config: Config, record: BotRecord) -> Dict[str, Any]:
             filesystem["allowWrite"] = [str(shared)]
         else:
             filesystem["denyWrite"] = others["denyWrite"] + [str(shared)]
+        if not record.allows("soul"):
+            filesystem["denyWrite"] = filesystem["denyWrite"] + [str(soul.path_in(workspace))]
         settings["sandbox"] = {
             "enabled": True,
             "allowUnsandboxedCommands": False,
@@ -939,6 +951,11 @@ def render_manual(config: Config, record: BotRecord) -> str:
         workdir_section=workdir_section,
         permissions=permission_summary(record),
         agents_section=agents_section(config, record),
+        soul_rule=(
+            "The user lets you edit it: change it only when they ask you to, keep it about personality and tone, "
+            "and tell them what you changed." if record.allows("soul") else
+            "It is the user's to change, from the control panel (My bots → Personality); do not edit it."
+        ),
         alfred_home=str(config.home),
     )
 
@@ -987,12 +1004,14 @@ def prepare_workspace(config: Config) -> Path:
     for directory in (folder, config.memory_dir, config.inbox_dir, folder / "outbox", config.skills_dir, config.extensions_dir):
         directory.mkdir(parents=True, exist_ok=True)
     shared_memory.refresh_copy(config, folder, shared_memory.WRITER if record.allows("shared") else shared_memory.READER)
+    soul.ensure(config, folder)  # from the base, the first time (a bot made before personalities included)
     manual = render_manual(config, record)
     home._write_if_changed(folder / "CLAUDE.md", manual)
     # Codex reads AGENTS.md and does not follow @imports, so it is told to open the indexes itself.
     home._write_if_changed(
         folder / "AGENTS.md",
         manual.replace("@memory/MEMORY.md", "Read memory/MEMORY.md at the start of every conversation.")
+        .replace("@%s" % soul.FILE_NAME, "Read %s at the start of every conversation." % soul.FILE_NAME)
         .replace("@%s" % shared_memory.COPY_NAME, "Read %s at the start of every conversation." % shared_memory.COPY_NAME),
     )
     settings_text = json.dumps(claude_settings(config, record), indent=2, sort_keys=True) + "\n"

@@ -15,9 +15,8 @@ except ImportError:  # pragma: no cover
 from alfred import menus, presets
 
 
-@unittest.skipIf(PanelHarness is None, "python-telegram-bot is not installed")
-class MenuTests(PanelHarness):  # type: ignore[misc,valid-type]
-    # -- driving the menu --
+class MenuDriver:
+    """Open /bot, tap buttons by their label, type answers. Mixed into a PanelHarness; no tests of its own."""
 
     async def open(self) -> None:
         replies = await self.command("/bot")
@@ -72,28 +71,35 @@ class MenuTests(PanelHarness):  # type: ignore[misc,valid-type]
         await self.tap("Create bot")
         await self.type("Gestor de Calendarios")
         await self.type("Keep my calendar tidy and remind me of events.")
+        await self.tap("Use the base")
         await self.tap("Sonnet")
         await self.tap("high")
         await self.tap("Customize")  # starts from the recommended preset, Assistant
         await self.tap("Browser")
         await self.tap("Next")
 
+
+@unittest.skipIf(PanelHarness is None, "python-telegram-bot is not installed")
+class MenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
     # -- the assistant --
 
     def test_menu_the_assistant_walks_through_every_step_and_creates_the_request(self) -> None:
         async def scenario() -> None:
             await self.open()
-            self.assertEqual([label for label in self.labels()], ["➕ Create bot", "🤖 My bots", "🧠 Shared memory", "📜 Audit", "❓ Help", "✖️ Close"])
+            self.assertEqual([label for label in self.labels()], ["➕ Create bot", "🤖 My bots", "🧠 Shared memory", "📜 Audit", "🎭 Base personality", "❓ Help", "✖️ Close"])
             await self.tap("Create bot")
-            self.assertIn("Step 1 of 6: name", self.text)
+            self.assertIn("Step 1 of 7: name", self.text)
             await self.type("Gestor de Calendarios")
-            self.assertIn("Step 2 of 6: task", self.text)
+            self.assertIn("Step 2 of 7: task", self.text)
             await self.type("Keep my calendar tidy and remind me of events.")
-            self.assertIn("Step 3 of 6: model", self.text)
+            self.assertIn("Step 3 of 7: personality", self.text)
+            self.assertIn("starts with the base personality", self.text)
+            await self.tap("Use the base")
+            self.assertIn("Step 4 of 7: model", self.text)
             await self.tap("Sonnet")
-            self.assertIn("Step 4 of 6: effort", self.text)
+            self.assertIn("Step 5 of 7: effort", self.text)
             await self.tap("high")
-            self.assertIn("Step 5 of 6: permissions", self.text)
+            self.assertIn("Step 6 of 7: permissions", self.text)
             self.assertIn("● ⭐ Assistant (recommended)", self.labels())
             await self.tap("Customize")
             self.assertIn("✅ 🌐 Web search and pages", self.labels())
@@ -101,7 +107,7 @@ class MenuTests(PanelHarness):  # type: ignore[misc,valid-type]
             await self.tap("Browser")
             self.assertIn("⚠️ Browser", self.text)  # the risky choice is flagged
             await self.tap("Next")
-            self.assertIn("Step 6 of 6", self.text)
+            self.assertIn("Step 7 of 7", self.text)
             # AlfredPanelBot -> alfredpanel_ + slug, cut to fit 32 characters.
             self.assertIn("Username: @alfredpanel_gestor_de_calend_bot", self.text)
             self.assertIn("Model: sonnet", self.text)
@@ -135,18 +141,21 @@ class MenuTests(PanelHarness):  # type: ignore[misc,valid-type]
             await self.tap("Create bot")
             await self.type("Research")
             await self.type("Summarize papers")
+            await self.tap("Use the base")
             await self.tap("Opus")
             await self.tap("Back")
-            self.assertIn("Step 3 of 6: model", self.text)
+            self.assertIn("Step 4 of 7: model", self.text)
             self.assertIn("● Opus", self.labels())
             await self.tap("Back")
-            self.assertIn("Step 2 of 6: task", self.text)
+            self.assertIn("Step 3 of 7: personality", self.text)
+            await self.tap("Back")
+            self.assertIn("Step 2 of 7: task", self.text)
             self.assertIn("Now: Summarize papers", self.text)
             await self.tap("Keep it")
-            self.assertIn("Step 3 of 6", self.text)
+            self.assertIn("Step 3 of 7", self.text)
             await self.tap("Back")
             await self.tap("Back")
-            self.assertIn("Step 1 of 6: name", self.text)
+            self.assertIn("Step 1 of 7: name", self.text)
             self.assertIn("Now: Research", self.text)
             await self.type("Researcher")  # typing again replaces the name
             await self.tap("Back")
@@ -162,6 +171,7 @@ class MenuTests(PanelHarness):  # type: ignore[misc,valid-type]
             await self.tap("Create bot")
             await self.type("Research")
             await self.tap("Skip")
+            await self.tap("Use the base")
             old_button = self.data("Sonnet")
             await self.tap("Cancel")
             self.assertIn("Menu closed", self.text)
@@ -217,16 +227,17 @@ class MenuTests(PanelHarness):  # type: ignore[misc,valid-type]
             await self.tap("Create bot")
             await self.type("x" * 80)
             self.assertIn("1 to 64 characters", self.text)
-            self.assertIn("Step 1 of 6", self.text)
+            self.assertIn("Step 1 of 7", self.text)
             await self.type("Research")
             await self.tap("Skip")
+            await self.tap("Use the base")
             await self.tap("Type a model name")
             await self.type("not a model!")
             self.assertIn("does not look like a model name", self.text)
             await self.type("claude-opus-5-5")
-            self.assertIn("Step 4 of 6", self.text)
+            self.assertIn("Step 5 of 7", self.text)
             await self.tap("Back")
-            self.assertIn("Step 3 of 6", self.text)
+            self.assertIn("Step 4 of 7", self.text)
 
         self.play(scenario)
 
@@ -236,6 +247,7 @@ class MenuTests(PanelHarness):  # type: ignore[misc,valid-type]
             await self.tap("Create bot")
             await self.type("Coder")
             await self.tap("Skip")
+            await self.tap("Use the base")
             await self.tap("Codex")
             self.assertIn("● Codex", self.labels())
             self.assertNotIn("Sonnet", " ".join(self.labels()))
@@ -251,6 +263,7 @@ class MenuTests(PanelHarness):  # type: ignore[misc,valid-type]
             await self.tap("Create bot")
             await self.type("Risky")
             await self.tap("Skip")
+            await self.tap("Use the base")
             await self.tap("Next")
             await self.tap("Next")
             await self.tap("Customize")
@@ -335,9 +348,10 @@ class MenuTests(PanelHarness):  # type: ignore[misc,valid-type]
         await self.tap("Create bot")
         await self.type(name)
         await self.tap("Skip")
+        await self.tap("Use the base")
         await self.tap("Next")
         await self.tap("Next")
-        self.assertIn("Step 5 of 6: permissions", self.text)
+        self.assertIn("Step 6 of 7: permissions", self.text)
 
     def test_menu_presets_are_offered_with_what_each_can_do(self) -> None:
         async def scenario() -> None:
@@ -350,7 +364,7 @@ class MenuTests(PanelHarness):  # type: ignore[misc,valid-type]
             self.assertNotIn("Web search and pages", " ".join(self.labels()))  # no switches here
 
             await self.tap("Power")  # choosing one moves on
-            self.assertIn("Step 6 of 6", self.text)
+            self.assertIn("Step 7 of 7", self.text)
             self.assertIn("Permissions: 🛠 Power", self.text)
             self.assertIn("⚠️ Browser", self.text)
             await self.tap("Create")
@@ -373,7 +387,7 @@ class MenuTests(PanelHarness):  # type: ignore[misc,valid-type]
             await self.tap("Web")
             self.assertIn("Now: 🎛 Custom (from 🔒 Basic: + web)", self.text)
             await self.tap("Back")
-            self.assertIn("Step 5 of 6: permissions", self.text)
+            self.assertIn("Step 6 of 7: permissions", self.text)
             self.assertIn("Now: 🎛 Custom (from 🔒 Basic: + web)", self.text)
             self.assertNotIn("● ", " ".join(self.labels()))  # no preset is current
             await self.tap("Customize")

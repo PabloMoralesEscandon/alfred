@@ -38,7 +38,7 @@ from telegram.ext import (
     filters,
 )
 
-from . import bots, home, menus, orca, presets, shared_memory, usage, usage_monitor
+from . import bots, home, menus, orca, presets, shared_memory, soul, usage, usage_monitor
 from .agent import Agent, Chat, Listener
 from .backends import BACKENDS, BackendError, RunResult
 from .bots import BotError, BotRecord, BotRegistry
@@ -98,6 +98,8 @@ Text shortcuts:
 /shared - the shared memory every agent reads (list, show, add, remove); bots only read it
 /bot pause <bot>, /bot resume <bot> - disconnect or reconnect it
 /bot destroy <bot> - delete it, its schedule and its state (asks first)
+/bot soul <bot> show|set <text>|reset - its personality (SOUL.md); reset puts the base back
+/bot base-soul show|set <text>|reset - the base personality new bots start with
 
 Settings: %s.
 Permissions: %s.
@@ -658,7 +660,9 @@ class ControlPanel:
                 await self._bot_new(update, rest)
             elif action == "audit":
                 await reply(self._audit_text(update.effective_user.id))
-            elif action in ("show", "set", "perm", "pause", "resume", "destroy"):
+            elif action in ("base-soul", "basesoul"):
+                await self._base_soul(update, rest)
+            elif action in ("show", "set", "perm", "pause", "resume", "destroy", "soul"):
                 target, _, rest = rest.strip().partition(" ")
                 # Only the user's own bots: someone else's reads as "no such bot", so it is not even confirmed to exist.
                 record = self.pool.registry.find(target, owner_id=update.effective_user.id) if target else None
@@ -678,12 +682,52 @@ class ControlPanel:
                     await reply("Paused %s. Messages sent to it meanwhile are dropped; its scheduled items wait until /bot resume." % record.handle)
                 elif action == "resume":
                     await reply(await self.pool.resume(record))
+                elif action == "soul":
+                    await self._bot_soul(update, record, rest)
                 else:
                     await self._bot_destroy_ask(update, record)
             else:
                 await reply(BOT_USAGE)
-        except BotError as exc:
+        except (BotError, soul.SoulError) as exc:
             await reply(str(exc))
+
+    async def _bot_soul(self, update: Update, record: BotRecord, rest: str) -> None:
+        """/bot soul <bot> show | set <text> | reset: the owner reads and changes a bot's personality."""
+        verb, _, text = rest.strip().partition(" ")
+        verb = verb.lower() or "show"
+        chat = chat_of(update)
+        if verb == "show":
+            current = soul.read(self.pool.registry.workspace(record.bot_id)) or soul.base(self.config)
+            await self._send(self.bot, chat, "Personality of %s (SOUL.md):\n\n%s" % (record.handle, current.strip()))
+        elif verb == "set":
+            if not text.strip():
+                await update.effective_message.reply_text("Give the new personality after set: /bot soul %s set <text>" % record.username)
+                return
+            await self.pool.set_soul(record, text)
+            await update.effective_message.reply_text(
+                "Personality of %s replaced. It applies from its next message, in the same conversation." % record.handle)
+        elif verb == "reset":
+            await self.pool.set_soul(record, None)
+            await update.effective_message.reply_text(
+                "Personality of %s reset to the base. It applies from its next message, in the same conversation." % record.handle)
+        else:
+            await update.effective_message.reply_text("/bot soul <bot> show | set <text> | reset")
+
+    async def _base_soul(self, update: Update, rest: str) -> None:
+        """/bot base-soul show | set <text> | reset: the personality new bots start with."""
+        verb, _, text = rest.strip().partition(" ")
+        verb = verb.lower() or "show"
+        if verb == "show":
+            edited = "" if soul.base_is_edited(self.config) else " (the template; not edited yet)"
+            await self._send(self.bot, chat_of(update), "Base personality for new bots%s:\n\n%s" % (edited, soul.base(self.config).strip()))
+        elif verb == "set" and text.strip():
+            soul.set_base(self.config, text)
+            await update.effective_message.reply_text("Base personality replaced. New bots start with it; existing ones keep theirs.")
+        elif verb == "reset":
+            soul.reset_base(self.config)
+            await update.effective_message.reply_text("Base personality reset to the template. Existing bots keep theirs.")
+        else:
+            await update.effective_message.reply_text("/bot base-soul show | set <text> | reset")
 
     async def _bot_new(self, update: Update, rest: str) -> None:
         reply = update.effective_message.reply_text
@@ -699,10 +743,11 @@ class ControlPanel:
         await self.send_creation_request(update.effective_user.id, update.effective_chat.id, name, settings, permissions)
 
     async def send_creation_request(
-        self, user_id: int, chat_id: int, name: str, settings: Dict[str, str], permissions: Dict[str, str]
+        self, user_id: int, chat_id: int, name: str, settings: Dict[str, str], permissions: Dict[str, str],
+        soul_text: str = "",
     ) -> str:
         """Ask Telegram to create a bot: a keyboard button, then the link. Returns the suggested username."""
-        link, username = await self.pool.request_creation(user_id, chat_id, name, settings, permissions)
+        link, username = await self.pool.request_creation(user_id, chat_id, name, settings, permissions, soul_text)
         draft = bots.BotRecord(bot_id=0, username=username, name=name, owner_id=0, settings=settings, permissions=permissions)
         # First way: a keyboard button that asks Telegram to create the bot (KeyboardButtonRequestManagedBot).
         # python-telegram-bot 22.5 has no class for it, so the button carries the Bot API's own JSON.
@@ -1065,7 +1110,8 @@ class BotPool:
     # -- creating ------------------------------------------------------------
 
     async def request_creation(
-        self, owner_id: int, chat_id: int, name: str, settings: Dict[str, str], permissions: Optional[Dict[str, str]] = None
+        self, owner_id: int, chat_id: int, name: str, settings: Dict[str, str], permissions: Optional[Dict[str, str]] = None,
+        soul_text: str = "",
     ) -> Tuple[str, str]:
         """Remember what the user asked for and return the link that creates the bot, and its username."""
         if self.can_manage is False:
@@ -1076,7 +1122,8 @@ class BotPool:
         if not self.manager_username:
             raise BotError("I don't know my own username yet; try again in a moment.")
         username = self.suggest_username(name, settings.get("task", ""))
-        self.registry.add_pending(owner_id, chat_id, name, username, settings, permissions)
+        self.registry.add_pending(owner_id, chat_id, name, username, settings, permissions,
+                                  soul.clean(soul_text) if soul_text.strip() else "")
         return bots.creation_link(self.manager_username, username, name), username
 
     def suggest_username(self, name: str, task: str = "") -> str:
@@ -1121,6 +1168,8 @@ class BotPool:
         token = await bots.fetch_token(manager, bot_id)
         self.registry.save(record)
         self.registry.set_token(bot_id, token)
+        if pending is not None and pending.soul.strip():  # its own personality from the assistant; else the base
+            soul.write(self.registry.workspace(bot_id), pending.soul)
         try:
             await bots.restrict_access(manager, bot_id)
         except Exception as exc:  # Consiglieri's own allow-list still guards the bot
@@ -1219,6 +1268,14 @@ class BotPool:
         if frontend is not None:
             frontend.record = record  # applies from its next message, as with set_permission
         return record
+
+    async def set_soul(self, record: BotRecord, text: Optional[str]) -> str:
+        """Replace a bot's personality, or with None put the base back. Its next message reopens its process
+        with the same conversation, as with any change to its manual. Returns what it now is."""
+        workspace = self.registry.workspace(record.bot_id)
+        written = soul.reset(self.config, workspace) if text is None else soul.write(workspace, text)
+        log.info("personality of %s %s (%d characters)", record.handle, "reset" if text is None else "replaced", len(written))
+        return written
 
     async def pause(self, record: BotRecord) -> None:
         record = self.registry.get(record.bot_id) or record
