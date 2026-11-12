@@ -14,6 +14,7 @@ from alfred.bots import BotRecord, BotRegistry
 from fakes import Sandbox
 
 try:
+    from alfred.telegram_bot import BotPool  # noqa: F401  (test_panel needs it to import)
     from test_panel import OWNER, RESEARCH, PanelHarness
 except ImportError:  # pragma: no cover
     PanelHarness = unittest.TestCase  # type: ignore

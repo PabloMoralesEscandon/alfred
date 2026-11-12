@@ -895,8 +895,8 @@ class BotPool:
                 await self.launch(record)
         # Polled often because `alfred event` relies on it to wake the agent promptly.
         self._scheduler = asyncio.ensure_future(run_scheduler(self.store, self.deliver, poll_seconds=2.0))
-        # Off unless ALFRED_USAGE_MONITOR is set; even then it only logs a line for now.
-        self.usage_monitor = usage_monitor.start(self.config)
+        # Off unless ALFRED_USAGE_MONITOR is set. When on, it checks the bots' usage alerts with one reading per cycle.
+        self.usage_monitor = usage_monitor.start(self.config, scheduler=self.store)
         log.info(
             "Alfred is up. home=%s backend=%s bots=%d running=%d manager=%s",
             self.config.home, self.config.default_backend, len(self.registry.list()),
@@ -904,6 +904,8 @@ class BotPool:
         )
 
     async def stop(self) -> None:
+        if self.usage_monitor is not None:
+            await self.usage_monitor.stop()
         if self._scheduler is not None:
             self._scheduler.cancel()
             await asyncio.gather(self._scheduler, return_exceptions=True)

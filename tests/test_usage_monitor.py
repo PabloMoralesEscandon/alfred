@@ -77,7 +77,7 @@ class DisabledTests(SkeletonTestCase):
     def test_off_by_default_and_does_nothing(self) -> None:
         before = self.files_in_home()
         with mock.patch.object(MonitorSettings, "from_config", side_effect=AssertionError("read settings")), \
-                mock.patch.object(usage_monitor.usage, "fetch_report", side_effect=AssertionError("read usage")):
+                mock.patch.object(usage_monitor.usage, "run_json_lines", side_effect=AssertionError("read usage")):
             self.assertIsNone(usage_monitor.start(self.sandbox.config))
         self.assertFalse(usage_monitor.is_enabled(self.sandbox.config))
         self.assertEqual(self.sandbox.calls("claude"), [])
@@ -96,16 +96,16 @@ class DisabledTests(SkeletonTestCase):
 
 
 class EnabledTests(SkeletonTestCase):
-    def test_on_only_logs_one_line(self) -> None:
+    def test_on_without_a_scheduler_logs_one_line_and_reads_nothing(self) -> None:
         self.sandbox.environ["ALFRED_USAGE_MONITOR"] = "1"
         before = self.files_in_home()
-        with mock.patch.object(usage_monitor.usage, "fetch_report", side_effect=AssertionError("read usage")):
+        with mock.patch.object(usage_monitor.usage, "run_json_lines", side_effect=AssertionError("read usage")):
             monitor = usage_monitor.start(self.sandbox.config)
         self.assertIsInstance(monitor, UsageMonitor)
         assert monitor is not None
         self.assertTrue(monitor.settings.enabled)
         self.assertEqual(len(self.logs.records), 1)
-        self.assertIn("not implemented yet", self.logs.records[0].getMessage())
+        self.assertIn("usage monitor is on", self.logs.records[0].getMessage())
         self.assertEqual(self.sandbox.calls("claude"), [])
         self.assertEqual(self.files_in_home(), before)  # no history file written
 
@@ -158,7 +158,7 @@ class ReadingTests(SkeletonTestCase):
 
 
 class SourceTests(SkeletonTestCase):
-    def test_claude_source_reuses_usage_and_reads_the_report(self) -> None:
+    def test_claude_source_falls_back_to_the_text(self) -> None:
         source = ClaudeUsageSource(self.sandbox.config, dict(self.sandbox.environ))
         self.assertIsInstance(source, UsageSource)
         reading = asyncio.run(source.read())

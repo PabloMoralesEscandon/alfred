@@ -473,6 +473,76 @@ def require_usage(config: Config, record) -> None:
         )
 
 
+def usage_alert_bot(config: Config, args: argparse.Namespace, adding: bool = False) -> int:
+    """The bot whose usage alerts these are: the calling bot itself, or `--bot` for the operator."""
+    record = calling_bot(config)
+    if record is not None:
+        require(record, "usage")
+    bot_id = own_bot_only(config, record, args)
+    if not bot_id:
+        raise CommandError("usage alerts belong to the bots Alfred created; pass --bot <@username>")
+    if adding:
+        from .bots import BotRegistry
+        from . import usage_monitor
+
+        target = record or BotRegistry(config).get(bot_id)
+        if target is None or not target.allows("usage"):
+            raise CommandError("that bot does not have the usage permission (/bot perm <bot> usage on)")
+        if not usage_monitor.is_enabled(config):
+            raise CommandError(
+                "the usage monitor is off (%s), so an alert would never be checked; ask the user to switch it on"
+                % usage_monitor.ENABLE_SETTING
+            )
+    return bot_id
+
+
+def cmd_usage_alert_add(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
+    from . import usage_alerts, usage_monitor
+
+    record = calling_bot(config)
+    bot_id = usage_alert_bot(config, args, adding=True)
+    chat_id = resolve_chat_id(args)
+    own_chat_only(record, chat_id)
+    try:
+        alert = usage_alerts.AlertStore.for_bot(config, bot_id).add(
+            args.when,
+            note=" ".join(args.note).strip(),
+            repeat=args.repeat,
+            chat_id=chat_id,
+            thread_id=resolve_thread_id(args),
+            user_id=int(os.environ.get("ALFRED_USER_ID") or 0),
+            username=os.environ.get("ALFRED_USERNAME", ""),
+        )
+    except usage_alerts.ConditionError as exc:
+        raise CommandError(str(exc)) from exc
+    settings = usage_monitor.MonitorSettings.from_config(config)
+    return {
+        "ok": True,
+        "alert": alert.describe(),
+        "checked_every_minutes": settings.poll_seconds // 60,
+        "cost": "checking is free; each wake-up is one turn of yours and uses plan usage, "
+                "at most one every %d minutes" % (settings.wake_interval_seconds // 60),
+    }
+
+
+def cmd_usage_alert_list(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
+    from . import usage_alerts, usage_monitor
+
+    bot_id = usage_alert_bot(config, args)
+    alerts = usage_alerts.AlertStore.for_bot(config, bot_id).alerts()
+    return {"ok": True, "monitor_on": usage_monitor.is_enabled(config), "alerts": [alert.describe() for alert in alerts]}
+
+
+def cmd_usage_alert_remove(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
+    from . import usage_alerts
+
+    bot_id = usage_alert_bot(config, args)
+    alert = usage_alerts.AlertStore.for_bot(config, bot_id).remove(args.id)
+    if alert is None:
+        raise CommandError("no single alert matches %r; run `alfred usage-alert list`" % args.id)
+    return {"ok": True, "removed": alert.describe()}
+
+
 def cmd_usage(config: Config, args: argparse.Namespace) -> int:
     from . import usage
 
@@ -589,6 +659,31 @@ def build_parser() -> argparse.ArgumentParser:
     service.set_defaults(run=cmd_service)
 
     commands.add_parser("usage", help="show how much of the Claude plan limits is used").set_defaults(run=cmd_usage)
+
+    alert = commands.add_parser(
+        "usage-alert", help="wake this bot when a condition on the Claude plan usage holds",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="Values: session.used, week.used (percent used), session.left, week.left (time to the reset).\n"
+                    "Operators: < <= > >= = !=, joined with and, or, not and parentheses.\n"
+                    "Example: alfred usage-alert add --when \"session.left < 1h and session.used = 0\" use the spare window\n"
+                    "An alert fires once (or with --repeat, once per window). Each wake-up uses plan usage.",
+    )
+    alert_actions = alert.add_subparsers(dest="action", required=True)
+    alert_add = alert_actions.add_parser("add", help="add an alert; the rest of the line is a note you get back")
+    alert_add.add_argument("--when", required=True, help='for example "week.left < 1d and week.used < 60"')
+    alert_add.add_argument("--repeat", action="store_true", help="fire again in every new window, not just once")
+    alert_add.add_argument("--chat-id", type=int)
+    alert_add.add_argument("--thread-id", type=int)
+    alert_add.add_argument("--bot", help=argparse.SUPPRESS)
+    alert_add.add_argument("note", nargs="*")
+    alert_add.set_defaults(json=cmd_usage_alert_add)
+    alert_list = alert_actions.add_parser("list", help="this bot's alerts")
+    alert_list.add_argument("--bot", help=argparse.SUPPRESS)
+    alert_list.set_defaults(json=cmd_usage_alert_list)
+    alert_remove = alert_actions.add_parser("remove", help="delete an alert by id or id prefix")
+    alert_remove.add_argument("--bot", help=argparse.SUPPRESS)
+    alert_remove.add_argument("id")
+    alert_remove.set_defaults(json=cmd_usage_alert_remove)
 
     browser = commands.add_parser("browser-setup", help="link the home to Orca's built-in browser and test it")
     browser.add_argument("--no-test", action="store_true", help="skip opening a test page")

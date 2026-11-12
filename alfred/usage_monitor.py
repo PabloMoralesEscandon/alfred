@@ -1,36 +1,39 @@
 """Usage monitor: the skeleton for warnings about the Claude plan limits.
 
-Nothing here acts yet. The pieces are in place so the behaviour can be added one
-step at a time (see docs/USAGE_MONITOR_RESEARCH.md, section 9):
+The pieces, and what each does today (see docs/USAGE_MONITOR_RESEARCH.md, section 9):
 
 - `Window` and `Reading`: one look at the plan limits.
 - `UsageSource` and `ClaudeUsageSource`: where readings come from. The Claude one
-  reuses `usage.fetch_report`, which costs no quota (Claude Code answers `/usage`
-  without calling the model).
+  asks `/usage` for its structured `usage_report` with `usage.py`'s helpers, and falls
+  back to the text. It costs no quota (Claude Code answers `/usage` without the model).
 - `Rule` and the six declared rules: what will decide when to warn. They have no
   logic yet and never return an alert.
 - `UsageHistory`: the last readings, kept in a small JSON file.
 - `MonitorSettings`: configuration, read from the environment and `.env`.
 - `UsageMonitor` and `start()`: the entry point; `BotPool.start` calls it once per process.
+  Its loop checks the agents' usage alerts (`usage_alerts.py`) with one reading per cycle.
 
 The monitor is off unless `ALFRED_USAGE_MONITOR` is set. When it is off, `start()`
-reads no other setting, builds nothing and returns None. When it is on, it only
-logs one line: it reads no usage, sends no messages and schedules nothing.
+reads no other setting, builds nothing and returns None: no reading, no message, no wake-up.
+When it is on, it reads usage only while some bot with the usage permission has an alert,
+and the only thing it does is wake that bot. It sends the user nothing yet.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from . import usage
+from . import usage, usage_alerts
 from .config import Config
-from .scheduler import parse_duration, parse_time, to_utc_text, utc_now
+from .scheduler import KIND_EVENT, SchedulerStore, parse_duration, parse_time, to_utc_text, utc_now
 
 log = logging.getLogger("alfred.usage_monitor")
 
@@ -42,6 +45,12 @@ KIND_WEEKLY_ALL = "weekly_all"
 KIND_WEEKLY_SCOPED = "weekly_scoped"
 
 SOURCE_TEXT = "text"  # parsed from the human-readable `/usage` text
+SOURCE_REPORT = "usage_report"  # Claude Code's structured copy of `/usage` (documented, marked experimental)
+
+# `/usage` as a stream, so the reply carries `usage_report`; without the user's hooks and MCP servers.
+# Not --bare: bare mode does not read the OAuth login, and the plan usage needs it.
+PROBE_FLAGS = ("--print", "--output-format", "stream-json", "--verbose", "--no-session-persistence",
+               "--setting-sources", "project", "--strict-mcp-config")
 
 
 # -- one reading -------------------------------------------------------------
@@ -119,6 +128,42 @@ class Reading:
         return cls(taken_at=taken_at or utc_now(), source=SOURCE_TEXT, windows=tuple(windows))
 
     @classmethod
+    def from_usage_report(cls, report: Dict[str, Any], taken_at: Optional[datetime] = None) -> "Reading":
+        """Read the meters out of Claude Code's `usage_report`. Unknown kinds are kept under their own name."""
+        taken_at = taken_at or utc_now()
+        rate_limits = report.get("rate_limits") if isinstance(report, dict) else None
+        if not isinstance(rate_limits, dict):
+            return cls.failed("Claude Code returned no plan usage", SOURCE_REPORT, taken_at)
+        windows: List[Window] = []
+        for row in rate_limits.get("limits") or []:
+            if not isinstance(row, dict) or row.get("percent") is None:
+                continue
+            kind = str(row.get("kind") or "unknown")
+            scope_data = row.get("scope") or {}
+            scope = None
+            for part in ("model", "surface"):
+                if isinstance(scope_data, dict) and isinstance(scope_data.get(part), dict):
+                    scope = scope_data[part].get("display_name") or scope
+            try:
+                resets_at = _reset_time(row["resets_at"]) if row.get("resets_at") else None
+                percent = float(row["percent"])
+            except (TypeError, ValueError):
+                continue
+            windows.append(Window(
+                kind=kind,
+                label=_label_of(kind, scope),
+                percent=percent,
+                resets_at=resets_at,
+                reset_text=resets_at.astimezone().strftime("%a %d %b %H:%M") if resets_at else "",
+                severity=str(row.get("severity") or "unknown"),
+                scope=scope,
+            ))
+        return cls(taken_at=taken_at, source=SOURCE_REPORT, windows=tuple(windows))
+
+    def window(self, kind: str) -> Optional[Window]:
+        return next((window for window in self.windows if window.kind == kind), None)
+
+    @classmethod
     def failed(cls, error: str, source: str, taken_at: Optional[datetime] = None) -> "Reading":
         return cls(taken_at=taken_at or utc_now(), source=source, error=error)
 
@@ -138,6 +183,21 @@ class Reading:
             windows=tuple(Window.from_dict(item) for item in data.get("windows") or []),
             error=data.get("error"),
         )
+
+
+def _reset_time(text: Any) -> datetime:
+    """ISO 8601 from the server, with any number of fraction digits (Python 3.9 takes only 3 or 6)."""
+    return parse_time(re.sub(r"\.\d+", "", str(text).strip()))
+
+
+def _label_of(kind: str, scope: Optional[str]) -> str:
+    if kind == KIND_SESSION:
+        return "Session"
+    if kind == KIND_WEEKLY_ALL:
+        return "Week (all models)"
+    if kind == KIND_WEEKLY_SCOPED:
+        return "Week (%s)" % (scope or "scoped")
+    return kind.replace("_", " ").capitalize()
 
 
 def _kind_of(label: str) -> Tuple[str, Optional[str]]:
@@ -166,20 +226,56 @@ class UsageSource:
 
 
 class ClaudeUsageSource(UsageSource):
-    """Claude Code's `/usage`, through `usage.fetch_report`: no model call, no quota spent."""
+    """Claude Code's `/usage`: no model call, no quota spent.
 
-    name = SOURCE_TEXT
+    Asks for the structured `usage_report` and falls back to the text, read with the same pattern
+    `usage.summarize` uses. Runs from `state/usage-probe/`, a folder with no project settings.
+    """
+
+    name = SOURCE_REPORT
 
     def __init__(self, config: Config, environ: Optional[Dict[str, str]] = None) -> None:
         self.config = config
         self.environ = dict(os.environ if environ is None else environ)
 
     async def read(self) -> Reading:
+        found: Dict[str, Any] = {"report": None, "text": "", "result": None}
+
+        async def on_event(event: Dict[str, Any]) -> None:
+            if event.get("type") == "assistant":
+                if isinstance(event.get("usage_report"), dict):
+                    found["report"] = event["usage_report"]
+                content = (event.get("message") or {}).get("content")
+                if isinstance(content, str):
+                    found["text"] = content
+                elif isinstance(content, list):
+                    found["text"] = "\n".join(str(block.get("text") or "") for block in content if isinstance(block, dict))
+            elif event.get("type") == "result" or "result" in event:
+                found["result"] = event
+
+        probe_dir = self.config.state_dir / "usage-probe"
+        probe_dir.mkdir(parents=True, exist_ok=True)
+        env = {key: value for key, value in self.environ.items() if key not in usage.INHERITED_SESSION_VARS}
         try:
-            report = await usage.fetch_report(self.config, self.environ)
-        except usage.UsageUnavailable as exc:
+            output = await usage.run_json_lines(
+                [self.config.claude_bin] + list(PROBE_FLAGS),
+                stdin_text="/usage", cwd=probe_dir, env=env, on_event=on_event, timeout=usage.USAGE_TIMEOUT,
+            )
+        except usage.BackendError as exc:
             return Reading.failed(str(exc), self.name)
-        return Reading.from_report(report)
+        result = found["result"]
+        if result is None or result.get("is_error"):
+            detail = str((result or {}).get("result") or output.stderr or "no answer from claude").strip()
+            return Reading.failed(detail.splitlines()[0], self.name)
+        if result.get("total_cost_usd"):  # /usage never calls the model; if that changes, say so loudly
+            log.warning("reading the usage cost %s USD; it should cost nothing", result.get("total_cost_usd"))
+        if found["report"] is not None:
+            return Reading.from_usage_report(found["report"])
+        text = found["text"] or str(result.get("result") or "")
+        reading = Reading.from_report(text)
+        if not reading.windows and "rate limited" in text.lower():
+            return Reading.failed(text.strip().splitlines()[0], SOURCE_TEXT)
+        return reading
 
 
 # -- warning rules -----------------------------------------------------------
@@ -244,6 +340,21 @@ class SpareSessionRule(Rule):
 class SpareWeeklyRule(Rule):
     name = "spare_weekly"
     summary = "The week resets soon with plenty unused."
+
+    @staticmethod
+    def estimate(reading: Reading, now: datetime, window_share_percent: float) -> Optional[Tuple[float, float]]:
+        """(full 5-hour windows the unused weekly share would take, 5-hour windows left before the weekly reset).
+
+        `window_share_percent` is how much of the weekly limit one fully used 5-hour window takes
+        (`MonitorSettings.window_share_percent`). None when the reading has no weekly reset time.
+        The rule will compare the two numbers; it does not act on them yet.
+        """
+        week = reading.window(KIND_WEEKLY_ALL)
+        if week is None or week.resets_at is None or window_share_percent <= 0:
+            return None
+        unused = max(0.0, 100.0 - week.percent)
+        left = max(0.0, (week.resets_at - now).total_seconds())
+        return unused / window_share_percent, left / (5 * 3600)
 
 
 def default_rules() -> List[Rule]:
@@ -316,6 +427,12 @@ class MonitorSettings:
     quiet_hours: Optional[Tuple[int, int]] = (23, 8)  # ALFRED_QUIET_HOURS, local start and end hour
     spare: bool = True  # ALFRED_USAGE_SPARE
     autorun: bool = False  # ALFRED_USAGE_AUTORUN
+    # ALFRED_USAGE_WAKE_INTERVAL: the least time between two usage-alert wake-ups of one bot. Waking costs usage.
+    wake_interval_seconds: int = 60 * 60
+    # ALFRED_USAGE_WINDOW_SHARE: percent of the weekly limit one fully used 5-hour window takes. Not published by
+    # Anthropic; 8 is a rounded community median for Pro (and Max, which official pages put at 5x Pro in both
+    # limits), measured in November 2026. Sources and range: docs/USAGE_MONITOR_RESEARCH.md, section 10.
+    window_share_percent: float = 8.0
     history_path: Path = field(default_factory=lambda: Path("usage.json"))
 
     MIN_POLL_SECONDS = 5 * 60
@@ -333,6 +450,8 @@ class MonitorSettings:
             quiet_hours=_setting(config, "ALFRED_QUIET_HOURS", defaults.quiet_hours, _hours),
             spare=config.get_bool("ALFRED_USAGE_SPARE", defaults.spare),
             autorun=config.get_bool("ALFRED_USAGE_AUTORUN", defaults.autorun),
+            wake_interval_seconds=_setting(config, "ALFRED_USAGE_WAKE_INTERVAL", defaults.wake_interval_seconds, _poll_seconds),
+            window_share_percent=_setting(config, "ALFRED_USAGE_WINDOW_SHARE", defaults.window_share_percent, _share),
             history_path=config.state_dir / "usage.json",
         )
 
@@ -361,6 +480,13 @@ def _poll_seconds(text: str) -> int:
     if seconds < MonitorSettings.MIN_POLL_SECONDS:
         raise ValueError("must be at least %dm" % (MonitorSettings.MIN_POLL_SECONDS // 60))
     return seconds
+
+
+def _share(text: str) -> float:
+    value = float(text.strip().rstrip("%"))
+    if not 0.5 <= value <= 100:
+        raise ValueError("a share of the weekly limit between 0.5 and 100")
+    return value
 
 
 def _percent(text: str) -> int:
@@ -397,7 +523,12 @@ def _hours(text: str) -> Optional[Tuple[int, int]]:
 
 
 class UsageMonitor:
-    """Holds the pieces. It does nothing yet beyond saying it is there."""
+    """Reads the plan usage once per cycle and wakes the bots whose usage alerts hold.
+
+    The six warning rules for the user are still only declared. A cycle reads nothing when no bot
+    has an alert to check, and never calls the model: the only usage it spends is the agent turn a
+    fired alert starts, at most one per bot per `wake_interval_seconds`.
+    """
 
     def __init__(
         self,
@@ -405,29 +536,118 @@ class UsageMonitor:
         source: UsageSource,
         history: UsageHistory,
         rules: Optional[Sequence[Rule]] = None,
+        *,
+        config: Optional[Config] = None,
+        scheduler: Optional[SchedulerStore] = None,
+        first_delay: float = 30.0,
     ) -> None:
         self.settings = settings
         self.source = source
         self.history = history
         self.rules = list(default_rules() if rules is None else rules)
+        self.config = config
+        self.scheduler = scheduler
+        self.first_delay = first_delay
+        self._task: Optional["asyncio.Future[None]"] = None
 
     def announce(self) -> None:
         log.info(
-            "usage monitor is on but not implemented yet: it reads no usage and sends nothing (%d rules declared)",
-            len(self.rules),
+            "usage monitor is on: checks agents' usage alerts every %dm (one /usage reading, no model call); "
+            "%d warning rules declared, none active",
+            self.settings.poll_seconds // 60, len(self.rules),
         )
 
+    # -- the loop -------------------------------------------------------------
 
-def start(config: Config, environ: Optional[Dict[str, str]] = None) -> Optional[UsageMonitor]:
-    """Called once per process, by `BotPool.start`, with Alfred's own configuration.
+    def start_loop(self) -> None:
+        if self._task is None:
+            self._task = asyncio.ensure_future(self.run())
+
+    async def stop(self) -> None:
+        if self._task is not None:
+            self._task.cancel()
+            await asyncio.gather(self._task, return_exceptions=True)
+            self._task = None
+
+    async def run(self) -> None:
+        await asyncio.sleep(self.first_delay)
+        while True:
+            try:
+                await self.cycle()
+            except Exception:  # one bad cycle must not end the monitor
+                log.exception("usage monitor cycle failed")
+            await asyncio.sleep(self.settings.poll_seconds)
+
+    def targets(self) -> List[Tuple[Any, usage_alerts.AlertStore, List[usage_alerts.Alert]]]:
+        """Bots that are on, have the usage permission and have an alert left to check."""
+        if self.config is None:
+            return []
+        from .bots import BotRegistry
+
+        found = []
+        for record in BotRegistry(self.config).list():
+            if not record.enabled or not record.allows("usage"):
+                continue
+            store = usage_alerts.AlertStore.for_bot(self.config, record.bot_id)
+            alerts = [alert for alert in store.alerts() if not alert.spent]
+            if alerts:
+                found.append((record, store, alerts))
+        return found
+
+    async def cycle(self, now: Optional[datetime] = None) -> Optional[Reading]:
+        """One pass: one reading for every bot's alerts. Returns the reading, or None when none was needed."""
+        targets = self.targets()
+        if not targets:
+            return None
+        reading = await self.source.read()
+        now = now or utc_now()
+        self.history.append(reading, now=now)
+        if not reading.ok:
+            log.warning("could not read the plan usage: %s", reading.error)
+            return reading
+        for record, store, alerts in targets:
+            firings = usage_alerts.due(alerts, reading, now)
+            # Only the bot's own chats, unless it may write to others: the same rule as when it was set.
+            firings = [item for item in firings if record.allows("contact") or item.alert.chat_id in record.own_chats()]
+            if not firings:
+                continue
+            if not usage_alerts.wake_allowed(store, now, self.settings.wake_interval_seconds):
+                log.info("%s: %d usage alert(s) hold; waiting for its wake interval", record.handle, len(firings))
+                continue
+            fired = usage_alerts.mark_fired(store, firings, now)
+            self._wake(record.bot_id, fired, reading, now)
+        return reading
+
+    def _wake(self, bot_id: int, fired: List[usage_alerts.Alert], reading: Reading, now: datetime) -> None:
+        if not fired or self.scheduler is None:
+            return
+        by_chat: Dict[Tuple[int, Optional[int]], List[usage_alerts.Alert]] = {}
+        for alert in fired:
+            by_chat.setdefault((alert.chat_id, alert.thread_id), []).append(alert)
+        for (chat_id, thread_id), group in by_chat.items():
+            self.scheduler.add(
+                chat_id=chat_id, due=now, text=usage_alerts.event_text(group, reading, now), kind=KIND_EVENT,
+                user_id=group[0].user_id, username=group[0].username, bot_id=bot_id, thread_id=thread_id,
+            )
+            log.info("usage alert(s) %s met: waking bot %s", ", ".join(alert.id for alert in group), bot_id)
+
+
+def start(
+    config: Config, environ: Optional[Dict[str, str]] = None, *, scheduler: Optional[SchedulerStore] = None,
+) -> Optional[UsageMonitor]:
+    """Called once per process, by `BotPool.start`, with Alfred's own configuration and the shared scheduler.
 
     Off by default: then this reads nothing else and returns None. A created bot's configuration
     (`config.bot_id` set) never starts one, because the plan limits belong to the Claude account that
-    every bot of the process shares, so one monitor covers them all.
+    every bot of the process shares, so one monitor covers them all. Without a scheduler the monitor is
+    built but its loop is not started.
     """
     if config.bot_id or not is_enabled(config):
         return None
     settings = MonitorSettings.from_config(config)
-    monitor = UsageMonitor(settings, ClaudeUsageSource(config, environ), UsageHistory(settings.history_path))
+    monitor = UsageMonitor(settings, ClaudeUsageSource(config, environ), UsageHistory(settings.history_path),
+                           config=config, scheduler=scheduler)
     monitor.announce()
+    if scheduler is not None:
+        monitor.start_loop()
     return monitor
