@@ -396,7 +396,8 @@ class BlacklistTests(BotsTestCase):
             for path in (self.chef, self.chef_project, self.config.home, self.alfred_project):
                 self.assertIn(str(path), filesystem["denyRead"], level)
                 self.assertIn(str(path), filesystem["denyWrite"], level)
-            self.assertNotIn("allowRead", filesystem, level)
+            self.assertIn(str(self.config.bots_home), filesystem["denyRead"], level)  # bots created later too
+            self.assertEqual(filesystem["allowRead"], [str(self.config.bots_home / str(self.RESEARCH))], level)
             self.assertFalse(settings["sandbox"]["autoAllowBashIfSandboxed"], level)
 
     def test_the_blacklist_is_there_at_every_level(self) -> None:

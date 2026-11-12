@@ -704,8 +704,10 @@ def blacklist(config: Config, record: BotRecord) -> Dict[str, List[str]]:
     deny: List[str] = []
     allow: List[str] = []
     directories: List[str] = []
-    deny_read = [str(config.home)] + [str(path) for path in config.env_files]
-    allow_read: List[str] = []
+    # The whole of ~/.alfred-bots, with its own directory opened again (the narrower path wins): a bot
+    # created later is closed from its first moment, before this bot's rules are rewritten.
+    deny_read = [str(config.home)] + [str(path) for path in config.env_files] + [str(config.bots_home)]
+    allow_read: List[str] = [str(own)]
     deny_write = [str(config.home)]
     for agent in other_agents(config, record):
         project = claude_project_dir(config, agent.workspace)
@@ -835,8 +837,7 @@ def claude_settings(config: Config, record: BotRecord) -> Dict[str, Any]:
         # The OS sandbox (Seatbelt on macOS) holds for every process the shell starts, which the rules
         # above, matching only the text of a command, cannot promise.
         filesystem: Dict[str, Any] = {"denyRead": others["denyRead"], "denyWrite": others["denyWrite"]}
-        if others["allowRead"]:
-            filesystem["allowRead"] = others["allowRead"]  # the narrower path wins: cross-agent access
+        filesystem["allowRead"] = others["allowRead"]  # its own directory, and with cross-agent access the shared parts
         settings["sandbox"] = {
             "enabled": True,
             "allowUnsandboxedCommands": False,
