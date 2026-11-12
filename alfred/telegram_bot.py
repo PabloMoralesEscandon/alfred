@@ -20,7 +20,7 @@ from telegram import BotCommand, Message, Update
 from telegram.constants import ChatAction
 from telegram.ext import Application, ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 
-from . import home, orca, usage
+from . import home, orca, usage, usage_monitor
 from .agent import Agent, Listener
 from .backends import BACKENDS, BackendError, RunResult
 from .config import Config
@@ -111,6 +111,7 @@ class TelegramBot(Listener):
         self.bot: Any = None  # set when the application starts, or by the first update
         self._progress: Dict[int, Progress] = {}
         self._scheduler: Optional["asyncio.Future[None]"] = None
+        self.usage_monitor: Optional[usage_monitor.UsageMonitor] = None
 
     # -- wiring -------------------------------------------------------------
 
@@ -135,6 +136,8 @@ class TelegramBot(Listener):
         self.bot = application.bot
         # Polled often because `alfred event` relies on it to wake the agent promptly.
         self._scheduler = asyncio.ensure_future(run_scheduler(self.store, self._deliver, poll_seconds=2.0))
+        # Off unless ALFRED_USAGE_MONITOR is set; even then it only logs a line for now.
+        self.usage_monitor = usage_monitor.start(self.config)
         log.info("Alfred is up. home=%s backend=%s", self.config.home, self.config.default_backend)
 
     async def _post_shutdown(self, application: Application) -> None:

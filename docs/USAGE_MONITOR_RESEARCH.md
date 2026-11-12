@@ -1,6 +1,7 @@
 # Monitor de uso de la suscripción de Claude: investigación y diseño
 
-Estado: investigación, sin cambios en `alfred/`. Fecha: 2026-11-12. Claude Code probado: v2.1.322.
+Estado: investigación terminada; esqueleto del monitor implementado y desactivado por defecto (ver
+[sección 9](#9-estado-de-la-implementación)). Fecha: 2026-11-12. Claude Code probado: v2.1.322.
 
 Objetivo: que Alfred (1) avise antes de que se agoten los límites del plan (ventana de 5 horas y
 límites semanales) y (2) detecte cuota sin usar antes de que se reinicie, para avisar al usuario o
@@ -508,6 +509,64 @@ Cada paso se puede integrar por separado y deja las pruebas en verde.
   porque se guarda el último.
 - Si Anthropic documenta `unifiedWindows` o añade los semanales por modelo al evento: entonces la
   consulta activa podría espaciarse mucho más.
+
+## 9. Estado de la implementación
+
+### Lo que hay (esqueleto, sin funcionalidad)
+
+`alfred/usage_monitor.py` contiene las piezas del diseño de la sección 7 con nombres definitivos.
+Ninguna actúa todavía.
+
+| Pieza | Qué es hoy | Nombre en la sección 7 |
+| --- | --- | --- |
+| `Window`, `Reading` | Modelo de datos de una lectura: tipo de medidor (`session`, `weekly_all`, `weekly_scoped` u otro), etiqueta, porcentaje, `resets_at` (UTC, opcional), `reset_text`, `severity` y `scope`. Se serializa a dict. `Reading.from_report()` lee el texto de `/usage` con la misma `usage.LIMIT_LINE`, así que `resets_at` queda vacío y solo se guarda `reset_text`. | `Limit`, `Snapshot` |
+| `UsageSource`, `ClaudeUsageSource` | Interfaz de la fuente (`async read() -> Reading`) y la implementación que reutiliza `usage.py`. | `probe()` |
+| `Rule`, `RuleContext`, `Alert`, `default_rules()` | Interfaz de reglas y las seis declaradas: `ThresholdRule` (R1), `ProjectionRule` (R2), `LimitReachedRule` (R3), `ResetRule` (R4), `SpareSessionRule` (R5) y `SpareWeeklyRule` (R6). Todas tienen `implemented = False` y `evaluate()` devuelve `[]`. | `evaluate()` |
+| `UsageHistory` | Historial en `state/usage.json`: `append()` con escritura atómica y poda a 24 h, `readings()` y `latest()`. Tolera archivos y entradas dañados. No toca el disco hasta que se le llama. | `UsageStore` (aún sin las claves de avisos enviados) |
+| `MonitorSettings`, `is_enabled()` | Configuración: `ALFRED_USAGE_MONITOR` (interruptor, desactivado por defecto) y los ajustes de la sección 7 (`_CHAT_ID`, `_POLL` con mínimo de 5 min, `_WARN`, `_CAP`, `ALFRED_QUIET_HOURS`, `_SPARE` y `_AUTORUN`). Un valor inválido conserva su valor por defecto y deja un aviso en el log. Vive en el propio módulo, no en `config.py`. Solo el interruptor tiene efecto. | Variables de `config.py` |
+| `UsageMonitor`, `start()` | Punto de entrada. `TelegramBot._post_init` llama a `usage_monitor.start(config)` justo después de arrancar el planificador. | `run_usage_monitor` |
+
+Comportamiento garantizado por los tests (`tests/test_usage_monitor.py`):
+
+- **Desactivado (por defecto):** `start()` lee solo el interruptor y devuelve `None`. No lee otros
+  ajustes, no construye nada, no ejecuta `claude`, no escribe archivos y no registra nada en el log.
+- **Activado:** construye las piezas y registra una sola línea (`usage monitor is on but not
+  implemented yet ...`). No lee el uso, no escribe el historial, no manda mensajes y no programa
+  tareas.
+- Cada pieza se puede construir y usar por separado.
+
+Únicos cambios fuera del módulo nuevo:
+
+- `usage.py`: `fetch()` se ha dividido en `fetch_report()`, que devuelve el texto bruto o lanza
+  `UsageUnavailable`, y `fetch()`, que lo resume. La orden y los mensajes de error son los mismos y
+  `/usage` responde igual: los tests anteriores pasan sin cambios.
+- `telegram_bot.py`: el atributo `usage_monitor` y la llamada a `start()` en `_post_init`.
+- `.env.example`: `ALFRED_USAGE_MONITOR=0`, documentado como esqueleto.
+
+### Lo que falta
+
+Por orden, siguiendo los pasos de la sección 7:
+
+1. **Fuente estructurada.** `ClaudeUsageSource` debería pedir `stream-json --verbose` con
+   `--setting-sources project --strict-mcp-config` y `cwd` en `state/usage-probe/`, leer
+   `usage_report.rate_limits` (con `resets_at` y `severity` reales) y dejar el texto como respaldo.
+   Hace falta una `Reading.from_usage_report()`, detectar `rate limited until` y una fixture real
+   para los tests. Puede hacerse en `usage_monitor.py` sin tocar `fetch()`, o pasando `/usage`
+   también al formato estructurado.
+2. **Captura pasiva.** `Listener.rate_limit()`, el manejo de `rate_limit_event` en `live.py` y
+   `claude.py`, y `Reading.from_rate_limit_event()`.
+3. **Historial completo.** Claves de avisos enviados en `UsageHistory`, para la deduplicación entre
+   reinicios, y `alfred usage --json`.
+4. **Lógica de R1, R3 y R4**, deduplicación y horas de silencio, con tests con reloj fijo.
+5. **Bucle de consulta.** Sustituir `announce()` por una tarea de asyncio con intervalo
+   adaptativo y espera exponencial, cancelada en `_post_shutdown`, que envíe con
+   `TelegramBot._send` a `settings.chat_id`. Test de que nunca llama a `agent.submit`.
+6. **Lógica de R2, R5 y R6** (proyección y cuota sobrante), con mensajes simples.
+7. **Tope en `_deliver`** con `SchedulerStore.defer()`, usando `cap_percent`.
+8. **Backlog**: tabla, `alfred backlog`, skill base, `/spare N`, y `autorun` como opción explícita.
+9. **Documentación de usuario**: README (`/spare`, la sección de configuración), `.env.example`
+   con los ajustes restantes cuando tengan efecto, y `docs/PLAN.md`.
+10. **Prueba real** de un día (sección 7, paso 10).
 
 ## Fuentes
 

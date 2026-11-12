@@ -45,8 +45,12 @@ def summarize(report: str) -> str:
     return first or "Claude Code returned no usage information."
 
 
-async def fetch(config: Config, environ: Dict[str, str]) -> str:
-    """Ask Claude Code for the usage report and return the short version."""
+class UsageUnavailable(Exception):
+    """Claude Code gave no usage report. The message is a one-line reason."""
+
+
+async def fetch_report(config: Config, environ: Dict[str, str]) -> str:
+    """Ask Claude Code for its usage report and return the text as it came."""
     state: Dict[str, Optional[Dict[str, Any]]] = {"result": None}
 
     async def on_event(event: Dict[str, Any]) -> None:
@@ -64,9 +68,17 @@ async def fetch(config: Config, environ: Dict[str, str]) -> str:
             timeout=USAGE_TIMEOUT,
         )
     except BackendError as exc:
-        return "Could not get usage: %s" % exc
+        raise UsageUnavailable(str(exc)) from exc
     result = state["result"]
     if result is None or result.get("is_error"):
         detail = str((result or {}).get("result") or output.stderr or "no answer from claude").strip()
-        return "Could not get usage: %s" % detail.splitlines()[0]
-    return summarize(str(result.get("result") or ""))
+        raise UsageUnavailable(detail.splitlines()[0])
+    return str(result.get("result") or "")
+
+
+async def fetch(config: Config, environ: Dict[str, str]) -> str:
+    """Ask Claude Code for the usage report and return the short version."""
+    try:
+        return summarize(await fetch_report(config, environ))
+    except UsageUnavailable as exc:
+        return "Could not get usage: %s" % exc
