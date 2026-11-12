@@ -446,7 +446,7 @@ class Menus:
 
     def _screen_home(self, session: Session) -> Screen:
         return Screen(
-            "Alfred's control panel. Each bot has its own chat, task, model, permissions, memory and session.",
+            "The Consiglieri control panel. Each bot has its own chat, task, model, permissions, memory and session.",
             [[("➕ Create bot", "go:new_name")], [("🤖 My bots", "go:list")], [("🧠 Shared memory", "go:shared")],
              [("❓ Help", "go:help")], [("✖️ Close", "cancel")]],
         )
@@ -515,7 +515,7 @@ class Menus:
         backend = self._backend(session.settings)
         typing = "\n\nSend the model's name as a message." if session.awaiting == "model" else ""
         return Screen(
-            "%s\n\nWhich model should %s use? Default means Alfred's setting.%s"
+            "%s\n\nWhich model should %s use? Default means Consiglieri's setting.%s"
             % (STEP_TITLES["new_model"], session.name, typing),
             self._model_rows(session.settings, backend) + [self._nav(("Next ➡️", "next"))],
         )

@@ -410,7 +410,7 @@ def permission_note(config: Config, record: Any) -> str:
         return ""
     return (
         "ℹ️ Plan usage is on for %s, but the usage monitor is off (%s=0), so the permission has no effect: "
-        "it can't read usage or set alerts until you put %s=1 in .env and restart Alfred."
+        "it can't read usage or set alerts until you put %s=1 in .env and restart Consiglieri."
         % (record.handle, ENABLE_SETTING, ENABLE_SETTING)
     )
 

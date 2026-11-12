@@ -390,7 +390,7 @@ def check(config: Config, name: str, run_tests: bool = True) -> Dict[str, Any]:
         base_commands = {item.name for item in (BASE_PLUGIN / "bin").iterdir()} | {"alfred"}
         for command in extension.commands:
             if command in base_commands:
-                errors.append("bin/%s would replace one of Alfred's own commands" % command)
+                errors.append("bin/%s would replace one of Consiglieri's own commands" % command)
 
     for item in _files(path):
         relative = item.relative_to(path)

@@ -79,7 +79,7 @@ MAIN_UPDATES = ["message", "callback_query", "managed_bot"]
 BOT_UPDATES = ["message", "callback_query"]
 CONFIRM_SECONDS = 300
 CANCEL_CREATION = "Cancel"  # the second key of the creation keyboard
-BOT_USAGE = """I am Alfred's control panel. I have no agent of my own: I create and run bots, each with its own chat, task, model, permissions, memory, tools and Claude session.
+BOT_USAGE = """I am the Consiglieri control panel. I have no agent of my own: I create and run bots, each with its own chat, task, model, permissions, memory, tools and Claude session.
 
 /bot - the menu: create a bot step by step, or change one of yours, with buttons
 
@@ -239,7 +239,7 @@ class TelegramBot(Listener):
         await self.started(application)
         # Polled often because `alfred event` relies on it to wake the agent promptly.
         self._scheduler = asyncio.ensure_future(run_scheduler(self.store, self._deliver, poll_seconds=2.0))
-        log.info("Alfred is up. home=%s backend=%s", self.config.home, self.config.default_backend)
+        log.info("Consiglieri is up. home=%s backend=%s", self.config.home, self.config.default_backend)
 
     async def _post_shutdown(self, application: Application) -> None:
         if self._scheduler is not None:
@@ -387,8 +387,8 @@ class TelegramBot(Listener):
             lines = ["I'm Alfred. Just write to me in plain language. You can also send photos, files and voice notes."]
         else:
             task = self.record.settings.get("task")
-            lines = ["I'm %s, a bot Alfred made for one job." % self.record.name]
-            lines.append("My task: %s" % task if task else "I have no task yet; give me one from Alfred's control panel (/bot set).")
+            lines = ["I'm %s, a Consiglieri bot made for one job." % self.record.name]
+            lines.append("My task: %s" % task if task else "I have no task yet; give me one from the Consiglieri control panel (/bot set).")
             lines.append("Write to me in plain language. My memory and files are my own.")
         lines += ["", "Commands:"]
         lines += ["/%s - %s" % command for command in self.commands]
@@ -556,7 +556,7 @@ class ControlPanel:
         if self.bot is None:
             raise RuntimeError("the control panel is not connected")
         if item["kind"] in (KIND_TASK, KIND_EVENT):
-            await self._send(self.bot, chat, "⏰ This was scheduled for Alfred's old agent, which no longer runs here, "
+            await self._send(self.bot, chat, "⏰ This was scheduled for the old main agent, which no longer runs here, "
                                              "so I can't carry it out. Give it to one of your bots: %s" % item["message"])
         else:
             await self._send(self.bot, chat, "⏰ %s" % item["message"])
@@ -859,7 +859,7 @@ class ControlPanel:
             await query.answer("This menu has expired.")
             try:
                 await query.edit_message_text(
-                    "This menu has expired: it timed out, was replaced by a newer one, or Alfred restarted. "
+                    "This menu has expired: it timed out, was replaced by a newer one, or Consiglieri restarted. "
                     "Nothing from it was kept. Send /bot to open a new one."
                 )
             except Exception:
@@ -981,7 +981,7 @@ class BotPool:
         # Off unless ALFRED_USAGE_MONITOR is set. When on, it checks the bots' usage alerts with one reading per cycle.
         self.usage_monitor = usage_monitor.start(self.config, scheduler=self.store)
         log.info(
-            "Alfred is up. home=%s backend=%s bots=%d running=%d manager=%s",
+            "Consiglieri is up. home=%s backend=%s bots=%d running=%d manager=%s",
             self.config.home, self.config.default_backend, len(self.registry.list()),
             len(self.frontends), self.manager_state(),
         )

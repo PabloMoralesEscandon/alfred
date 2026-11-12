@@ -183,7 +183,7 @@ class MenuTests(PanelHarness):  # type: ignore[misc,valid-type]
             self.pool.main.menus.sessions.clear()  # what a restart leaves: no sessions at all
             toast = await self.tap("", data=create)
             self.assertEqual(toast, "This menu has expired.")
-            self.assertIn("Alfred restarted", self.text)
+            self.assertIn("Consiglieri restarted", self.text)
             self.assertEqual(self.panel_bot.sent, [])  # no half-made request was sent
             await self.open()
             first = self.data("Create bot")

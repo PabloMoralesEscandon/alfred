@@ -38,7 +38,7 @@ def resolve_chat_id(args: argparse.Namespace) -> int:
     try:
         return int(value)
     except (TypeError, ValueError):
-        raise CommandError("no chat: pass --chat-id or run inside an Alfred turn (ALFRED_CHAT_ID)") from None
+        raise CommandError("no chat: pass --chat-id or run inside an agent's turn (ALFRED_CHAT_ID)") from None
 
 
 def resolve_bot_id(config: Config, args: argparse.Namespace) -> int:
@@ -87,7 +87,7 @@ def require(record, permission: str) -> None:
     """A bot without the permission is refused. Claude Code's rules usually stop it first; this is the second lock."""
     if record is not None and not record.allows(permission):
         raise CommandError(
-            "%s does not have the %s permission; the user can grant it from Alfred's control panel "
+            "%s does not have the %s permission; the user can grant it from the Consiglieri control panel "
             "(/bot perm %s %s on)" % (record.handle, permission, record.username, permission)
         )
 
@@ -289,7 +289,7 @@ def cmd_bots_set(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
     setting = args.setting.lower()
     if caller is not None:
         if record.bot_id == caller.bot_id:
-            raise CommandError("a bot can't change its own settings; the user can, from Alfred's control panel")
+            raise CommandError("a bot can't change its own settings; the user can, from the Consiglieri control panel")
         if setting == "workdir":
             raise CommandError("only the control panel can change a bot's working directory")
     try:
@@ -442,7 +442,7 @@ def cmd_ext_remove(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
 
 def cmd_init(config: Config, args: argparse.Namespace) -> int:
     imported = home.bootstrap(config)
-    print("Alfred's home is ready at %s" % config.home)
+    print("Consiglieri's home is ready at %s" % config.home)
     if imported:
         print("Imported from the old layout: %s" % ", ".join(imported))
     return 0
@@ -480,7 +480,7 @@ def usage_alert_bot(config: Config, args: argparse.Namespace, adding: bool = Fal
         require(record, "usage")
     bot_id = own_bot_only(config, record, args)
     if not bot_id:
-        raise CommandError("usage alerts belong to the bots Alfred created; pass --bot <@username>")
+        raise CommandError("usage alerts belong to the bots Consiglieri created; pass --bot <@username>")
     if adding:
         from .bots import BotRegistry
         from . import usage_monitor
@@ -646,7 +646,7 @@ def cmd_chat(config: Config, args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="alfred", description="Alfred: a Telegram agent driven by Claude Code.")
+    parser = argparse.ArgumentParser(prog="alfred", description="Consiglieri: a set of Telegram agents driven by Claude Code.")
     parser.add_argument("--version", action="version", version="alfred %s" % __version__)
     commands = parser.add_subparsers(dest="command")
 
@@ -692,7 +692,7 @@ def build_parser() -> argparse.ArgumentParser:
     chat = commands.add_parser("chat", help="talk to the agent from this terminal")
     chat.add_argument("-m", "--message", help="send one message and exit")
     chat.add_argument("--chat-id", type=int)
-    chat.add_argument("--bot", help="talk to one of the bots Alfred created, by @username, name or id")
+    chat.add_argument("--bot", help="talk to one of the bots Consiglieri created, by @username, name or id")
     chat.add_argument("--backend", choices=("claude", "codex"))
     chat.add_argument("--new", action="store_true", help="start a fresh conversation")
     chat.set_defaults(run=cmd_chat)
@@ -714,7 +714,7 @@ def build_parser() -> argparse.ArgumentParser:
     event.add_argument("text", nargs="*")
     event.set_defaults(json=cmd_event)
 
-    ext = commands.add_parser("ext", help="Alfred's own extensions (skills, commands, hooks, MCP servers)")
+    ext = commands.add_parser("ext", help="an agent's own extensions (skills, commands, hooks, MCP servers)")
     ext_actions = ext.add_subparsers(dest="action", required=True)
     ext_actions.add_parser("list", help="every extension, on or off").set_defaults(json=cmd_ext_list)
     ext_new = ext_actions.add_parser("new", help="create an empty extension")
@@ -730,7 +730,7 @@ def build_parser() -> argparse.ArgumentParser:
         sub_parser.add_argument("name")
         sub_parser.set_defaults(json=handler)
 
-    bots_parser = commands.add_parser("bots", help="the Telegram bots Alfred created")
+    bots_parser = commands.add_parser("bots", help="the Telegram bots Consiglieri created")
     bots_actions = bots_parser.add_subparsers(dest="action", required=True)
     bots_actions.add_parser("list", help="every bot and its settings").set_defaults(json=cmd_bots_list)
     bots_set = bots_actions.add_parser("set", help="change one setting of a bot")
@@ -744,7 +744,7 @@ def build_parser() -> argparse.ArgumentParser:
     bots_new.add_argument("--owner", type=int, help="Telegram user id to ask, outside a bot's turn")
     bots_new.set_defaults(json=cmd_bots_new)
 
-    commands.add_parser("chrome", help="open a window of Alfred's own Chrome profile").set_defaults(json=cmd_chrome)
+    commands.add_parser("chrome", help="open a window of Consiglieri's own Chrome profile").set_defaults(json=cmd_chrome)
 
     shot = commands.add_parser("screenshot", help="save a screenshot of the browser tab to a file")
     shot.add_argument("--page", help="browser page id; defaults to the active tab")

@@ -82,7 +82,7 @@ class ExtensionTests(unittest.TestCase):
         errors = "\n".join(report["errors"])
         for expected in (
             "bin/not-executable is not executable",
-            "bin/alfred-wait-agent would replace one of Alfred's own commands",
+            "bin/alfred-wait-agent would replace one of Consiglieri's own commands",
             "lib/client.py looks like it contains a Anthropic or OpenAI key",
             "skills/vague/SKILL.md needs a description",
             "CLAUDE.md inside an extension is not loaded",

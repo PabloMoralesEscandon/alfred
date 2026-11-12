@@ -148,7 +148,7 @@ def setup_browser(config: Config, *, test: bool = True) -> List[Step]:
             call(config, "wait", "--load", "networkidle", "--page", page)
             title = str(call(config, "get", "--what", "title", "--page", page).get("title") or "")
             record("Page load", bool(title), "opened %s: %r" % (TEST_URL, title))
-            record("Tab scoping", scoped, "tabs open in Alfred's workspace" if scoped else "tab opened in another workspace")
+            record("Tab scoping", scoped, "tabs open in Consiglieri's workspace" if scoped else "tab opened in another workspace")
         except (OrcaError, KeyError) as exc:
             record("Page load", False, str(exc))
         finally:

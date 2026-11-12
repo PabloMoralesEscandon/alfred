@@ -155,7 +155,7 @@ def systemd_unit(config: Config) -> str:
     )
     return (
         "[Unit]\n"
-        "Description=Alfred Telegram agent\n"
+        "Description=Consiglieri Telegram agents\n"
         "After=network-online.target\n"
         "Wants=network-online.target\n\n"
         "[Service]\n"
