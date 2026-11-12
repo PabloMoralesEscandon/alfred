@@ -128,6 +128,12 @@ def _duration(seconds: int) -> str:
     return "%ds" % seconds
 
 
+def _short(text: str, limit: int = 28) -> str:
+    """A task on a button: one line, short enough for Telegram's button width."""
+    text = " ".join((text or "").split())
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
 def _label_note(pool: Any, record: BotRecord) -> str:
     """For a bot whose SOUL.md has a role: the task is only its label, and what it does is changed there."""
     if pool is None or not soul.has_role(soul.read(pool.registry.workspace(record.bot_id))):
@@ -255,6 +261,14 @@ class Menus:
             session.soul_target = "bot" if session.screen.startswith("bot_") else "new"
             session.awaiting = "soul_describe"
             return self.go(session, "bot_soul" if session.soul_target == "bot" else "new_soul")
+        if verb == "souldefault":  # the task label as the description
+            task = (self._record(session).settings.get("task", "") if session.screen.startswith("bot_")
+                    else session.settings.get("task", ""))
+            session.soul_target = "bot" if session.screen.startswith("bot_") else "new"
+            if not task.strip():
+                session.awaiting = "soul_describe"
+                return self.render(session)
+            return await self._draft(session, soul_writer.default_description(task))
         if verb == "soulaccept":
             if not session.soul_preview:
                 return self.go(session, "new_soul" if session.soul_target != "bot" else "bot_soul")
@@ -702,10 +716,12 @@ class Menus:
                           "talks, never what it may do (that is the permissions, next)." % (STEP_TITLES["new_soul"], session.name),
                           [self._nav()])
         if session.awaiting == "soul_describe":
-            return Screen("%s\n\nDescribe %s's personality in a sentence or two, as a message, for example: "
-                          "patient and encouraging, explains with examples, a bit of humour. Claude writes a draft "
-                          "from it (one small call) and you see it before anything is saved."
-                          % (STEP_TITLES["new_soul"], session.name), [self._nav()])
+            task = session.settings.get("task", "")
+            rows: List[Row] = [[("✨ Use its task: %s" % _short(task), "souldefault")]] if task else []
+            return Screen("%s\n\nDescribe %s in a sentence or two, as a message: what it is for, its scope and how "
+                          "it should come across, for example: keeps my calendar tidy, nothing else; patient, a bit "
+                          "of humour. Claude writes a draft of its role and personality (one small call) and you see "
+                          "it before anything is saved." % (STEP_TITLES["new_soul"], session.name), rows + [self._nav()])
         if session.soul:
             current = "Now: its own personality (%d characters):\n\n%s" % (len(session.soul), self._shown(session.soul))
             rows: List[Row] = [[("Keep it ➡️", "next")], [("↩️ Use the base instead", "soulbase")],
@@ -727,12 +743,15 @@ class Menus:
         if session.awaiting == "bot_soul":
             lines += ["", "Send the new personality as a message. Nothing changes until you send it."]
         if session.awaiting == "soul_describe":
-            lines += ["", "Describe the personality you want in a sentence or two, as a message. Claude writes a "
-                      "draft (one small call) and you see it before anything is saved."]
+            lines += ["", "Describe what it is for and how it should come across, in a sentence or two, as a message. "
+                      "Claude writes a draft of its role and personality (one small call) and you see it before "
+                      "anything is saved."]
         if record.allows("soul"):
             lines += ["", "⚠️ It may edit its own personality (Permissions → Customize)."]
-        rows: List[Row] = [[("✏️ Replace", "soulreplace"), ("✨ Describe it", "souldescribe")],
-                           [("↩️ Reset to the base", "soulreset")], [("⬅️ Back", "back")]]
+        rows: List[Row] = [[("✏️ Replace", "soulreplace"), ("✨ Describe it", "souldescribe")]]
+        if session.awaiting == "soul_describe" and record.settings.get("task"):
+            rows.append([("✨ Use its task: %s" % _short(record.settings["task"]), "souldefault")])
+        rows += [[("↩️ Reset to the base", "soulreset")], [("⬅️ Back", "back")]]
         return Screen("\n".join(lines), rows)
 
     def _screen_base_soul(self, session: Session) -> Screen:
