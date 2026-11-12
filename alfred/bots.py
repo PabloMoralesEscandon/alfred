@@ -1,0 +1,743 @@
+"""The bots Alfred creates: Telegram managed bots, each with its own settings, permissions, token and directory.
+
+How a bot comes to exist (see docs/AGENT_CHATS_RESEARCH.md): the main bot is a control panel and a
+*manager bot* (Bot Management Mode, switched on once in @BotFather's Mini App). It sends the user a
+`t.me/newbot/<manager>/<username>` link; the user confirms in Telegram; the manager receives a
+`managed_bot` update and fetches the new bot's token with `getManagedBotToken`.
+
+What a bot owns, and where:
+
+    <home>/state/bots/<bot_id>/       0700, never committed (state/ is git-ignored)
+        bot.json                      name, owner, settings and permissions
+        token                         0600, the bot's token, nothing else
+        sessions.json                 one Claude/Codex session per chat or topic
+        claude-settings.json          its permissions as Claude Code settings, passed with --settings
+    <home>-bots/<bot_id>/             the bot's own directory: where its agent runs
+        CLAUDE.md, AGENTS.md          its manual, rewritten from its settings
+        memory/  inbox/  outbox/      its memory and files, shared with no one
+        extensions/  .claude/skills/  tools it adds to itself; no other bot loads them
+
+The bots' directories sit next to the home, not inside it, because Claude Code loads every CLAUDE.md
+from its working directory up to the root: inside the home, a bot would also read Alfred's manual and
+Alfred's memory index.
+
+This module has no Telegram connection of its own. The few Bot API calls a manager makes take the
+manager's `telegram.Bot` as an argument, and go through `do_api_request`, so they work with any
+python-telegram-bot from 20.8 on (the methods arrived natively only in 22.8, which needs Python 3.10).
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import shutil
+import time
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+from string import Template
+from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import quote_plus
+
+from . import home
+from .config import Config
+
+TOKEN_PATTERN = re.compile(r"^\d{5,15}:[A-Za-z0-9_-]{30,}$")
+PENDING_SECONDS = 30 * 60  # how long a creation link is honoured
+TEMPLATES = Path(__file__).resolve().parent / "templates"
+
+CLAUDE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
+PERMISSION_MODES = ("dontAsk", "acceptEdits", "auto", "plan", "default", "bypassPermissions")
+BACKEND_NAMES = ("claude", "codex")
+CLEAR_WORDS = ("default", "none", "unset", "-")
+ON_WORDS = ("on", "yes", "true", "1")
+OFF_WORDS = ("off", "no", "false", "0")
+
+# What `/bot set` accepts, in the order `/bot show` lists them.
+SETTINGS = (
+    ("task", "what the bot is for; goes into its manual"),
+    ("model", "model alias or full name, for example sonnet; default: Alfred's"),
+    ("effort", "low, medium, high, xhigh or max; default: Alfred's"),
+    ("backend", "claude or codex; default: Alfred's"),
+    ("workdir", "the directory it does its job in (it keeps its own memory either way)"),
+)
+SETTING_NAMES = tuple(name for name, _ in SETTINGS)
+
+# What `/bot perm` accepts: (name, default, what it controls). A new bot starts with these defaults:
+# nothing outside its own directory, no web, no browser, no shell beyond the `alfred` command.
+PERMISSIONS = (
+    ("mode", "dontAsk", "Claude Code permission mode: %s" % ", ".join(PERMISSION_MODES)),
+    ("shell", "alfred", "alfred: only the alfred command; full: any shell command"),
+    ("sandbox", "on", "with shell full: run commands in Claude Code's OS sandbox"),
+    ("edit", "off", "edit files in its working directory and extra folders (its own directory always)"),
+    ("folders", "", "extra folders it may read (and edit, with edit on), separated by commas"),
+    ("web", "off", "WebSearch and WebFetch"),
+    ("browser", "off", "Alfred's browser (Orca's, or Chrome)"),
+    ("mcp", "off", "MCP tools (your connectors and servers, its extensions'); off removes them all"),
+    ("schedule", "on", "reminders and timed tasks with alfred schedule"),
+    ("contact", "off", "post or schedule messages to chats other than its owner's"),
+    ("bots", "off", "list bots, change their settings and ask for new ones (never destroy)"),
+    ("allow", "", "extra Claude Code allow rules, separated by ;"),
+    ("deny", "", "extra Claude Code deny rules, separated by ;"),
+)
+PERMISSION_NAMES = tuple(name for name, _, _ in PERMISSIONS)
+DEFAULT_PERMISSIONS = {name: default for name, default, _ in PERMISSIONS}
+SWITCHES = ("sandbox", "edit", "web", "browser", "mcp", "schedule", "contact", "bots")
+# `+name` / `-name` when creating a bot: on and off, or for shell: full and alfred.
+SHORTHANDS = {"bypass": ("mode", "bypassPermissions")}
+
+# alfred subcommands a bot never runs: they start or install Alfred itself.
+ALWAYS_DENIED = ("Bash(alfred run)", "Bash(alfred run *)", "Bash(alfred service *)", "Bash(alfred init)",
+                 "Bash(alfred chat)", "Bash(alfred chat *)", "Bash(alfred browser-setup *)")
+# alfred subcommands that run outside the sandbox: they need Alfred's state and Telegram, and check
+# the bot's permissions themselves.
+UNSANDBOXED_ALFRED = ("alfred send *", "alfred schedule *", "alfred event *", "alfred skills", "alfred bots *")
+BROWSER_RULES = ("Bash(orca *)", "mcp__claude-in-chrome__*")
+
+
+class BotError(Exception):
+    """Something the user can fix: a bad setting, an unknown bot, a missing token."""
+
+
+def utc_now_text() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+# -- private files ------------------------------------------------------------
+
+
+def _private_dir(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    os.chmod(path, 0o700)
+
+
+def write_private(path: Path, text: str) -> None:
+    """Write a file only the user can read (0600), atomically, in a directory only the user can open."""
+    _private_dir(path.parent)
+    temporary = path.with_name(".%s.tmp" % path.name)
+    descriptor = os.open(str(temporary), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, path)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
+# -- records ------------------------------------------------------------------
+
+
+@dataclass
+class BotRecord:
+    bot_id: int
+    username: str
+    name: str
+    owner_id: int
+    created_at: str = field(default_factory=utc_now_text)
+    enabled: bool = True
+    settings: Dict[str, str] = field(default_factory=dict)
+    permissions: Dict[str, str] = field(default_factory=dict)  # only what differs from DEFAULT_PERMISSIONS
+    chat_ids: List[int] = field(default_factory=list)  # chats that have pressed Start
+    notify_chat_id: int = 0  # the chat with the control panel where it was asked for
+
+    @property
+    def handle(self) -> str:
+        return "@%s" % self.username if self.username else str(self.bot_id)
+
+    @property
+    def link(self) -> str:
+        return "https://t.me/%s" % self.username
+
+    def permission(self, name: str) -> str:
+        return self.permissions.get(name) or DEFAULT_PERMISSIONS[name]
+
+    def allows(self, name: str) -> bool:
+        return self.permission(name) == "on"
+
+    def folders(self) -> List[Path]:
+        return [Path(part) for part in self.permission("folders").split(",") if part.strip()]
+
+    def working_dirs(self) -> List[Path]:
+        """Directories besides its own it may work in: its working directory, then its extra folders."""
+        dirs = [Path(self.settings["workdir"])] if self.settings.get("workdir") else []
+        return dirs + [folder for folder in self.folders() if folder not in dirs]
+
+    def own_chats(self) -> List[int]:
+        return [self.owner_id] + [chat for chat in self.chat_ids if chat != self.owner_id]
+
+    @classmethod
+    def from_json(cls, data: Dict[str, Any]) -> "BotRecord":
+        known = {key: data[key] for key in cls.__dataclass_fields__ if key in data}  # type: ignore[attr-defined]
+        record = cls(**known)
+        record.bot_id = int(record.bot_id)
+        record.settings = {str(k): str(v) for k, v in (record.settings or {}).items() if k in SETTING_NAMES and v}
+        record.permissions = {
+            str(k): str(v) for k, v in (record.permissions or {}).items()
+            if k in PERMISSION_NAMES and str(v) != DEFAULT_PERMISSIONS[k]
+        }
+        return record
+
+
+@dataclass
+class Pending:
+    """A creation link Alfred sent and the settings and permissions the new bot will start with."""
+
+    owner_id: int
+    chat_id: int
+    name: str
+    username: str
+    settings: Dict[str, str]
+    created: float
+    permissions: Dict[str, str] = field(default_factory=dict)
+
+
+class BotRegistry:
+    """Everything about the bots on disk. Cheap to create; reads the files on every call."""
+
+    def __init__(self, config: Config) -> None:
+        self.config = config  # the control panel's (main) configuration
+        self.root = config.bots_state_dir
+
+    # -- paths --
+
+    def state_dir(self, bot_id: int) -> Path:
+        return self.root / str(int(bot_id))
+
+    def workspace(self, bot_id: int) -> Path:
+        return self.config.bots_home / str(int(bot_id))
+
+    def settings_file(self, bot_id: int) -> Path:
+        return self.state_dir(bot_id) / "claude-settings.json"
+
+    # -- records --
+
+    def list(self) -> List[BotRecord]:
+        records: List[BotRecord] = []
+        if not self.root.is_dir():
+            return records
+        for path in self.root.glob("*/bot.json"):
+            record = self._read(path)
+            if record is not None:
+                records.append(record)
+        return sorted(records, key=lambda record: (record.created_at, record.bot_id))
+
+    def _read(self, path: Path) -> Optional[BotRecord]:
+        try:
+            return BotRecord.from_json(json.loads(path.read_text(encoding="utf-8")))
+        except (OSError, ValueError, TypeError):
+            return None
+
+    def get(self, bot_id: int) -> Optional[BotRecord]:
+        return self._read(self.state_dir(bot_id) / "bot.json")
+
+    def find(self, text: str) -> Optional[BotRecord]:
+        """A bot by @username, username, display name or id, ignoring case."""
+        wanted = text.strip().lstrip("@").lower()
+        if not wanted:
+            return None
+        records = self.list()
+        for record in records:
+            if wanted in (str(record.bot_id), record.username.lower()):
+                return record
+        named = [record for record in records if record.name.lower() == wanted]
+        return named[0] if len(named) == 1 else None
+
+    def save(self, record: BotRecord) -> None:
+        record.permissions = {k: v for k, v in record.permissions.items() if v != DEFAULT_PERMISSIONS.get(k)}
+        _private_dir(self.root)
+        write_private(self.state_dir(record.bot_id) / "bot.json", json.dumps(asdict(record), indent=2, sort_keys=True) + "\n")
+
+    def remove(self, bot_id: int) -> List[str]:
+        """Delete a bot's settings, sessions, token and its own directory. Returns what was removed."""
+        removed: List[str] = []
+        for path in (self.state_dir(bot_id), self.workspace(bot_id)):
+            if path.exists():
+                shutil.rmtree(path)
+                removed.append(str(path))
+        return removed
+
+    # -- tokens --
+
+    def token(self, bot_id: int) -> Optional[str]:
+        try:
+            token = (self.state_dir(bot_id) / "token").read_text(encoding="utf-8").strip()
+        except OSError:
+            return None
+        return token or None
+
+    def set_token(self, bot_id: int, token: str) -> None:
+        token = token.strip()
+        if not TOKEN_PATTERN.match(token):
+            raise BotError("Telegram returned something that does not look like a bot token")
+        if not token.startswith("%d:" % int(bot_id)):
+            raise BotError("the token belongs to another bot")
+        _private_dir(self.root)
+        write_private(self.state_dir(bot_id) / "token", token + "\n")
+
+    def delete_token(self, bot_id: int) -> None:
+        path = self.state_dir(bot_id) / "token"
+        if path.exists():
+            path.unlink()
+
+    # -- what a bot's agent runs with --
+
+    def overrides(self, bot_id: int) -> Dict[str, str]:
+        """A bot's settings and permissions as configuration names. Unset settings are left out, so .env applies."""
+        record = self.get(bot_id)
+        if record is None:
+            return {}
+        settings = record.settings
+        backend = settings.get("backend") or self.config.default_backend
+        prefix = "ALFRED_CODEX" if backend == "codex" else "ALFRED_CLAUDE"
+        mode = record.permission("mode")
+        if mode == "bypassPermissions":
+            codex_sandbox = "danger-full-access"
+        elif record.permission("shell") == "full" or record.allows("edit"):
+            codex_sandbox = "workspace-write"
+        else:
+            codex_sandbox = "read-only"
+        return {
+            "ALFRED_BACKEND": settings.get("backend", ""),
+            prefix + "_MODEL": settings.get("model", ""),
+            prefix + "_EFFORT": settings.get("effort", ""),
+            "ALFRED_CLAUDE_PERMISSION_MODE": mode,
+            "ALFRED_CODEX_SANDBOX": codex_sandbox,
+            "ALFRED_BROWSER": "" if record.allows("browser") else "none",
+            "ALFRED_WORKDIR": settings.get("workdir", ""),
+            "ALFRED_ADD_DIRS": os.pathsep.join(str(path) for path in record.working_dirs()),
+            "ALFRED_CLAUDE_SETTINGS": str(self.settings_file(bot_id)),
+        }
+
+    def config_for(self, bot_id: int) -> Config:
+        """The configuration a bot's agent runs with: Alfred's, with the bot's own directory and settings."""
+        bot_id = int(bot_id)
+        return Config(
+            home=self.config.home,
+            env_files=self.config.env_files,
+            environ=self.config.environ,
+            bot_id=bot_id,
+            workspace_dir=self.workspace(bot_id),
+            overrides=lambda: self.overrides(bot_id),
+        )
+
+    # -- creation links waiting for the user --
+
+    def _pending_path(self) -> Path:
+        return self.root / "pending.json"
+
+    def _pending(self) -> List[Pending]:
+        try:
+            items = json.loads(self._pending_path().read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return []
+        fresh = []
+        for item in items if isinstance(items, list) else []:
+            try:
+                pending = Pending(**item)
+            except TypeError:
+                continue
+            if time.time() - pending.created < PENDING_SECONDS:
+                fresh.append(pending)
+        return fresh
+
+    def _save_pending(self, items: List[Pending]) -> None:
+        _private_dir(self.root)
+        write_private(self._pending_path(), json.dumps([asdict(item) for item in items], indent=2) + "\n")
+
+    def add_pending(
+        self, owner_id: int, chat_id: int, name: str, username: str, settings: Dict[str, str],
+        permissions: Optional[Dict[str, str]] = None,
+    ) -> Pending:
+        pending = Pending(int(owner_id), int(chat_id), name, username, dict(settings), time.time(), dict(permissions or {}))
+        self._save_pending([item for item in self._pending() if item.username.lower() != username.lower()] + [pending])
+        return pending
+
+    def take_pending(self, owner_id: int, username: str) -> Optional[Pending]:
+        """The request a new bot answers: the same username, or else the owner's latest (names can be edited)."""
+        items = self._pending()
+        mine = [item for item in items if item.owner_id == int(owner_id)]
+        match = next((item for item in mine if item.username.lower() == username.lower()), None)
+        if match is None and mine:
+            match = mine[-1]
+        if match is not None:
+            self._save_pending([item for item in items if item is not match])
+        return match
+
+
+# -- settings and permissions -------------------------------------------------
+
+
+def _check_directory(config: Config, value: str, what: str) -> str:
+    path = Path(value.strip()).expanduser()
+    if not path.is_absolute():
+        raise BotError("give %s as an absolute path, for example ~/projects/site" % what)
+    path = path.resolve()
+    if not path.is_dir():
+        raise BotError("%s is not a directory" % path)
+    for private in (config.home.resolve(), config.bots_home.resolve()):
+        if path == private or private in path.parents or path in private.parents:
+            raise BotError("%s cannot include %s, which holds Alfred's and the bots' own state" % (what, private))
+    return str(path)
+
+
+def clean_setting(config: Config, name: str, value: str) -> str:
+    """Check one `/bot set` value. Returns what to store; an empty string clears the setting."""
+    name = name.strip().lower()
+    value = value.strip()
+    if name not in SETTING_NAMES:
+        hint = " (that is a permission: use /bot perm)" if name in PERMISSION_NAMES else ""
+        raise BotError("unknown setting %r%s; one of: %s" % (name, hint, ", ".join(SETTING_NAMES)))
+    if value.lower() in CLEAR_WORDS:
+        return ""
+    if not value:
+        raise BotError("give a value for %s, or `default` to clear it" % name)
+    if name == "task":
+        if len(value) > 4000:
+            raise BotError("the task is too long (at most 4000 characters)")
+        return value
+    if name == "model":
+        if not re.match(r"^[A-Za-z0-9._:\[\]/-]{1,100}$", value):
+            raise BotError("that does not look like a model name")
+        return value
+    if name == "effort":
+        if value.lower() not in CLAUDE_EFFORTS:
+            raise BotError("effort is one of: %s" % ", ".join(CLAUDE_EFFORTS))
+        return value.lower()
+    if name == "backend":
+        if value.lower() not in BACKEND_NAMES:
+            raise BotError("backend is one of: %s" % ", ".join(BACKEND_NAMES))
+        return value.lower()
+    return _check_directory(config, value, "the working directory")
+
+
+def clean_permission(config: Config, name: str, value: str) -> str:
+    """Check one `/bot perm` value. Returns what to store; `default` gives back the default."""
+    name = name.strip().lower()
+    value = value.strip()
+    if name not in PERMISSION_NAMES:
+        hint = " (that is a setting: use /bot set)" if name in SETTING_NAMES else ""
+        raise BotError("unknown permission %r%s; one of: %s" % (name, hint, ", ".join(PERMISSION_NAMES)))
+    if value.lower() in CLEAR_WORDS:
+        return DEFAULT_PERMISSIONS[name]
+    if name == "mode":
+        match = next((mode for mode in PERMISSION_MODES if mode.lower() == value.lower()), None)
+        if match is None:
+            raise BotError("mode is one of: %s" % ", ".join(PERMISSION_MODES))
+        return match
+    if name == "shell":
+        if value.lower() not in ("alfred", "full"):
+            raise BotError("shell is alfred (only the alfred command) or full (any command)")
+        return value.lower()
+    if name in SWITCHES:
+        if value.lower() in ON_WORDS:
+            return "on"
+        if value.lower() in OFF_WORDS:
+            return "off"
+        raise BotError("%s is on or off" % name)
+    if name == "folders":
+        return ",".join(_check_directory(config, part, "a folder") for part in value.split(",") if part.strip())
+    rules = [rule.strip() for rule in value.split(";") if rule.strip()]
+    for rule in rules:
+        if not re.match(r"^[A-Za-z_*][\w*-]*(\(.*\))?$", rule):
+            raise BotError("%r is not a Claude Code permission rule, such as Bash(git status) or mcp__github__*" % rule)
+    return ";".join(rules)
+
+
+def _is_option(word: str) -> bool:
+    if word[:1] in "+-" and len(word) > 1 and word[1:].isalpha():
+        return True
+    return "=" in word and word.split("=", 1)[0].lower() in SETTING_NAMES + PERMISSION_NAMES
+
+
+def split_options(text: str) -> Tuple[List[str], str]:
+    """Options at the start of a text, and the rest with its line breaks: `+web model=sonnet Do X` -> ([...], "Do X")."""
+    words: List[str] = []
+    rest = text.strip()
+    while rest:
+        match = re.match(r"(\S+)\s*(.*)\Z", rest, re.S)
+        if match is None or not _is_option(match.group(1)):
+            break
+        words.append(match.group(1))
+        rest = match.group(2)
+    return words, rest
+
+
+def parse_options(config: Config, words: List[str]) -> Tuple[Dict[str, str], Dict[str, str], List[str]]:
+    """`+web -schedule model=sonnet folders=~/a ...` at the start of /bot new: (settings, permissions, rest)."""
+    settings: Dict[str, str] = {}
+    permissions: Dict[str, str] = {}
+    index = 0
+    for index, word in enumerate(words):
+        if word[:1] in "+-" and len(word) > 1:
+            name, on = word[1:].lower(), word[0] == "+"
+            if name in SHORTHANDS:
+                key, value = SHORTHANDS[name]
+                permissions[key] = value if on else DEFAULT_PERMISSIONS[key]
+            elif name == "shell":
+                permissions["shell"] = "full" if on else "alfred"
+            elif name in SWITCHES:
+                permissions[name] = "on" if on else "off"
+            else:
+                raise BotError("unknown option %s; use one of: %s" % (word, ", ".join(
+                    "+%s" % name for name in ("shell",) + SWITCHES + tuple(SHORTHANDS))))
+        elif "=" in word and word.split("=", 1)[0].lower() in SETTING_NAMES + PERMISSION_NAMES:
+            key, value = word.split("=", 1)
+            key = key.lower()
+            if key in SETTING_NAMES:
+                settings[key] = clean_setting(config, key, value)
+            else:
+                permissions[key] = clean_permission(config, key, value)
+        else:
+            return settings, permissions, words[index:]
+    return settings, permissions, []
+
+
+def describe(record: BotRecord, running: Optional[bool] = None) -> str:
+    """A few lines for /bot show."""
+    state = "on" if record.enabled else "paused"
+    if running is not None and record.enabled and not running:
+        state = "on, but not connected"
+    lines = ["%s (%s), %s" % (record.name, record.handle, state), "", "Settings:"]
+    for name, _ in SETTINGS:
+        value = record.settings.get(name)
+        lines.append("  %s: %s" % (name, value or ("(none yet)" if name == "task" else "default")))
+    lines += ["", "Permissions:"]
+    for name, default, _ in PERMISSIONS:
+        value = record.permission(name)
+        if name in ("folders", "allow", "deny") and not value:
+            value = "none"
+        lines.append("  %s: %s%s" % (name, value, "" if value == default or (not default and value == "none") else " (changed)"))
+    return "\n".join(lines)
+
+
+def permission_summary(record: BotRecord, for_owner: bool = False) -> str:
+    """What the bot may do, in plain words: for its manual (to the bot), or for the owner (about the bot)."""
+    can = ["read and write files in %s own directory" % ("its" if for_owner else "your")]
+    cannot = []
+    dirs = record.working_dirs()
+    if dirs:
+        can.append(("read and edit" if record.allows("edit") else "read") + " files in " + ", ".join("`%s`" % d for d in dirs))
+    if record.permission("shell") == "full":
+        can.append("run shell commands" + (" (inside Claude Code's sandbox)" if record.allows("sandbox") else " (no sandbox)"))
+    else:
+        cannot.append("run shell commands other than `alfred`")
+    for name, phrase in (("web", "search and fetch web pages"), ("browser", "use the browser"),
+                         ("mcp", "use MCP tools"), ("schedule", "schedule reminders and tasks"),
+                         ("contact", "message chats other than %s owner's" % ("its" if for_owner else "your")),
+                         ("bots", "list, configure and request bots")):
+        (can if record.allows(name) else cannot).append(phrase)
+    subject = "It" if for_owner else "You"
+    text = "%s can %s." % (subject, "; ".join(can))
+    if cannot:
+        text += " %s cannot %s." % (subject, "; ".join(cannot))
+        if not for_owner:
+            text += " Those tools are switched off for you, so do not try them; if the task needs one, tell the " \
+                    "user, who can grant it from Alfred's control panel."
+    text += " Permission mode: %s." % record.permission("mode")
+    return text
+
+
+def claude_settings(config: Config, record: BotRecord) -> Dict[str, Any]:
+    """A bot's permissions as Claude Code settings. `config` is the bot's own configuration.
+
+    Everything here is enforced by Claude Code itself (deny rules hold in every mode, even
+    bypassPermissions); what it can't cover, the manual and the `alfred` command say.
+    """
+    def absolute(path: Path) -> str:  # Claude Code's rule syntax for an absolute path is //path
+        return "//" + str(path).lstrip("/")
+
+    workspace = config.workspace
+    shell_full = record.permission("shell") == "full"
+    allow = ["Skill", "Read", "Glob", "Grep", "TodoWrite", "Agent", "Edit(%s/**)" % absolute(workspace)]
+    deny = list(ALWAYS_DENIED)
+    # Alfred's home holds .env and every bot's token; the bot's manual and settings are rewritten by Alfred.
+    deny.append("Read(%s/**)" % absolute(config.home))
+    deny += ["Read(%s)" % absolute(path) for path in config.env_files]
+    deny += ["Edit(%s)" % absolute(workspace / name) for name in ("CLAUDE.md", "AGENTS.md", ".claude/settings.json", ".claude/settings.local.json")]
+    allow.append("Bash" if shell_full else "Bash(alfred *)")
+    if not record.allows("schedule"):
+        deny.append("Bash(alfred schedule *)")
+    if not record.allows("bots"):
+        deny.append("Bash(alfred bots *)")
+    if record.allows("web"):
+        allow += ["WebFetch", "WebFetch(domain:*)", "WebSearch"]  # the domain form also opens the sandbox's network
+    else:
+        deny += ["WebFetch", "WebSearch"]
+    if record.allows("browser"):
+        allow += list(BROWSER_RULES)
+    else:
+        deny += list(BROWSER_RULES)
+    if not record.allows("mcp"):
+        if record.allows("browser"):
+            pass  # Claude in Chrome is an MCP server; a blanket deny would remove it too
+        else:
+            deny.append("mcp__*")
+    if record.allows("edit"):
+        allow += ["Edit(%s/**)" % absolute(path) for path in record.working_dirs()]
+    allow += [rule for rule in record.permission("allow").split(";") if rule]
+    deny += [rule for rule in record.permission("deny").split(";") if rule]
+
+    settings: Dict[str, Any] = {
+        "permissions": {
+            "defaultMode": record.permission("mode"),
+            "allow": allow,
+            "deny": deny,
+            "additionalDirectories": [str(path) for path in record.working_dirs()],
+            # The file tools refuse anything outside its own directory and the ones above, in every mode.
+            "blockReadsOutsideWorkingDirectories": True,
+            "blockWritesOutsideWorkingDirectories": True,
+            # Nobody is there to answer a prompt: anything that would ask is denied.
+            "denyInsteadOfPrompting": True,
+        },
+    }
+    if shell_full and record.allows("sandbox"):
+        others = [str(config.bots_home / str(other.bot_id)) for other in BotRegistry(config).list() if other.bot_id != record.bot_id]
+        settings["sandbox"] = {
+            "enabled": True,
+            "allowUnsandboxedCommands": False,
+            "failIfUnavailable": True,
+            "excludedCommands": [command for command in UNSANDBOXED_ALFRED if record.allows("bots") or "bots" not in command],
+            "filesystem": {"denyRead": [str(config.home)] + [str(path) for path in config.env_files] + others},
+        }
+    return settings
+
+
+# -- the bot's own directory --------------------------------------------------
+
+
+def render_manual(config: Config, record: BotRecord) -> str:
+    workdir = record.settings.get("workdir")
+    if workdir:
+        workdir_section = (
+            "## Where you work\n\n"
+            "Your working directory for this task is `%s`. Do the work there and use absolute paths. Its own "
+            "CLAUDE.md, if it has one, is loaded as project instructions. Your memory, tools and inbox stay in "
+            "this directory.\n\n" % workdir
+        )
+    else:
+        workdir_section = ""
+    return Template((TEMPLATES / "BOT.md").read_text(encoding="utf-8")).safe_substitute(
+        name=record.name,
+        username=record.handle,
+        task=record.settings.get("task") or "No task has been set yet. Help the user with what they ask, and suggest they set one from Alfred's control panel (/bot set).",
+        workdir_section=workdir_section,
+        permissions=permission_summary(record),
+        alfred_home=str(config.home),
+    )
+
+
+def prepare_workspace(config: Config) -> Path:
+    """Create or refresh a bot's own directory and its permission settings. Safe to call before every message."""
+    registry = BotRegistry(config)
+    record = registry.get(config.bot_id)
+    if record is None:
+        raise BotError("bot %s is not registered" % config.bot_id)
+    folder = config.workspace
+    for directory in (folder, config.memory_dir, config.inbox_dir, folder / "outbox", config.skills_dir, config.extensions_dir):
+        directory.mkdir(parents=True, exist_ok=True)
+    manual = render_manual(config, record)
+    home._write_if_changed(folder / "CLAUDE.md", manual)
+    # Codex reads AGENTS.md and does not follow @imports, so it is told to open the index itself.
+    home._write_if_changed(
+        folder / "AGENTS.md",
+        manual.replace("@memory/MEMORY.md", "Read memory/MEMORY.md at the start of every conversation."),
+    )
+    settings_text = json.dumps(claude_settings(config, record), indent=2, sort_keys=True) + "\n"
+    settings_path = registry.settings_file(record.bot_id)
+    try:
+        current = settings_path.read_text(encoding="utf-8")
+    except OSError:
+        current = ""
+    if current != settings_text:
+        write_private(settings_path, settings_text)
+    if not config.memory_index.exists():
+        shutil.copyfile(TEMPLATES / "MEMORY.md", config.memory_index)
+    if not (folder / ".gitignore").exists():
+        shutil.copyfile(TEMPLATES / "gitignore", folder / ".gitignore")
+    if config.autosave and shutil.which("git") and not (folder / ".git").exists():
+        home._git(folder, "init", "-q")
+        home.autosave(config, "%s: created" % record.handle)
+    return folder
+
+
+def path_is_allowed(config: Config, record: BotRecord, path: Path) -> bool:
+    """For `alfred send --file`: the file must be in one of the bot's directories."""
+    try:
+        resolved = path.expanduser().resolve()
+    except OSError:
+        return False
+    roots = [config.workspace.resolve()] + [directory.resolve() for directory in record.working_dirs()]
+    return any(resolved == root or root in resolved.parents for root in roots)
+
+
+# -- talking to Telegram as the manager ---------------------------------------
+
+
+def suggest_username(name: str) -> str:
+    """A bot username from a display name: letters, digits and underscores, 5 to 32 characters, ending in bot."""
+    slug = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_") or "agent"
+    if not slug[0].isalpha():
+        slug = "a_" + slug
+    slug = slug[:28].rstrip("_")
+    if slug.endswith("bot"):
+        slug = slug[: -len("bot")].rstrip("_") or "agent"
+    username = "%s_bot" % slug
+    return username if len(username) >= 5 else "%s_agent_bot" % slug
+
+
+def creation_link(manager_username: str, username: str, name: str) -> str:
+    """The link that opens Telegram's "create a bot managed by <manager>" window, pre-filled."""
+    link = "https://t.me/newbot/%s/%s" % (manager_username.lstrip("@"), username)
+    return link + ("?name=%s" % quote_plus(name) if name else "")
+
+
+def can_manage_bots(user: Any) -> Optional[bool]:
+    """`User.can_manage_bots` from getMe, also on python-telegram-bot versions that do not know the field."""
+    value = getattr(user, "can_manage_bots", None)
+    if value is None:
+        value = (getattr(user, "api_kwargs", None) or {}).get("can_manage_bots")
+    return None if value is None else bool(value)
+
+
+def _as_dict(value: Any) -> Dict[str, Any]:
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return value
+    to_dict = getattr(value, "to_dict", None)
+    return to_dict() if callable(to_dict) else {}
+
+
+def managed_bot_payload(update: Any) -> Optional[Tuple[Dict[str, Any], Dict[str, Any]]]:
+    """(creator, bot) from a `managed_bot` update, or None for any other update."""
+    payload = _as_dict(getattr(update, "managed_bot", None)) or _as_dict(
+        (getattr(update, "api_kwargs", None) or {}).get("managed_bot")
+    )
+    user, bot = _as_dict(payload.get("user")), _as_dict(payload.get("bot"))
+    if not user.get("id") or not bot.get("id"):
+        return None
+    return user, bot
+
+
+async def fetch_token(manager: Any, bot_id: int) -> str:
+    token = await manager.do_api_request("getManagedBotToken", api_kwargs={"user_id": int(bot_id)})
+    if not isinstance(token, str) or not TOKEN_PATTERN.match(token.strip()):
+        raise BotError("Telegram did not return a token for bot %s" % bot_id)
+    return token.strip()
+
+
+async def revoke_token(manager: Any, bot_id: int) -> None:
+    """Make the current token useless. The new one Telegram returns is dropped: nobody holds it."""
+    await manager.do_api_request("replaceManagedBotToken", api_kwargs={"user_id": int(bot_id)})
+
+
+async def restrict_access(manager: Any, bot_id: int) -> None:
+    """Only the bot's owner can use it. Alfred's own allow-list is checked as well."""
+    await manager.do_api_request(
+        "setManagedBotAccessSettings", api_kwargs={"user_id": int(bot_id), "is_access_restricted": True}
+    )
