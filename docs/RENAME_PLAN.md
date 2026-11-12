@@ -1,6 +1,7 @@
 # Plan de cambio de nombre: Alfred → Consiglieri
 
-Estado: **fase 0 (análisis) cerrada; fase 1 en curso** en la rama `PabloMoralesEscandon/rename`.
+Estado: **fases 0 (análisis) y 1 (nombre visible) hechas** en la rama `PabloMoralesEscandon/rename`,
+sin fusionar ni publicar. Las fases 2 a 5 esperan la confirmación del usuario.
 Fecha del análisis: 2026-11-12, sobre el commit `2fd0e0a`.
 
 ## Decisión
@@ -160,6 +161,21 @@ copia del plist).
   personaje y los nombres técnicos); `scripts/check_old_name.sh` para ver el recuento.
 - **Reversión**: `git revert` de los commits de la fase. Al usuario le llega cuando se fusione en
   `refactor` y se reinicie el servicio.
+- **Hecho** (seis commits, uno por tipo de cambio): textos al usuario (panel, `/help` de los bots,
+  ayuda y errores del CLI, resúmenes de permisos, avisos de memoria compartida y del monitor de uso);
+  plantillas del repo (`CLAUDE.md`, `AGENTS.md`, `BOT.md`) y plugin base (`displayName`,
+  `description`, `author`, skill `extensions`); comentarios y docstrings; README, `.env.example` y
+  `description` de `pyproject.toml`; documentos de diseño; notas de investigación (commit aparte,
+  ver decisión abierta 4). La palabra `Alfred` pasa de 321 líneas a 34, todas el agente principal,
+  el ejemplo de perfil de Chrome, la identidad git del home o la historia («the first version of
+  Alfred»). `scripts/check_old_name.sh` baja de 1.083 a 836 líneas: lo que queda es comando,
+  variables, rutas, paquete y skills, de las fases 2 a 4. Los 289 tests pasan, con el paquete
+  importado desde este worktree.
+- **Sin tocar, a propósito**: `SOUL.md` de la plantilla («Your name is Alfred.»), el título
+  «Alfred: operating manual» de `CLAUDE.md`, «I'm Alfred» de `/start`, el nombre «Alfred» del
+  agente principal en las listas de otros agentes y en `alfred chat`, el perfil de Chrome de ejemplo,
+  `user.name=Alfred` de los autoguardados, los fixtures `AlfredPanelBot` de los tests, y todo lo que
+  es código: `alfred`, `ALFRED_*`, `~/.alfred*`, `$alfred_home`, `alfred:<skill>`, servicio.
 
 ### Fase 2: paquete y comando, con `alfred` como alias
 
@@ -295,6 +311,12 @@ copia del plist).
 5. ¿La identidad git de los autoguardados del home pasa a `Consiglieri <consiglieri@localhost>`?
    Propuesta: sí, en la fase 4.
 6. ¿Instancia de pruebas `~/.alfred-test*`: migrar o borrar?
+7. Cómo se presenta un bot: la fase 1 usa el plural como nombre común en su manual («one of the
+   user's Consiglieri: a Telegram bot created for one job») y «a Consiglieri bot» en su `/help`.
+   ¿Se queda así o se prefiere otra fórmula?
+8. En los avisos de permisos («read the memory of the other bots and of Alfred») el agente principal
+   aparece como «Alfred». Si el usuario no asocia ese nombre al agente principal, cambiar a «the
+   main agent (Alfred)».
 
 ## Anexo: `scripts/check_old_name.sh`
 
@@ -309,7 +331,7 @@ scripts/check_old_name.sh -n consigliere  # comprobar otro nombre (p. ej. una er
 
 Una línea con el marcador `rename-compat` (en un comentario) se da por intencionada: un alias, la
 lectura de la variable vieja, la migración. Un fichero `.rename-allow` en la raíz excluye ficheros
-enteros, un patrón por línea. Sale con 1 mientras quede algo, así que sirve como comprobación final
+enteros, un patrón por línea (ahora mismo solo este plan). Sale con 1 mientras quede algo, así que sirve como comprobación final
 de la fase 4. Salida en la fase 0: 1.083 líneas (405 de documentación, 287 de código, 277 de tests,
 42 de configuración, 41 del plugin, 31 de plantillas), 45 nombres `ALFRED_*`, y en la máquina
 `~/.alfred`, el plist `com.alfred.bot` cargado y cuatro proyectos de Claude Code con la ruta vieja.
