@@ -107,7 +107,7 @@ def own_chat_only(record, chat_id: int) -> None:
 
 def describe(item: Dict[str, Any]) -> Dict[str, Any]:
     due = parse_time(item["due_at_utc"])
-    return {
+    described = {
         "id": item["id"],
         "kind": item["kind"],
         "text": item["message"],
@@ -117,6 +117,78 @@ def describe(item: Dict[str, Any]) -> Dict[str, Any]:
         "repeat_seconds": item["repeat_seconds"],
         "last_error": item["last_error"],
     }
+    if item.get("gate"):
+        from .usage_gate import Gate, GateError
+
+        try:
+            described["usage"] = Gate.from_text(item["gate"]).describe()
+        except GateError as exc:
+            described["usage"] = {"error": str(exc)}
+        described["skips"] = item.get("skips") or 0
+        described["last_skip"] = item.get("last_skip")
+    return described
+
+
+def schedule_gate(config: Config, record, args: argparse.Namespace) -> Optional[str]:
+    """The usage condition of `schedule add`, stored as text; None without one. Needs the usage permission."""
+    from . import usage_gate, usage_monitor
+
+    asked = [name for name in ("skip_if_low", "skip_if", "only_if") if getattr(args, name, None)]
+    if args.only_if_waste:
+        asked.append("only_if_waste")
+    if not asked:
+        for flag, value in (("--threshold", args.threshold), ("--margin", args.margin), ("--if-unread", args.if_unread),
+                            ("--hours", args.hours), ("--days", args.days), ("--tz", args.tz)):
+            if value is not None and value is not False:
+                raise CommandError("%s goes with a usage condition: --skip-if-low, --skip-if, --only-if or "
+                                   "--only-if-waste" % flag)
+        if args.projected:
+            raise CommandError("--projected goes with --skip-if-low")
+        return None
+    if record is not None:
+        require(record, "usage")
+    if args.skip_if_low and args.skip_if:
+        raise CommandError("give one of --skip-if-low or --skip-if (--skip-if can say both: 'a or b')")
+    if args.only_if_waste and args.only_if:
+        raise CommandError("give one of --only-if-waste or --only-if")
+    if (args.threshold is not None or args.projected) and not args.skip_if_low:
+        raise CommandError("--threshold and --projected go with --skip-if-low")
+    if args.margin is not None and not args.only_if_waste:
+        raise CommandError("--margin goes with --only-if-waste")
+    labels = []
+    skip_if = args.skip_if or ""
+    if args.skip_if_low:
+        threshold = args.threshold
+        if threshold is None:
+            threshold = usage_monitor.MonitorSettings.from_config(config).low_threshold
+        if not 0 < threshold <= 100:
+            raise CommandError("the threshold is a percentage between 1 and 100")
+        skip_if = running_low_condition(args.skip_if_low, threshold, args.projected)
+        labels.append("--skip-if-low %s" % args.skip_if_low)
+    only_if = args.only_if or ""
+    if args.only_if_waste:
+        only_if = WASTE_CONDITION % (args.margin or 0)
+        labels.append("--only-if-waste")
+    gate = usage_gate.Gate(skip_if=skip_if, only_if=only_if, hours=_hours_spec(args), if_unread=args.if_unread or "",
+                           label=" ".join(labels))
+    try:
+        return gate.validate().to_text()
+    except usage_gate.GateError as exc:
+        raise CommandError(str(exc)) from None
+
+
+def gate_note(text: str) -> str:
+    from .usage_gate import Gate
+
+    gate = Gate.from_text(text)
+    parts = []
+    if gate.skip_if:
+        parts.append("not delivered when %s" % gate.skip_if)
+    if gate.only_if:
+        parts.append("delivered only when %s" % gate.only_if)
+    return ("Checked just before each delivery: %s. A held-back delivery does not wake you and costs no usage; a "
+            "recurring item moves on to its next time, a one-off ends as skipped. If the usage can't be read, it is "
+            "%s." % ("; ".join(parts), "delivered" if gate.unread_policy == "run" else "skipped"))
 
 
 # -- agent-facing commands ---------------------------------------------------
@@ -139,6 +211,7 @@ def cmd_schedule_add(config: Config, args: argparse.Namespace) -> Dict[str, Any]
     bot_id = own_bot_only(config, record, args)
     chat_id = resolve_chat_id(args)
     own_chat_only(record, chat_id)
+    gate = schedule_gate(config, record, args)
     try:
         item = SchedulerStore(config.db_path).add(
             chat_id=chat_id,
@@ -150,10 +223,14 @@ def cmd_schedule_add(config: Config, args: argparse.Namespace) -> Dict[str, Any]
             username=os.environ.get("ALFRED_USERNAME", ""),
             bot_id=bot_id,
             thread_id=resolve_thread_id(args),
+            gate=gate,
         )
     except ValueError as exc:
         raise CommandError(str(exc)) from exc
-    return {"ok": True, "item": describe(item)}
+    payload = {"ok": True, "item": describe(item)}
+    if gate:
+        payload["usage_note"] = gate_note(gate)
+    return payload
 
 
 def cmd_schedule_list(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
@@ -1007,6 +1084,22 @@ def build_parser() -> argparse.ArgumentParser:
     add.add_argument("--every", metavar="DURATION", help="repeat interval such as 1d")
     add.add_argument("--message", help="text to deliver as-is")
     add.add_argument("--task", help="prompt for the agent to carry out at that time")
+    gate = add.add_argument_group("usage conditions (need the usage permission; checked before each delivery)")
+    gate.add_argument("--skip-if-low", nargs="?", const="any", choices=("any", "session", "week"),
+                      help="don't deliver it when a limit (the 5-hour window, the week, or any) is at the threshold")
+    gate.add_argument("--threshold", type=float, help="percent used for --skip-if-low (default ALFRED_USAGE_LOW_THRESHOLD, 90)")
+    gate.add_argument("--projected", action="store_true",
+                      help="--skip-if-low also when the recent pace would use that limit up before it resets")
+    gate.add_argument("--skip-if", metavar="CONDITION", help="don't deliver it when this usage condition holds")
+    gate.add_argument("--only-if", metavar="CONDITION", help="deliver it only when this usage condition holds")
+    gate.add_argument("--only-if-waste", action="store_true",
+                      help="deliver it only when weekly quota will be lost even using every window fully")
+    gate.add_argument("--margin", type=float, help="--only-if-waste: ignore losses under this many points")
+    gate.add_argument("--hours", help="active hours for the forecast values, such as 9-20")
+    gate.add_argument("--days", help="active days, such as mon-fri")
+    gate.add_argument("--tz", help="time zone of the active hours, such as Europe/Madrid")
+    gate.add_argument("--if-unread", choices=("run", "skip"),
+                      help="when the usage can't be read: deliver (default) or skip (default with --only-if)")
     add.set_defaults(json=cmd_schedule_add)
     listing = actions.add_parser("list")
     listing.add_argument("--chat-id", type=int)
