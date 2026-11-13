@@ -9,7 +9,7 @@ import sqlite3
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Set, Union
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple, Union
 
 log = logging.getLogger("alfred.scheduler")
 
@@ -18,6 +18,7 @@ STATUS_DELIVERING = "delivering"
 STATUS_SENT = "sent"
 STATUS_CANCELLED = "cancelled"
 STATUS_FAILED = "failed"
+STATUS_SKIPPED = "skipped"  # a one-off whose usage condition said not to deliver it
 
 KIND_MESSAGE = "message"
 KIND_TASK = "task"
@@ -28,6 +29,15 @@ DURATION_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400, "w": 604800}
 DURATION_PATTERN = re.compile(r"^\s*(\d+)\s*([smhdw])\s*$", re.IGNORECASE)
 
 Item = Dict[str, Any]
+
+
+class Skip(Exception):
+    """Raised by a delivery that must not happen this time (its usage condition says so). A recurring item
+    moves on to its next occurrence; a one-off ends as skipped. `reason` is kept on the item."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
 
 
 class Postpone(Exception):
@@ -116,6 +126,13 @@ class SchedulerStore:
             connection.execute("ALTER TABLE scheduled_messages ADD COLUMN bot_id INTEGER NOT NULL DEFAULT 0")
         if "thread_id" not in existing:
             connection.execute("ALTER TABLE scheduled_messages ADD COLUMN thread_id INTEGER")
+        # A usage condition checked before each delivery (JSON, see usage_gate), and the last time it held one back.
+        if "gate" not in existing:
+            connection.execute("ALTER TABLE scheduled_messages ADD COLUMN gate TEXT")
+        if "last_skip" not in existing:
+            connection.execute("ALTER TABLE scheduled_messages ADD COLUMN last_skip TEXT")
+        if "skips" not in existing:
+            connection.execute("ALTER TABLE scheduled_messages ADD COLUMN skips INTEGER NOT NULL DEFAULT 0")
         connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_scheduled_messages_due ON scheduled_messages(status, due_at_utc)"
         )
@@ -139,6 +156,7 @@ class SchedulerStore:
         username: str = "",
         bot_id: int = 0,
         thread_id: Optional[int] = None,
+        gate: Optional[str] = None,
     ) -> Item:
         if kind not in (KIND_MESSAGE, KIND_TASK, KIND_EVENT):
             raise ValueError("kind must be 'message', 'task' or 'event'")
@@ -153,12 +171,13 @@ class SchedulerStore:
                 """
                 INSERT INTO scheduled_messages (
                     id, chat_id, user_id, username, due_at_utc, message, source_request,
-                    status, created_at_utc, kind, repeat_seconds, bot_id, thread_id
-                ) VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?)
+                    status, created_at_utc, kind, repeat_seconds, bot_id, thread_id, gate
+                ) VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     item_id, chat_id, user_id, username, to_utc_text(due), text,
                     STATUS_SCHEDULED, to_utc_text(utc_now()), kind, repeat_seconds, bot_id, thread_id or None,
+                    gate or None,
                 ),
             )
         created = self.get(item_id)
@@ -265,14 +284,7 @@ class SchedulerStore:
         now = now or utc_now()
         error_text = error[:1000] if error else None
         delivered = None if error else to_utc_text(now)
-        if item["repeat_seconds"]:
-            step = timedelta(seconds=item["repeat_seconds"])
-            due = parse_time(item["due_at_utc"]) + step
-            if due <= now:  # skip occurrences missed while the bot was down
-                due += step * ((now - due) // step + 1)
-            status, due_text = STATUS_SCHEDULED, to_utc_text(due)
-        else:
-            status, due_text = (STATUS_FAILED if error else STATUS_SENT), item["due_at_utc"]
+        status, due_text = self._after(item, STATUS_FAILED if error else STATUS_SENT, now)
         with self._connect() as connection:
             connection.execute(
                 """
@@ -283,6 +295,32 @@ class SchedulerStore:
                 (status, due_text, error_text, delivered, item_id),
             )
         return self.get(item_id)
+
+    def skip(self, item_id: str, reason: str, *, now: Optional[datetime] = None) -> Optional[Item]:
+        """Hold back this delivery: a recurring item moves on to its next occurrence, a one-off ends as skipped."""
+        item = self.get(item_id)
+        if item is None or item["status"] != STATUS_DELIVERING:
+            return item
+        now = now or utc_now()
+        status, due_text = self._after(item, STATUS_SKIPPED, now)
+        note = ("%s %s" % (to_utc_text(now), reason))[:1000]
+        with self._connect() as connection:
+            connection.execute(
+                "UPDATE scheduled_messages SET status = ?, due_at_utc = ?, last_skip = ?, skips = skips + 1 WHERE id = ?",
+                (status, due_text, note, item_id),
+            )
+        return self.get(item_id)
+
+    @staticmethod
+    def _after(item: Item, final_status: str, now: datetime) -> Tuple[str, str]:
+        """Status and due time once an occurrence is over: the next one for a recurring item, else `final_status`."""
+        if item["repeat_seconds"]:
+            step = timedelta(seconds=item["repeat_seconds"])
+            due = parse_time(item["due_at_utc"]) + step
+            if due <= now:  # skip occurrences missed while the bot was down
+                due += step * ((now - due) // step + 1)
+            return STATUS_SCHEDULED, to_utc_text(due)
+        return final_status, item["due_at_utc"]
 
 
 async def run_scheduler(
@@ -303,6 +341,9 @@ async def run_scheduler(
             await deliver(item)
         except Postpone as wait:
             store.postpone(item["id"], wait.seconds)
+        except Skip as held:
+            log.info("held back %s: %s", item["id"], held.reason)
+            store.skip(item["id"], held.reason)
         except Exception as exc:  # delivery failures must not stop the loop
             log.exception("delivery of %s failed", item["id"])
             store.finish(item["id"], error=str(exc) or exc.__class__.__name__)
