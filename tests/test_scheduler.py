@@ -1,177 +1,161 @@
 from __future__ import annotations
 
 import asyncio
-import io
-import tempfile
+import sqlite3
 import unittest
-from contextlib import redirect_stdout
-from pathlib import Path
+from datetime import datetime, timedelta, timezone
 
-import support_telegram
+from alfred import scheduler
+from alfred.scheduler import SchedulerStore
+from fakes import Sandbox
 
-support_telegram.install()
-
-import scheduler_store
-import scheduler_tool
-import scheduler_worker
+T0 = datetime(2030, 1, 1, 9, 0, tzinfo=timezone.utc)
 
 
-TEST_USERNAME = "allowed_user"
-
-
-class SchedulerStoreTests(unittest.TestCase):
+class SchedulerTests(unittest.TestCase):
     def setUp(self) -> None:
-        handle = tempfile.NamedTemporaryFile(suffix=".sqlite3", delete=False)
-        handle.close()
-        self.db_path = Path(handle.name)
-        self.addCleanup(self.db_path.unlink, missing_ok=True)
+        self.sandbox = Sandbox()
+        self.addCleanup(self.sandbox.cleanup)
+        self.store = SchedulerStore(self.sandbox.root / "state" / "scheduler.sqlite3")
 
-    def test_create_cancel_and_due_claim(self) -> None:
-        scheduled = scheduler_store.create_message(
-            chat_id=123,
-            user_id=456,
-            username=TEST_USERNAME,
-            due_at_utc="2020-01-01T00:00:00Z",
-            message="Call Sam",
-            source_request="Remind me",
-            db_path=self.db_path,
-        )
-        cancelled = scheduler_store.create_message(
-            chat_id=123,
-            user_id=456,
-            username=TEST_USERNAME,
-            due_at_utc="2020-01-01T00:00:01Z",
-            message="Ignore me",
-            source_request="Cancel this",
-            db_path=self.db_path,
-        )
-        scheduler_store.cancel_message(cancelled["id"], 123, db_path=self.db_path)
+    def test_parse_helpers(self) -> None:
+        self.assertEqual(scheduler.parse_duration("90s"), 90)
+        self.assertEqual(scheduler.parse_duration(" 2H "), 7200)
+        self.assertEqual(scheduler.parse_duration("1w"), 604800)
+        for bad in ("", "10", "m", "1.5h", "0m", "5 minutes"):
+            with self.assertRaises(ValueError, msg=bad):
+                scheduler.parse_duration(bad)
+        self.assertEqual(scheduler.to_utc_text("2030-01-01T10:00:00+01:00"), "2030-01-01T09:00:00Z")
+        self.assertEqual(scheduler.to_utc_text("2030-01-01T09:00:00Z"), "2030-01-01T09:00:00Z")
+        local = datetime(2030, 1, 1, 9, 0).astimezone()
+        self.assertEqual(scheduler.parse_time("2030-01-01T09:00"), local.astimezone(timezone.utc))
 
-        claimed = scheduler_store.claim_due_message(
-            "2020-01-01T00:01:00Z",
-            db_path=self.db_path,
-        )
+    def test_one_off_is_claimed_once_in_due_order_and_marked_sent(self) -> None:
+        later = self.store.add(chat_id=1, due=T0 + timedelta(minutes=5), text="later")
+        first = self.store.add(chat_id=1, due=T0, text="first")
+        self.assertIsNone(self.store.claim_due(T0 - timedelta(seconds=1)))
 
-        self.assertIsNotNone(claimed)
-        self.assertEqual(claimed["id"], scheduled["id"])
-        self.assertEqual(claimed["status"], scheduler_store.STATUS_DELIVERING)
+        claimed = self.store.claim_due(T0)
+        self.assertEqual(claimed["id"], first["id"])
+        self.assertEqual(claimed["status"], scheduler.STATUS_DELIVERING)
         self.assertEqual(claimed["attempts"], 1)
-        self.assertIsNone(
-            scheduler_store.claim_due_message("2020-01-01T00:01:00Z", db_path=self.db_path)
+        self.assertIsNone(self.store.claim_due(T0))
+
+        self.assertEqual(self.store.finish(first["id"], now=T0)["status"], scheduler.STATUS_SENT)
+        self.assertEqual([item["id"] for item in self.store.list(1)], [later["id"]])
+        self.assertEqual(len(self.store.list(1, include_done=True)), 2)
+
+    def test_failed_one_off_records_the_error(self) -> None:
+        item = self.store.add(chat_id=1, due=T0, text="x")
+        self.store.claim_due(T0)
+        failed = self.store.finish(item["id"], error="telegram down", now=T0)
+        self.assertEqual((failed["status"], failed["last_error"]), (scheduler.STATUS_FAILED, "telegram down"))
+
+    def test_recurring_item_is_rescheduled_and_skips_missed_runs(self) -> None:
+        item = self.store.add(chat_id=1, due=T0, text="standup", kind=scheduler.KIND_TASK, repeat_seconds=3600)
+        self.store.claim_due(T0)
+        again = self.store.finish(item["id"], now=T0 + timedelta(seconds=5))
+        self.assertEqual((again["status"], again["due_at_utc"]), (scheduler.STATUS_SCHEDULED, "2030-01-01T10:00:00Z"))
+
+        # The bot was down for a while: one catch-up run, then back on the grid, in the future.
+        much_later = T0 + timedelta(hours=5, minutes=30)
+        self.store.claim_due(much_later)
+        again = self.store.finish(item["id"], error="boom", now=much_later)
+        self.assertEqual(again["due_at_utc"], "2030-01-01T15:00:00Z")
+        self.assertEqual((again["status"], again["last_error"]), (scheduler.STATUS_SCHEDULED, "boom"))
+
+    def test_a_held_back_delivery_moves_a_recurring_item_on_and_ends_a_one_off_as_skipped(self) -> None:
+        daily = self.store.add(chat_id=1, due=T0, text="report", kind=scheduler.KIND_TASK, repeat_seconds=86400,
+                               gate='{"skip_if": "week.used >= 90"}')
+        self.assertEqual(daily["gate"], '{"skip_if": "week.used >= 90"}')
+        self.store.claim_due(T0)
+        held = self.store.skip(daily["id"], "week 92% used", now=T0 + timedelta(seconds=3))
+        self.assertEqual((held["status"], held["due_at_utc"]), (scheduler.STATUS_SCHEDULED, "2030-01-02T09:00:00Z"))
+        self.assertEqual((held["last_skip"], held["skips"], held["delivered_at_utc"]),
+                         ("2030-01-01T09:00:03Z week 92% used", 1, None))
+
+        once = self.store.add(chat_id=1, due=T0, text="reminder")
+        self.store.claim_due(T0)
+        held = self.store.skip(once["id"], "5-hour window 95% used", now=T0)
+        self.assertEqual((held["status"], held["skips"]), (scheduler.STATUS_SKIPPED, 1))
+        self.assertEqual(self.store.list(1), [self.store.get(daily["id"])])  # done items only with include_done
+        # Cancelled while its condition was being checked: it stays cancelled.
+        self.store.claim_due(T0 + timedelta(days=1))
+        self.store.cancel(daily["id"], chat_id=1)
+        self.assertEqual(self.store.skip(daily["id"], "x")["status"], scheduler.STATUS_CANCELLED)
+
+    def test_the_worker_records_a_skip_instead_of_a_failure(self) -> None:
+        item = self.store.add(chat_id=1, due=scheduler.utc_now() - timedelta(minutes=1), text="report")
+
+        async def deliver(item) -> None:
+            raise scheduler.Skip("week 92% used")
+
+        with self.assertLogs("alfred.scheduler", level="INFO"):
+            asyncio.run(scheduler.run_scheduler(self.store, deliver, once=True))
+        done = self.store.get(item["id"])
+        self.assertEqual((done["status"], done["last_error"]), (scheduler.STATUS_SKIPPED, None))
+        self.assertTrue(done["last_skip"].endswith(" week 92% used"))
+
+    def test_cancel_by_prefix_is_scoped_to_the_chat_and_sticks_during_delivery(self) -> None:
+        item = self.store.add(chat_id=1, due=T0, text="x", repeat_seconds=3600)
+        self.assertIsNone(self.store.cancel(item["id"], chat_id=2))
+        self.assertIsNone(self.store.cancel("", chat_id=1))
+        self.store.claim_due(T0)
+        self.assertEqual(self.store.cancel(item["id"][:8], chat_id=1)["status"], scheduler.STATUS_CANCELLED)
+        self.assertEqual(self.store.finish(item["id"], now=T0)["status"], scheduler.STATUS_CANCELLED)
+        self.assertIsNone(self.store.cancel(item["id"], chat_id=1))
+
+    def test_validation(self) -> None:
+        with self.assertRaises(ValueError):
+            self.store.add(chat_id=1, due=T0, text="   ")
+        with self.assertRaises(ValueError):
+            self.store.add(chat_id=1, due=T0, text="x", repeat_seconds=5)
+        with self.assertRaises(ValueError):
+            self.store.add(chat_id=1, due=T0, text="x", kind="email")
+
+    def test_database_from_the_first_version_is_migrated(self) -> None:
+        self.store.db_path.parent.mkdir(parents=True)
+        connection = sqlite3.connect(str(self.store.db_path))
+        connection.execute(
+            """CREATE TABLE scheduled_messages (id TEXT PRIMARY KEY, chat_id INTEGER NOT NULL, user_id INTEGER NOT NULL,
+               username TEXT NOT NULL, due_at_utc TEXT NOT NULL, message TEXT NOT NULL, source_request TEXT NOT NULL,
+               status TEXT NOT NULL, created_at_utc TEXT NOT NULL, delivered_at_utc TEXT,
+               attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT)"""
         )
-
-
-class SchedulerToolTests(unittest.TestCase):
-    def setUp(self) -> None:
-        handle = tempfile.NamedTemporaryFile(suffix=".sqlite3", delete=False)
-        handle.close()
-        self.db_path = Path(handle.name)
-        self.addCleanup(self.db_path.unlink, missing_ok=True)
-        self.tempdir = tempfile.TemporaryDirectory()
-        self.addCleanup(self.tempdir.cleanup)
-        self.original_env_path = scheduler_tool.ENV_PATH
-        scheduler_tool.ENV_PATH = Path(self.tempdir.name) / ".env"
-        scheduler_tool.ENV_PATH.write_text(
-            f"whitelisted@{TEST_USERNAME}\n",
-            encoding="utf-8",
+        connection.execute(
+            "INSERT INTO scheduled_messages VALUES ('old-1', 1, 2, 'u', '2030-01-01T09:00:00Z', 'Call Sam', 'req', "
+            "'scheduled', '2029-01-01T00:00:00Z', NULL, 0, NULL)"
         )
-        self.addCleanup(setattr, scheduler_tool, "ENV_PATH", self.original_env_path)
+        connection.commit()
+        connection.close()
 
-    def run_tool(self, *args: str) -> tuple[int, dict[str, object]]:
-        stream = io.StringIO()
-        with redirect_stdout(stream):
-            code = scheduler_tool.main(["--db-path", str(self.db_path), *args])
-        payload = scheduler_tool.json.loads(stream.getvalue())
-        return code, payload
+        claimed = self.store.claim_due(T0)
+        self.assertEqual((claimed["id"], claimed["kind"], claimed["repeat_seconds"]), ("old-1", "message", None))
+        self.assertEqual((claimed["gate"], claimed["last_skip"], claimed["skips"]), (None, None, 0))
 
-    def test_add_list_show_cancel(self) -> None:
-        code, added = self.run_tool(
-            "add",
-            "--chat-id",
-            "123",
-            "--user-id",
-            "456",
-            "--username",
-            TEST_USERNAME,
-            "--due",
-            "2099-01-01T00:00:00Z",
-            "--message",
-            "Call Sam",
-            "--source-request",
-            "Remind me to call Sam",
-        )
-        self.assertEqual(code, 0)
-        self.assertTrue(added["ok"])
+    def test_worker_delivers_due_items_survives_failures_and_requeues_interrupted_ones(self) -> None:
+        past = scheduler.utc_now() - timedelta(minutes=1)
+        good = self.store.add(chat_id=1, due=past, text="good")
+        bad = self.store.add(chat_id=1, due=past, text="bad")
+        future = self.store.add(chat_id=1, due=scheduler.utc_now() + timedelta(days=1), text="future")
+        interrupted = self.store.add(chat_id=1, due=past - timedelta(minutes=1), text="interrupted")
+        self.assertEqual(self.store.claim_due()["id"], interrupted["id"])  # a crash left it mid-delivery
 
-        code, listed = self.run_tool("list", "--chat-id", "123")
-        self.assertEqual(code, 0)
-        self.assertEqual(len(listed["items"]), 1)
+        delivered = []
 
-        message_id = str(added["id"])
-        code, shown = self.run_tool("show", "--id", message_id)
-        self.assertEqual(code, 0)
-        self.assertEqual(shown["item"]["id"], message_id)
+        async def deliver(item) -> None:
+            if item["message"] == "bad":
+                raise RuntimeError("nope")
+            delivered.append(item["message"])
 
-        code, cancelled = self.run_tool("cancel", "--id", message_id, "--chat-id", "123")
-        self.assertEqual(code, 0)
-        self.assertEqual(cancelled["item"]["status"], scheduler_store.STATUS_CANCELLED)
+        with self.assertLogs("alfred.scheduler", level="ERROR"):
+            asyncio.run(scheduler.run_scheduler(self.store, deliver, once=True))
 
-    def test_validation_errors_are_json(self) -> None:
-        code, payload = self.run_tool(
-            "add",
-            "--chat-id",
-            "123",
-            "--user-id",
-            "456",
-            "--username",
-            "someone_else",
-            "--due",
-            "2099-01-01T00:00:00Z",
-            "--message",
-            "Call Sam",
-            "--source-request",
-            "Remind me",
-        )
-
-        self.assertEqual(code, 1)
-        self.assertEqual(payload["ok"], False)
-        self.assertEqual(payload["error"], "username is not allowed")
-
-
-class SchedulerWorkerTests(unittest.TestCase):
-    def setUp(self) -> None:
-        handle = tempfile.NamedTemporaryFile(suffix=".sqlite3", delete=False)
-        handle.close()
-        self.db_path = Path(handle.name)
-        self.addCleanup(self.db_path.unlink, missing_ok=True)
-
-    def test_once_worker_marks_sent_with_mocked_delivery(self) -> None:
-        scheduler_store.create_message(
-            chat_id=123,
-            user_id=456,
-            username=TEST_USERNAME,
-            due_at_utc="2020-01-01T00:00:00Z",
-            message="Call Sam",
-            source_request="Remind me",
-            db_path=self.db_path,
-        )
-        delivered: list[tuple[int, str]] = []
-        original = scheduler_worker.bot.send_reminder
-
-        async def fake_send_reminder(chat_id: int, message: str) -> None:
-            delivered.append((chat_id, message))
-
-        scheduler_worker.bot.send_reminder = fake_send_reminder
-        self.addCleanup(setattr, scheduler_worker.bot, "send_reminder", original)
-
-        asyncio.run(
-            scheduler_worker.run_worker(db_path=self.db_path, once=True, poll_seconds=1)
-        )
-
-        rows = scheduler_store.list_messages(123, db_path=self.db_path)
-        self.assertEqual(delivered, [(123, "Call Sam")])
-        self.assertEqual(rows[0]["status"], scheduler_store.STATUS_SENT)
-        self.assertEqual(rows[0]["attempts"], 1)
+        self.assertEqual(sorted(delivered), ["good", "interrupted"])
+        self.assertEqual(self.store.get(good["id"])["status"], scheduler.STATUS_SENT)
+        self.assertEqual(self.store.get(bad["id"])["status"], scheduler.STATUS_FAILED)
+        self.assertEqual(self.store.get(bad["id"])["last_error"], "nope")
+        self.assertEqual(self.store.get(future["id"])["status"], scheduler.STATUS_SCHEDULED)
 
 
 if __name__ == "__main__":

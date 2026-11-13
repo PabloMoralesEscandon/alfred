@@ -1,0 +1,7 @@
+state/
+SHARED_MEMORY.md
+inbox/
+outbox/
+.env
+*.log
+__pycache__/
