@@ -1,6 +1,6 @@
 ---
 name: usage
-description: Ask whether the Claude plan limits allow work right now, and obey the answer. Use it when you wake up for a scheduled or non-urgent task (check running_low first), whenever your memory, SOUL or the user's instructions contain a rule about usage ("don't do this if the weekly limit is over 90%", "skip it when the 5-hour window is nearly used up"), and to get woken when weekly quota would otherwise go unused. Needs the usage permission.
+description: Ask whether the Claude plan limits allow work right now, and obey the answer. Use it when you schedule non-urgent work (put --skip-if-low on the item) or wake up for a scheduled or non-urgent task (check running_low first), whenever your memory, SOUL or the user's instructions contain a rule about usage ("don't do this if the weekly limit is over 90%", "skip it when the 5-hour window is nearly used up"), and to get woken when weekly quota would otherwise go unused. Needs the usage permission.
 ---
 
 # Plan usage: ask, get a verdict, obey it
@@ -55,9 +55,34 @@ Operators `< <= > >= = !=`, joined with `and`, `or`, `not` and parentheses. `--h
 `--days mon-fri` and `--tz Europe/Madrid` set the hours the user works, for the forecast values; without
 them the user's default applies (every hour, unless they set one).
 
+## Scheduling work that should wait for the limits
+
+When you schedule a non-urgent reminder or task, put the condition on the item itself. Just before each
+delivery the service asks the same question; if the item is held back you are not woken at all, so it
+costs no usage. A recurring item moves on to its next time; a one-off ends as `skipped`.
+
+```bash
+alfred schedule add --at 2026-06-08T17:00 --every 1d --task "Daily report" --skip-if-low             # 5-hour window or week at 90%
+alfred schedule add --in 2h --task "Re-index the notes" --skip-if-low week --threshold 80
+alfred schedule add --in 2h --task "..." --skip-if-low --projected                         # also at a pace that runs out
+alfred schedule add --in 1d --task "..." --skip-if 'week.left < 1d and week.used > 80'
+alfred schedule add --at 2026-06-08T18:00 --every 1d --task "Work on the backlog" --only-if-waste --hours 9-20 [--margin 5]
+alfred schedule add --in 1h --task "..." --only-if 'session.left < 1h and session.used < 30'
+```
+
+- `--skip-if` / `--skip-if-low`: not delivered when it holds. `--only-if` / `--only-if-waste`: delivered
+  only when it holds. You can give one of each; `--hours`, `--days`, `--tz` set the hours for the forecast.
+- If the usage can't be read at that moment, a `--skip-if` item is delivered and an `--only-if` item is
+  skipped; `--if-unread run|skip` chooses otherwise. Follow the user's rule ("if you can't check, don't"
+  is `--if-unread skip`).
+- `alfred schedule list` shows each item's condition, how many deliveries it held back and the last
+  reason. Tell the user about skips when they ask, or when a skipped task was one they were waiting for.
+- Turn a user rule into the item's condition the same way as below (the table), when you schedule it.
+
 ## When you wake up for a non-urgent task
 
-A scheduled task, a note to yourself, an event: before doing the work, ask.
+A scheduled task without a condition, a note to yourself, an event: before doing the work, ask. (A task
+with `--skip-if-low` was already checked just now: do it.)
 
 1. Run `alfred usage running_low`.
 2. `true`: do not do the task. End with one line that says why, using the reason, for example:

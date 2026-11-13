@@ -588,7 +588,7 @@ consumo a un bot, y las propuestas de cuota sobrante deben decir a qué bot va c
 7. ~~Skill base para agentes~~: hecha, `alfred:usage` (sección 14).
 8. **Más valores en las condiciones**: el semanal por modelo (`fable.used`, también en `running_low
    --limit any`) y si la ventana de 5 h está en marcha (`session.active`).
-9. **Puerta en el planificador** (`alfred schedule add ... --skip-if-low week:90`): ver la sección 14.
+9. ~~Puerta en el planificador~~: hecha, `alfred schedule add --skip-if-low` y compañía (sección 14).
 10. **Calibración con más historia**: el historial guarda 24 h, así que la proporción solo se mide con
     usos intensos de un día. Un acumulado persistente (puntos de ventana y de semanal por semana) la
     haría estable sin agrandar `usage.json`.
@@ -1104,20 +1104,41 @@ Pensado para consultarse a menudo (`read_on_demand` en `usage_monitor.py`):
    que haría por iniciativa propia. Motivo: un fallo de lectura no debe bloquear lo que el usuario pidió,
    y saltarse trabajo opcional cuesta poco.
 
-### Mejora futura: puerta en el planificador
+### Puerta en el planificador (`alfred schedule add --skip-if-low` y compañía)
 
-`alfred schedule add ... --skip-if-low week:90` (o `--skip-if '<condición>'`): que el panel evalúe la
-condición **antes** de despertar al bot y no gaste cuota en un despertar que va a decidir no hacer nada.
-No se ha hecho porque toca el núcleo compartido del planificador. Diseño propuesto:
+El servicio evalúa la condición **antes** de entregar el elemento, así que un elemento retenido no
+despierta al bot y no gasta cuota (la pregunta en la skill sí cuesta el despertar).
 
-- Una columna `gate` (texto de la condición) en `scheduled_messages`, con su migración como las de
-  `kind` y `bot_id`; `alfred schedule add --skip-if` la valida con `usage_alerts.parse` y exige el permiso
-  `usage`.
-- En `BotPool.deliver`, para `KIND_TASK` con `gate`: `read_on_demand` + `Evaluation`; si es cierto, no
-  despierta al bot y `finish()` sigue su curso (una tarea que se repite pasa a la siguiente vez, una
-  única queda como saltada con la razón). Si la lectura falla, despierta al bot (que aplicará la skill).
-- `read_on_demand` bloquea con `flock` mientras otro proceso lee `/usage`: en el bucle de asyncio del
-  pool habría que llamarlo en un hilo (`run_in_executor`) para no parar el panel.
+| Opción | Condición guardada |
+| --- | --- |
+| `--skip-if-low [any\|session\|week]` (`any` sin valor) | `running_low`: `session.used >= T or week.used >= T` |
+| `--threshold T` | el umbral de `--skip-if-low`; por defecto `ALFRED_USAGE_LOW_THRESHOLD` (90) **al crear** el elemento |
+| `--projected` | añade `<límite>.projected >= 100` a `--skip-if-low` |
+| `--skip-if CONDICIÓN` | no se entrega si se cumple |
+| `--only-if CONDICIÓN` | solo se entrega si se cumple |
+| `--only-if-waste [--margin N]` | `week.surplus >= N and week.used < 100` (lo mismo que `usage-alert waste`) |
+| `--hours`, `--days`, `--tz` | horario activo de los valores de previsión |
+| `--if-unread run\|skip` | si no se puede leer el uso; por defecto `run`, o `skip` si hay `--only-if` |
+
+- Se admite una condición de cada tipo (por ejemplo `--only-if-waste --skip-if-low session`). Vale para
+  mensajes fijos y para tareas: el usuario pidió que el aviso no se mande.
+- Datos: columnas `gate` (JSON de `usage_gate.Gate`), `last_skip` (hora y razón) y `skips` en
+  `scheduled_messages`, con migración. Estado nuevo `skipped` para un elemento único retenido; uno que se
+  repite pasa a su siguiente vez con la misma cuenta que `finish()` (`SchedulerStore._after`). El
+  planificador lo hace con la excepción `Skip`, como `Postpone`.
+- Comprobación: `BotPool._check_usage`, antes de `_deliver` y después de ver que el bot está conectado (un
+  bot pausado se aplaza sin leer nada). Llama a `usage_gate.check` en un hilo (`run_in_executor`), porque
+  `read_on_demand` espera con `flock` mientras otro proceso lee `/usage`. Usa la misma caché (lectura de
+  menos de 5 min, una lectura a la vez, 2 min tras un fallo), así que muchos elementos con condición no
+  multiplican las lecturas.
+- Permiso: `schedule add` con condición exige `usage` (el propio comando, y reglas de Claude Code
+  `Bash(alfred schedule * --skip-if*)` y `Bash(alfred schedule * --only-if*)` para un bot sin él). Si el
+  bot pierde el permiso después, el elemento se trata como «no se pudo leer» y sigue `--if-unread`. No
+  necesita `ALFRED_USAGE_MONITOR`, como las preguntas.
+- Elecciones: el umbral se fija al crear (lo que muestra `schedule list` es lo que se evalúa); un fallo
+  de lectura entrega por defecto (un recordatorio perdido es peor que uno de más), salvo con `--only-if`,
+  que existe para gastar cuota sobrante y no debe hacerlo a ciegas; un elemento único retenido no se
+  reintenta (no hay `--wait`: se puede añadir si hace falta esperar a que el límite se reinicie).
 
 ### Qué falta probar en vivo
 
@@ -1129,6 +1150,9 @@ No se ha hecho porque toca el núcleo compartido del planificador. Diseño propu
    los números.
 4. La proyección con lecturas reales espaciadas (el redondeo a enteros del servidor la hace ruidosa con
    ritmos bajos).
+5. La puerta del planificador en el servicio real: que `/usage` lanzado desde el hilo funciona bajo
+   launchd, que un elemento retenido no despierta al bot y aparece en `schedule list`, y que las reglas
+   `Bash(alfred schedule * --skip-if*)` deniegan de verdad la opción (el comando la rechaza igualmente).
 
 ## Fuentes
 
