@@ -122,8 +122,10 @@ ADMIN_WARNING = (
 )
 # The usage permission: the commands it opens, as deny rules when it is off and as sandbox exclusions when on
 # (they need Consiglieri's state and Claude Code's own login).
-USAGE_RULES = ("Bash(alfred usage)", "Bash(alfred usage *)", "Bash(alfred usage-alert)", "Bash(alfred usage-alert *)")
-USAGE_UNSANDBOXED = ("alfred usage", "alfred usage-alert *")
+USAGE_RULES = ("Bash(alfred usage)", "Bash(alfred usage *)", "Bash(alfred usage-alert)", "Bash(alfred usage-alert *)",
+               # usage conditions on scheduled items; `alfred schedule add` refuses them without the permission too
+               "Bash(alfred schedule * --skip-if*)", "Bash(alfred schedule * --only-if*)")
+USAGE_UNSANDBOXED = ("alfred usage", "alfred usage *", "alfred usage-alert *")  # usage * covers check, running_low, forecast
 
 # Cross-agent access: the level above full access. It is not a permission like the others (no preset,
 # switch, `/bot perm` value, `/bot new` option or `alfred` command reaches it); only the control panel
@@ -638,7 +640,9 @@ def permission_summary(record: BotRecord, for_owner: bool = False) -> str:
                          ("bots", "list, configure and request bots"),
                          ("admin", "create and set up bots for %s owner from a spec, up to these same permissions "
                                    "(the owner confirms each one)" % ("its" if for_owner else "your")),
-                         ("usage", "read the Claude plan usage and set usage alerts (`alfred usage`, `alfred usage-alert`)")):
+                         ("usage", "read the Claude plan usage and set usage alerts (`alfred usage check`, "
+                                   "`alfred usage running_low`, `alfred usage-alert`, and `alfred schedule add "
+                                   "--skip-if-low`; the alfred:usage skill)")):
         (can if record.allows(name) else cannot).append(phrase)
     can.append("read the shared memory every agent reads")
     (can if record.allows("shared") else cannot).append("write the shared memory")

@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Optional
 
 from . import __version__, home
 from .config import Config
-from .scheduler import KIND_EVENT, KIND_MESSAGE, KIND_TASK, SchedulerStore, parse_duration, parse_time, utc_now
+from .scheduler import KIND_EVENT, KIND_MESSAGE, KIND_TASK, SchedulerStore, parse_duration, parse_time, to_utc_text, utc_now
 
 LOCAL_CHAT_ID = 0
 
@@ -121,7 +121,7 @@ def own_chat_only(record, chat_id: int) -> None:
 
 def describe(item: Dict[str, Any]) -> Dict[str, Any]:
     due = parse_time(item["due_at_utc"])
-    return {
+    described = {
         "id": item["id"],
         "kind": item["kind"],
         "text": item["message"],
@@ -131,6 +131,78 @@ def describe(item: Dict[str, Any]) -> Dict[str, Any]:
         "repeat_seconds": item["repeat_seconds"],
         "last_error": item["last_error"],
     }
+    if item.get("gate"):
+        from .usage_gate import Gate, GateError
+
+        try:
+            described["usage"] = Gate.from_text(item["gate"]).describe()
+        except GateError as exc:
+            described["usage"] = {"error": str(exc)}
+        described["skips"] = item.get("skips") or 0
+        described["last_skip"] = item.get("last_skip")
+    return described
+
+
+def schedule_gate(config: Config, record, args: argparse.Namespace) -> Optional[str]:
+    """The usage condition of `schedule add`, stored as text; None without one. Needs the usage permission."""
+    from . import usage_gate, usage_monitor
+
+    asked = [name for name in ("skip_if_low", "skip_if", "only_if") if getattr(args, name, None)]
+    if args.only_if_waste:
+        asked.append("only_if_waste")
+    if not asked:
+        for flag, value in (("--threshold", args.threshold), ("--margin", args.margin), ("--if-unread", args.if_unread),
+                            ("--hours", args.hours), ("--days", args.days), ("--tz", args.tz)):
+            if value is not None and value is not False:
+                raise CommandError("%s goes with a usage condition: --skip-if-low, --skip-if, --only-if or "
+                                   "--only-if-waste" % flag)
+        if args.projected:
+            raise CommandError("--projected goes with --skip-if-low")
+        return None
+    if record is not None:
+        require(record, "usage")
+    if args.skip_if_low and args.skip_if:
+        raise CommandError("give one of --skip-if-low or --skip-if (--skip-if can say both: 'a or b')")
+    if args.only_if_waste and args.only_if:
+        raise CommandError("give one of --only-if-waste or --only-if")
+    if (args.threshold is not None or args.projected) and not args.skip_if_low:
+        raise CommandError("--threshold and --projected go with --skip-if-low")
+    if args.margin is not None and not args.only_if_waste:
+        raise CommandError("--margin goes with --only-if-waste")
+    labels = []
+    skip_if = args.skip_if or ""
+    if args.skip_if_low:
+        threshold = args.threshold
+        if threshold is None:
+            threshold = usage_monitor.MonitorSettings.from_config(config).low_threshold
+        if not 0 < threshold <= 100:
+            raise CommandError("the threshold is a percentage between 1 and 100")
+        skip_if = running_low_condition(args.skip_if_low, threshold, args.projected)
+        labels.append("--skip-if-low %s" % args.skip_if_low)
+    only_if = args.only_if or ""
+    if args.only_if_waste:
+        only_if = WASTE_CONDITION % (args.margin or 0)
+        labels.append("--only-if-waste")
+    gate = usage_gate.Gate(skip_if=skip_if, only_if=only_if, hours=_hours_spec(args), if_unread=args.if_unread or "",
+                           label=" ".join(labels))
+    try:
+        return gate.validate().to_text()
+    except usage_gate.GateError as exc:
+        raise CommandError(str(exc)) from None
+
+
+def gate_note(text: str) -> str:
+    from .usage_gate import Gate
+
+    gate = Gate.from_text(text)
+    parts = []
+    if gate.skip_if:
+        parts.append("not delivered when %s" % gate.skip_if)
+    if gate.only_if:
+        parts.append("delivered only when %s" % gate.only_if)
+    return ("Checked just before each delivery: %s. A held-back delivery does not wake you and costs no usage; a "
+            "recurring item moves on to its next time, a one-off ends as skipped. If the usage can't be read, it is "
+            "%s." % ("; ".join(parts), "delivered" if gate.unread_policy == "run" else "skipped"))
 
 
 # -- agent-facing commands ---------------------------------------------------
@@ -153,6 +225,7 @@ def cmd_schedule_add(config: Config, args: argparse.Namespace) -> Dict[str, Any]
     bot_id = own_bot_only(config, record, args)
     chat_id = resolve_chat_id(args)
     own_chat_only(record, chat_id)
+    gate = schedule_gate(config, record, args)
     try:
         item = SchedulerStore(config.db_path).add(
             chat_id=chat_id,
@@ -164,10 +237,14 @@ def cmd_schedule_add(config: Config, args: argparse.Namespace) -> Dict[str, Any]
             username=os.environ.get("ALFRED_USERNAME", ""),
             bot_id=bot_id,
             thread_id=resolve_thread_id(args),
+            gate=gate,
         )
     except ValueError as exc:
         raise CommandError(str(exc)) from exc
-    return {"ok": True, "item": describe(item)}
+    payload = {"ok": True, "item": describe(item)}
+    if gate:
+        payload["usage_note"] = gate_note(gate)
+    return payload
 
 
 def cmd_schedule_list(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
@@ -729,7 +806,19 @@ def usage_alert_bot(config: Config, args: argparse.Namespace, adding: bool = Fal
     return bot_id
 
 
-def cmd_usage_alert_add(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
+def _hours_spec(args: argparse.Namespace) -> str:
+    """The active hours from --hours, --days and --tz, normalized; empty when none was given."""
+    from . import usage_forecast
+
+    if not (getattr(args, "hours", None) or getattr(args, "days", None) or getattr(args, "tz", None)):
+        return ""
+    try:
+        return usage_forecast.parse_hours(args.hours, args.days, args.tz).spec()
+    except usage_forecast.HoursError as exc:
+        raise CommandError(str(exc)) from exc
+
+
+def _add_usage_alert(config: Config, args: argparse.Namespace, when: str, note: str) -> Dict[str, Any]:
     from . import usage_alerts, usage_monitor
 
     record = calling_bot(config)
@@ -738,24 +827,49 @@ def cmd_usage_alert_add(config: Config, args: argparse.Namespace) -> Dict[str, A
     own_chat_only(record, chat_id)
     try:
         alert = usage_alerts.AlertStore.for_bot(config, bot_id).add(
-            args.when,
-            note=" ".join(args.note).strip(),
+            when,
+            note=note,
             repeat=args.repeat,
             chat_id=chat_id,
             thread_id=resolve_thread_id(args),
             user_id=int(os.environ.get("ALFRED_USER_ID") or 0),
             username=os.environ.get("ALFRED_USERNAME", ""),
+            hours=_hours_spec(args),
         )
     except usage_alerts.ConditionError as exc:
         raise CommandError(str(exc)) from exc
     settings = usage_monitor.MonitorSettings.from_config(config)
-    return {
+    payload = {
         "ok": True,
         "alert": alert.describe(),
         "checked_every_minutes": settings.poll_seconds // 60,
         "cost": "checking is free; each wake-up is one turn of yours and uses plan usage, "
                 "at most one every %d minutes" % (settings.wake_interval_seconds // 60),
     }
+    if alert.condition.uses_forecast:
+        payload["active_hours"] = alert.hours or settings.active_hours.spec()
+        payload["fires"] = ("once per quota week, and again that week only if the loss grows by one window's share "
+                            "or ALFRED_USAGE_SURPLUS_STEP points; " + ("armed again every week" if alert.repeat
+                                                                       else "spent when that week resets"))
+    return payload
+
+
+def cmd_usage_alert_add(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
+    words = list(args.note)
+    when = args.when
+    if not when:
+        if not words:
+            raise CommandError("give a condition, such as: alfred usage-alert add 'week.surplus > 0' --hours 9-20")
+        when = words.pop(0)
+    return _add_usage_alert(config, args, when, " ".join(words).strip())
+
+
+WASTE_CONDITION = "week.surplus >= %g and week.used < 100"
+
+
+def cmd_usage_alert_waste(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
+    """The common case: wake me when weekly quota can no longer be used up before the reset."""
+    return _add_usage_alert(config, args, WASTE_CONDITION % args.margin, " ".join(args.note).strip())
 
 
 def cmd_usage_alert_list(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
@@ -763,7 +877,8 @@ def cmd_usage_alert_list(config: Config, args: argparse.Namespace) -> Dict[str, 
 
     bot_id = usage_alert_bot(config, args)
     alerts = usage_alerts.AlertStore.for_bot(config, bot_id).alerts()
-    return {"ok": True, "monitor_on": usage_monitor.is_enabled(config), "alerts": [alert.describe() for alert in alerts]}
+    return {"ok": True, "monitor_on": usage_monitor.is_enabled(config),
+            "alerts": [alert.describe() for alert in alerts]}
 
 
 def cmd_usage_alert_remove(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
@@ -786,6 +901,156 @@ def cmd_usage(config: Config, args: argparse.Namespace) -> int:
         return 1
     print(asyncio.run(usage.fetch(config, dict(os.environ))))
     return 0
+
+
+# On-demand usage questions: a verdict, never raw numbers to interpret (the breakdown only with --json).
+EXIT_ANSWERED = 0  # true or false was answered
+EXIT_REFUSED = 1  # no usage permission, or the bot no longer exists
+EXIT_BAD_QUESTION = 2  # the condition or an option can't be read
+EXIT_UNREAD = 3  # the plan usage could not be read
+
+
+class UsageQueryError(Exception):
+    def __init__(self, code: int, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+def _span_text(seconds: Optional[float]) -> Optional[str]:
+    from .usage_alerts import _span
+
+    return _span(seconds) if seconds is not None else None
+
+
+def _limits(reading, now) -> Dict[str, Any]:
+    """Every meter: percent used and left, and when it resets."""
+    limits: Dict[str, Any] = {}
+    for window in reading.windows:
+        name = {"session": "session", "weekly_all": "week"}.get(window.kind) or (
+            "week_%s" % (window.scope or window.kind).lower())
+        left = (window.resets_at - now).total_seconds() if window.resets_at else None
+        limits[name] = {
+            "label": window.label, "used": window.percent, "left": round(max(0.0, 100 - window.percent), 1),
+            "resets_at": to_utc_text(window.resets_at) if window.resets_at else None,
+            "resets_in": _span_text(max(0.0, left)) if left is not None else None, "severity": window.severity,
+        }
+    if "session" not in limits:
+        limits["session"] = {"label": "Session", "running": False, "used": None, "left": None, "resets_at": None,
+                             "resets_in": None}
+    return limits
+
+
+def _usage_question(config: Config, args: argparse.Namespace, condition: str, answer: Any = None) -> int:
+    """Evaluate a condition on a cached or new reading and print the verdict: `true: <reason>` or `false: ...`.
+
+    `answer(result, reason, evaluation, forecast)` may return another (result, reason) and extra JSON fields.
+    """
+    from . import usage_alerts, usage_forecast, usage_monitor
+
+    as_json = getattr(args, "as_json", False)
+    try:
+        try:
+            require(calling_bot(config), "usage")
+        except CommandError as exc:
+            raise UsageQueryError(EXIT_REFUSED, str(exc)) from None
+        try:
+            node = usage_alerts.parse(condition)
+        except usage_alerts.ConditionError as exc:
+            raise UsageQueryError(EXIT_BAD_QUESTION, "bad condition %r: %s" % (condition, exc)) from None
+        try:
+            hours = _hours_spec(args)
+        except CommandError as exc:
+            raise UsageQueryError(EXIT_BAD_QUESTION, str(exc)) from None
+        settings = usage_monitor.MonitorSettings.from_config(config)
+        if getattr(args, "partial", None):
+            settings.partial_windows = args.partial
+        source = usage_monitor.ClaudeUsageSource(config, dict(os.environ))
+        reading, cached = asyncio.run(usage_monitor.read_on_demand(settings, source))
+        if not reading.ok:
+            raise UsageQueryError(EXIT_UNREAD, "could not read the plan usage: %s" % reading.error)
+        now = utc_now()
+        evaluation = usage_monitor.Evaluation(settings, reading, now, usage_monitor.UsageHistory(settings.history_path).readings())
+        values, forecast = evaluation.values(node, hours or None)
+        result, reason = usage_alerts.verdict(node, values)
+        extra: Dict[str, Any] = {}
+        if answer is not None:
+            result, reason, extra = answer(result, reason, node, values, evaluation, forecast)
+    except UsageQueryError as exc:
+        if as_json:
+            print(json.dumps({"ok": False, "error": str(exc), "exit_code": exc.code}, ensure_ascii=False, sort_keys=True))
+        else:
+            print("alfred: %s" % exc, file=sys.stderr)
+        return exc.code
+    if not as_json:
+        print("%s: %s" % ("true" if result else "false", reason))
+        return EXIT_ANSWERED
+    payload: Dict[str, Any] = {
+        "ok": True, "result": result, "reason": reason, "condition": condition,
+        "met_by": [item.text for item in node.deciding(values)] if result else [],
+        "limits": _limits(reading, now),
+        "values": {key.replace("weekly_all.", "week."): value for key, value in values.items()},
+        "reading": {"taken_at": to_utc_text(reading.taken_at), "age_seconds": int((now - reading.taken_at).total_seconds()),
+                    "cached": cached, "source": reading.source},
+        "window_share": evaluation.share.to_dict(),
+    }
+    if forecast is not None:
+        payload["forecast"] = forecast.to_dict()
+    payload.update(extra)
+    print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+    return EXIT_ANSWERED
+
+
+def cmd_usage_check(config: Config, args: argparse.Namespace) -> int:
+    return _usage_question(config, args, args.condition)
+
+
+def running_low_condition(limit: str, threshold: float, projected: bool = False) -> str:
+    """running_low as a condition of the same language: the limits at or over the threshold, and with
+    `projected`, those that would run out before their reset at the recent pace."""
+    kinds = ("session", "week") if limit == "any" else (limit,)
+    parts = ["%s.used >= %g" % (kind, threshold) for kind in kinds]
+    if projected:
+        parts += ["%s.projected >= 100" % kind for kind in kinds]
+    return " or ".join(parts)
+
+
+def cmd_usage_running_low(config: Config, args: argparse.Namespace) -> int:
+    from . import usage_monitor
+
+    threshold = args.threshold
+    if threshold is None:
+        threshold = usage_monitor.MonitorSettings.from_config(config).low_threshold
+    if not 0 < threshold <= 100:
+        print("alfred: the threshold is a percentage between 1 and 100", file=sys.stderr)
+        return EXIT_BAD_QUESTION
+
+    def answer(result, reason, node, values, evaluation, forecast):
+        low = sorted({"session" if item.window == "session" else "week" for item in node.deciding(values)}) if result else []
+        return result, reason, {"low": low, "limit": args.limit, "threshold": threshold, "projected": args.projected}
+
+    return _usage_question(config, args, running_low_condition(args.limit, threshold, args.projected), answer)
+
+
+def cmd_usage_forecast(config: Config, args: argparse.Namespace) -> int:
+    """Will weekly quota go unused? The same test as `usage-alert waste`, answered now."""
+    condition = WASTE_CONDITION % args.margin
+
+    def answer(result, reason, node, values, evaluation, forecast):
+        if forecast is None:
+            raise UsageQueryError(EXIT_UNREAD, "the reading has no weekly reset time, so there is no forecast")
+        from .usage_alerts import _span
+
+        reset = _span((forecast.week_resets_at - evaluation.now).total_seconds())
+        start = "%g%% of the week is left and the %g useful 5-hour windows before it resets in %s (active hours: " \
+                "%s) can spend at most %g%%" % (forecast.week_left, forecast.windows_left, reset,
+                                                forecast.hours.describe(), forecast.max_spend)
+        if result:
+            reason = start + ": %g%% will be lost even using every window fully" % max(0.0, forecast.surplus)
+        else:
+            reason = start + (": all of it can still be used" if forecast.week_left > 0 else ": nothing is left")
+        return result, reason, {"margin": args.margin}
+
+    return _usage_question(config, args, condition, answer)
 
 
 def cmd_service(config: Config, args: argparse.Namespace) -> int:
@@ -889,25 +1154,81 @@ def build_parser() -> argparse.ArgumentParser:
     service.add_argument("-n", "--lines", type=int, default=40, help="log lines to show")
     service.set_defaults(run=cmd_service)
 
-    commands.add_parser("usage", help="show how much of the Claude plan limits is used").set_defaults(run=cmd_usage)
+    usage_parser = commands.add_parser(
+        "usage", help="show the Claude plan usage, or answer a question about it (check, running_low, forecast)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="Without a question: the usage report. The questions read /usage (no model call, no quota),\n"
+                    "reuse a reading a few minutes old, and print `true: <reason>` or `false: <reason>`.\n"
+                    "Exit codes: 0 answered, 1 refused (no usage permission), 2 bad condition, 3 usage not read.",
+    )
+    usage_parser.set_defaults(run=cmd_usage)
+    questions = usage_parser.add_subparsers(dest="question")
+
+    def hours_options(parser: argparse.ArgumentParser) -> None:
+        parser.add_argument("--hours", help="active hours for the forecast values, such as 9-20 or \"9-20 mon-fri\"; "
+                                            "default ALFRED_USAGE_ACTIVE_HOURS, else every hour")
+        parser.add_argument("--days", help="days of the active hours, such as mon-fri or sat,sun")
+        parser.add_argument("--tz", help="time zone of the active hours, such as Europe/Madrid; default local time")
+
+    check = questions.add_parser("check", help="is this condition true now? (the usage-alert language)")
+    check.add_argument("condition", help='for example "week.used >= 90" or "session.left < 1h and week.surplus > 0"')
+    hours_options(check)
+    check.add_argument("--json", dest="as_json", action="store_true", help="the full breakdown, for logs or to report to the user")
+    check.set_defaults(run=cmd_usage_check)
+    for name in ("running_low", "running-low"):
+        low = questions.add_parser(name, help="is a plan limit nearly used up? true means: don't start non-urgent work")
+        low.add_argument("--limit", choices=("any", "session", "week"), default="any")
+        low.add_argument("--threshold", type=float, help="percent used that counts as low; default "
+                                                         "ALFRED_USAGE_LOW_THRESHOLD, else 90")
+        low.add_argument("--projected", action="store_true",
+                         help="also true when the recent pace would use a limit up before it resets")
+        low.add_argument("--json", dest="as_json", action="store_true", help="the full breakdown")
+        low.set_defaults(run=cmd_usage_running_low)
+    forecast_parser = questions.add_parser("forecast", help="will weekly quota go unused before the reset?")
+    hours_options(forecast_parser)
+    forecast_parser.add_argument("--margin", type=float, default=0.0,
+                                 help="points of lost quota that count as waste (default 0: the exact limit counts)")
+    forecast_parser.add_argument("--partial", choices=("prorata", "full"), help="how partial windows count")
+    forecast_parser.add_argument("--json", dest="as_json", action="store_true", help="windows, assumptions and the full breakdown")
+    forecast_parser.set_defaults(run=cmd_usage_forecast)
 
     alert = commands.add_parser(
         "usage-alert", help="wake this bot when a condition on the Claude plan usage holds",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        description="Values: session.used, week.used (percent used), session.left, week.left (time to the reset).\n"
+        description="Values: session.used, week.used (percent used), session.left, week.left (time to the reset),\n"
+                    "week.windows_left, week.max_spend, week.surplus (the weekly forecast for the active hours),\n"
+                    "session.projected, week.projected (percent at the reset at the recent pace).\n"
                     "Operators: < <= > >= = !=, joined with and, or, not and parentheses.\n"
                     "Example: alfred usage-alert add --when \"session.left < 1h and session.used = 0\" use the spare window\n"
-                    "An alert fires once (or with --repeat, once per window). Each wake-up uses plan usage.",
+                    "Example: alfred usage-alert add 'week.surplus > 0' --hours 9-20\n"
+                    "Example: alfred usage-alert waste --hours 9-20  (weekly quota that can't be used up)\n"
+                    "An alert fires once (or with --repeat, once per window; forecast alerts once per quota week).\n"
+                    "Each wake-up uses plan usage.",
     )
     alert_actions = alert.add_subparsers(dest="action", required=True)
-    alert_add = alert_actions.add_parser("add", help="add an alert; the rest of the line is a note you get back")
-    alert_add.add_argument("--when", required=True, help='for example "week.left < 1d and week.used < 60"')
-    alert_add.add_argument("--repeat", action="store_true", help="fire again in every new window, not just once")
-    alert_add.add_argument("--chat-id", type=int)
-    alert_add.add_argument("--thread-id", type=int)
-    alert_add.add_argument("--bot", help=argparse.SUPPRESS)
+
+    def alert_options(parser: argparse.ArgumentParser, repeat_help: str) -> None:
+        parser.add_argument("--repeat", action="store_true", help=repeat_help)
+        parser.add_argument("--hours", help="active hours for the forecast values, such as 9-20 or \"9-20 mon-fri\"")
+        parser.add_argument("--days", help="days of the active hours, such as mon-fri")
+        parser.add_argument("--tz", help="time zone of the active hours, such as Europe/Madrid")
+        parser.add_argument("--chat-id", type=int)
+        parser.add_argument("--thread-id", type=int)
+        parser.add_argument("--bot", help=argparse.SUPPRESS)
+
+    alert_add = alert_actions.add_parser("add", help="add an alert: the condition (or --when), then a note you get back")
+    alert_add.add_argument("--when", help='for example "week.left < 1d and week.used < 60"')
+    alert_options(alert_add, "fire again in every new window (forecast alerts: every week), not just once")
     alert_add.add_argument("note", nargs="*")
     alert_add.set_defaults(json=cmd_usage_alert_add)
+    alert_waste = alert_actions.add_parser(
+        "waste", help="wake this bot when weekly quota can no longer be used up before the reset")
+    alert_waste.add_argument("--margin", type=float, default=0.0,
+                             help="points of lost quota that count (default 0: fires at the exact limit; "
+                                  "5 ignores small losses; -8 warns one window earlier)")
+    alert_options(alert_waste, "arm it again every week")
+    alert_waste.add_argument("note", nargs="*")
+    alert_waste.set_defaults(json=cmd_usage_alert_waste)
     alert_list = alert_actions.add_parser("list", help="this bot's alerts")
     alert_list.add_argument("--bot", help=argparse.SUPPRESS)
     alert_list.set_defaults(json=cmd_usage_alert_list)
@@ -1011,6 +1332,22 @@ def build_parser() -> argparse.ArgumentParser:
     add.add_argument("--every", metavar="DURATION", help="repeat interval such as 1d")
     add.add_argument("--message", help="text to deliver as-is")
     add.add_argument("--task", help="prompt for the agent to carry out at that time")
+    gate = add.add_argument_group("usage conditions (need the usage permission; checked before each delivery)")
+    gate.add_argument("--skip-if-low", nargs="?", const="any", choices=("any", "session", "week"),
+                      help="don't deliver it when a limit (the 5-hour window, the week, or any) is at the threshold")
+    gate.add_argument("--threshold", type=float, help="percent used for --skip-if-low (default ALFRED_USAGE_LOW_THRESHOLD, 90)")
+    gate.add_argument("--projected", action="store_true",
+                      help="--skip-if-low also when the recent pace would use that limit up before it resets")
+    gate.add_argument("--skip-if", metavar="CONDITION", help="don't deliver it when this usage condition holds")
+    gate.add_argument("--only-if", metavar="CONDITION", help="deliver it only when this usage condition holds")
+    gate.add_argument("--only-if-waste", action="store_true",
+                      help="deliver it only when weekly quota will be lost even using every window fully")
+    gate.add_argument("--margin", type=float, help="--only-if-waste: ignore losses under this many points")
+    gate.add_argument("--hours", help="active hours for the forecast values, such as 9-20")
+    gate.add_argument("--days", help="active days, such as mon-fri")
+    gate.add_argument("--tz", help="time zone of the active hours, such as Europe/Madrid")
+    gate.add_argument("--if-unread", choices=("run", "skip"),
+                      help="when the usage can't be read: deliver (default) or skip (default with --only-if)")
     add.set_defaults(json=cmd_schedule_add)
     listing = actions.add_parser("list")
     listing.add_argument("--chat-id", type=int)

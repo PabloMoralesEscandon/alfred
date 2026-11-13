@@ -38,12 +38,12 @@ from telegram.ext import (
     filters,
 )
 
-from . import bot_admin, bots, home, menus, orca, presets, shared_memory, soul, soul_writer, usage, usage_monitor
+from . import bot_admin, bots, home, menus, orca, presets, shared_memory, soul, soul_writer, usage, usage_gate, usage_monitor
 from .agent import Agent, Chat, Listener
 from .backends import BACKENDS, BackendError, RunResult
 from .bots import BotError, BotRecord, BotRegistry
 from .config import Config
-from .scheduler import KIND_EVENT, KIND_TASK, Item, Postpone, SchedulerStore, parse_time, run_scheduler, utc_now
+from .scheduler import KIND_EVENT, KIND_TASK, Item, Postpone, SchedulerStore, Skip, parse_time, run_scheduler, utc_now
 from .text import split_message
 
 log = logging.getLogger("alfred.telegram")
@@ -1124,19 +1124,34 @@ class BotPool:
                 frontend.record = record
 
     async def deliver(self, item: Item) -> None:
-        """Hand a due item to the bot that scheduled it, never to another one."""
+        """Hand a due item to the bot that scheduled it, never to another one, if its usage condition allows."""
         bot_id = int(item.get("bot_id") or 0)
         if not bot_id:
+            await self._check_usage(item, None)
             await self.main._deliver(item)
             return
         frontend = self.frontends.get(bot_id)
         if frontend is not None:
+            await self._check_usage(item, self.registry.get(bot_id) or frontend.record)
             await frontend._deliver(item)
             return
         record = self.registry.get(bot_id)
         if record is not None and (not record.enabled or self.registry.token(bot_id)):
             raise Postpone(300, "%s is paused or not connected" % record.handle)
         raise RuntimeError("bot %s no longer exists" % bot_id)
+
+    async def _check_usage(self, item: Item, record: Optional[BotRecord]) -> None:
+        """Raise Skip when the item's usage condition holds it back. The bot is not woken, so it costs no quota.
+        Reading the usage may wait for `/usage` or for another process reading it, so it runs in a thread."""
+        if not item.get("gate"):
+            return
+        allowed = record is None or record.allows("usage")
+        loop = asyncio.get_running_loop()
+        decision = await loop.run_in_executor(None, usage_gate.check, self.config, item["gate"], allowed)
+        if decision.unread:
+            log.warning("scheduled item %s: %s", item["id"], decision.reason)
+        if not decision.deliver:
+            raise Skip(decision.reason)
 
     # -- creating ------------------------------------------------------------
 

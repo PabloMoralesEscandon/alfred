@@ -39,11 +39,25 @@ alfred schedule add --at 2026-06-12T07:30 --task "Note to self: the user flies a
 - When you wake up and there is nothing worth telling the user, end with `NO_REPLY`.
 - A wake-up that repeats (`--every`) keeps using the user's plan limits. Set one up when they asked for it; ask first when it was your idea.
 
+## Only when the plan limits allow
+
+With the usage permission, a reminder or task can carry a usage condition, checked just before each
+delivery. When it holds the item back, nothing is sent and you are not woken (a recurring item moves on to
+its next time):
+
+```bash
+alfred schedule add --at 2026-06-08T17:00 --every 1d --task "Daily report" --skip-if-low        # not when the 5-hour window or the week is at 90%
+alfred schedule add --at 2026-06-08T18:00 --every 1d --task "Backlog" --only-if-waste --hours 9-20  # only when weekly quota would go unused
+```
+
+Use it for work that can wait; never for something the user needs at that time. The options are in the
+`alfred:usage` skill.
+
 ## List and cancel
 
 ```bash
 alfred schedule list           # pending items for this chat
-alfred schedule list --all     # include sent, cancelled, and failed
+alfred schedule list --all     # include sent, cancelled, failed, and skipped
 alfred schedule cancel <id>    # the id, or its first characters
 ```
 

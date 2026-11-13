@@ -64,6 +64,38 @@ class SchedulerTests(unittest.TestCase):
         self.assertEqual(again["due_at_utc"], "2030-01-01T15:00:00Z")
         self.assertEqual((again["status"], again["last_error"]), (scheduler.STATUS_SCHEDULED, "boom"))
 
+    def test_a_held_back_delivery_moves_a_recurring_item_on_and_ends_a_one_off_as_skipped(self) -> None:
+        daily = self.store.add(chat_id=1, due=T0, text="report", kind=scheduler.KIND_TASK, repeat_seconds=86400,
+                               gate='{"skip_if": "week.used >= 90"}')
+        self.assertEqual(daily["gate"], '{"skip_if": "week.used >= 90"}')
+        self.store.claim_due(T0)
+        held = self.store.skip(daily["id"], "week 92% used", now=T0 + timedelta(seconds=3))
+        self.assertEqual((held["status"], held["due_at_utc"]), (scheduler.STATUS_SCHEDULED, "2030-01-02T09:00:00Z"))
+        self.assertEqual((held["last_skip"], held["skips"], held["delivered_at_utc"]),
+                         ("2030-01-01T09:00:03Z week 92% used", 1, None))
+
+        once = self.store.add(chat_id=1, due=T0, text="reminder")
+        self.store.claim_due(T0)
+        held = self.store.skip(once["id"], "5-hour window 95% used", now=T0)
+        self.assertEqual((held["status"], held["skips"]), (scheduler.STATUS_SKIPPED, 1))
+        self.assertEqual(self.store.list(1), [self.store.get(daily["id"])])  # done items only with include_done
+        # Cancelled while its condition was being checked: it stays cancelled.
+        self.store.claim_due(T0 + timedelta(days=1))
+        self.store.cancel(daily["id"], chat_id=1)
+        self.assertEqual(self.store.skip(daily["id"], "x")["status"], scheduler.STATUS_CANCELLED)
+
+    def test_the_worker_records_a_skip_instead_of_a_failure(self) -> None:
+        item = self.store.add(chat_id=1, due=scheduler.utc_now() - timedelta(minutes=1), text="report")
+
+        async def deliver(item) -> None:
+            raise scheduler.Skip("week 92% used")
+
+        with self.assertLogs("alfred.scheduler", level="INFO"):
+            asyncio.run(scheduler.run_scheduler(self.store, deliver, once=True))
+        done = self.store.get(item["id"])
+        self.assertEqual((done["status"], done["last_error"]), (scheduler.STATUS_SKIPPED, None))
+        self.assertTrue(done["last_skip"].endswith(" week 92% used"))
+
     def test_cancel_by_prefix_is_scoped_to_the_chat_and_sticks_during_delivery(self) -> None:
         item = self.store.add(chat_id=1, due=T0, text="x", repeat_seconds=3600)
         self.assertIsNone(self.store.cancel(item["id"], chat_id=2))
@@ -99,6 +131,7 @@ class SchedulerTests(unittest.TestCase):
 
         claimed = self.store.claim_due(T0)
         self.assertEqual((claimed["id"], claimed["kind"], claimed["repeat_seconds"]), ("old-1", "message", None))
+        self.assertEqual((claimed["gate"], claimed["last_skip"], claimed["skips"]), (None, None, 0))
 
     def test_worker_delivers_due_items_survives_failures_and_requeues_interrupted_ones(self) -> None:
         past = scheduler.utc_now() - timedelta(minutes=1)

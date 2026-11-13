@@ -179,7 +179,7 @@ nothing else. Grant more when you create it or later with `/bot perm`:
 | `contact` | `off` | Post or schedule messages to chats other than yours |
 | `bots` | `off` | List bots, change other bots' settings, ask you for new ones. Never destroy |
 | `shared` | `off` | Write the shared memory. Reading it is always allowed; no preset turns this on. Every other agent reads what it writes |
-| `usage` | `off` | Read the Claude plan usage (`alfred usage`) and set usage alerts that wake it (`alfred usage-alert`). Has no effect while `ALFRED_USAGE_MONITOR` is off; the panel says so. See [docs/USAGE_MONITOR_RESEARCH.md](docs/USAGE_MONITOR_RESEARCH.md) |
+| `usage` | `off` | Ask the usage monitor for a verdict (`alfred usage running_low`, `alfred usage check '<condition>'`, `alfred usage forecast`), read the plan usage (`alfred usage`), set usage alerts that wake it (`alfred usage-alert`, `usage-alert waste`), and put a usage condition on a scheduled item so it is not delivered when the limits are nearly used (`alfred schedule add --skip-if-low`, `--skip-if`, `--only-if`, `--only-if-waste`). The questions and the conditions on scheduled items work with `ALFRED_USAGE_MONITOR` off; the report and the alerts need it on, and the panel says so. See the `alfred:usage` skill and [docs/USAGE_MONITOR_RESEARCH.md](docs/USAGE_MONITOR_RESEARCH.md) |
 | `soul` | `off` | Edit its own `SOUL.md`: its role and mission as well as its tone, so what it does and how, never what it may do. No preset turns this on, and it never opens another bot's |
 | `allow`, `deny` | none | Extra Claude Code permission rules, separated by `;` |
 
