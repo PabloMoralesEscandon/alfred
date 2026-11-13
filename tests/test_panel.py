@@ -12,6 +12,7 @@ import unittest
 from datetime import timedelta
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
+from unittest import mock
 
 try:
     from alfred.telegram_bot import PANEL_COMMANDS, BotPool, ControlPanel
@@ -19,10 +20,10 @@ except ImportError:  # pragma: no cover
     BotPool = None  # type: ignore
     PANEL_COMMANDS = []
 
-from alfred import bots, home, scheduler, shared_memory
+from alfred import bots, home, scheduler, shared_memory, usage_gate
 from alfred.agent import Chat
 from alfred.bots import BotRecord
-from alfred.scheduler import Postpone
+from alfred.scheduler import Postpone, Skip
 from fakes import Sandbox, claude_lines
 
 OWNER = 99
@@ -381,6 +382,33 @@ class PanelTests(PanelHarness):
             await self.pool.resume(self.pool.registry.get(CHEF))
             self.assertIn(CHEF, self.pool.frontends)
             self.assertTrue(self.pool.dropped[-1])  # what it was sent while paused is not answered now
+
+        self.play(scenario)
+
+    def test_an_item_held_back_by_its_usage_condition_never_reaches_the_bot(self) -> None:
+        store = scheduler.SchedulerStore(self.config.db_path)
+        gate = usage_gate.Gate(skip_if="week.used >= 90").to_text()
+        asked: List[bool] = []
+
+        def check(config, text, allowed):
+            asked.append(allowed)
+            return usage_gate.Decision(len(asked) > 1, "week 92% used (resets in 2d 3h)")
+
+        async def scenario() -> None:
+            await self.create(RESEARCH, "research_bot", "Research", "/bot new Research")
+            soon = scheduler.utc_now() - timedelta(seconds=1)
+            with mock.patch.object(usage_gate, "check", side_effect=check):
+                store.add(chat_id=OWNER, due=soon, text="report", kind=scheduler.KIND_TASK, bot_id=RESEARCH, gate=gate)
+                with self.assertRaises(Skip):
+                    await self.pool.deliver(store.claim_due())
+                self.assertEqual(self.sandbox.calls("claude"), [])  # not woken: no turn, no usage
+                self.assertEqual(self.pool.frontends[RESEARCH].bot.texts, [])
+                store.add(chat_id=OWNER, due=soon, text="plain reminder", bot_id=RESEARCH)
+                await self.pool.deliver(store.claim_due())  # no condition: not checked
+                store.add(chat_id=OWNER, due=soon, text="gated reminder", bot_id=RESEARCH, gate=gate)
+                await self.pool.deliver(store.claim_due())
+            self.assertEqual(self.pool.frontends[RESEARCH].bot.texts, ["⏰ plain reminder", "⏰ gated reminder"])
+            self.assertEqual(asked, [False, False])  # a bot without the usage permission: checked as unread
 
         self.play(scenario)
 
