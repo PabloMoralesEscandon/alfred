@@ -276,18 +276,50 @@ def bot_token(config: Config, bot_id: int) -> str:
     return token
 
 
+def verified_caller(config: Config):
+    """The bot calling `alfred bots`, checked against the key its agent was started with (ALFRED_BOT_KEY): a bot
+    that changes ALFRED_BOT_ID to another bot's does not know that bot's key. None outside a bot's turn."""
+    from .bots import key_matches
+
+    record = calling_bot(config)
+    if record is not None and not key_matches(config, record.bot_id, os.environ.get("ALFRED_BOT_KEY", "")):
+        raise CommandError("can't confirm that this runs for %s (ALFRED_BOT_KEY does not match); run it from that "
+                           "bot's own turn" % record.handle)
+    return record
+
+
+def admin_caller(config: Config):
+    """The bot admin whose turn this is. The helpers never run outside one: there is no admin to check against."""
+    caller = verified_caller(config)
+    if caller is None:
+        raise CommandError("the bot admin helpers run only inside a bot admin's turn; from a terminal, use the control "
+                           "panel's /bot menu")
+    require(caller, "admin")
+    return caller
+
+
+def _caller_level_covers(config: Config, caller, record) -> List[str]:
+    from .bot_admin import ceiling_problems
+
+    return ceiling_problems(config, caller, record.permissions, record.cross_agent, record.settings)
+
+
 def cmd_bots_list(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
+    from . import presets
     from .bots import BotRegistry
 
-    caller = calling_bot(config)
-    require(caller, "bots")
+    caller = verified_caller(config)
+    if caller is not None and not caller.allows("admin"):
+        require(caller, "bots")  # either permission lists the owner's bots
     owner = caller.owner_id if caller is not None else None  # a bot sees only its owner's bots
     return {
         "ok": True,
         "bots": [
             {"id": record.bot_id, "username": record.username, "name": record.name, "enabled": record.enabled,
              "settings": record.settings, "permissions": {name: record.permission(name) for name in record.permissions},
-             "link": record.link}
+             "preset": presets.level_name(record), "link": record.link,
+             "created_by_you": caller is not None and record.created_by == caller.bot_id,
+             "started": int(record.owner_id) in record.chat_ids}
             for record in BotRegistry(config).list(owner_id=owner)
         ],
     }
@@ -297,7 +329,7 @@ def cmd_bots_set(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
     """Change another bot's setting. Permissions and working directories only change from the control panel."""
     from .bots import BotError, BotRegistry, clean_setting
 
-    caller = calling_bot(config)
+    caller = verified_caller(config)
     require(caller, "bots")
     registry = BotRegistry(config)
     record = registry.find(args.name, owner_id=caller.owner_id if caller is not None else None)
@@ -309,6 +341,13 @@ def cmd_bots_set(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
             raise CommandError("a bot can't change its own settings; the user can, from the Consiglieri control panel")
         if setting == "workdir":
             raise CommandError("only the control panel can change a bot's working directory")
+        if setting == "backend" and " ".join(args.value).strip().lower() == "codex" and \
+                (caller.settings.get("backend") or config.default_backend) != "codex":
+            raise CommandError("a bot can't move another to codex, which enforces fewer rules than claude")
+        above = _caller_level_covers(config, caller, record)
+        if above:  # its task and model steer it: a bot doesn't steer one that may do more than itself
+            raise CommandError("%s may do more than %s (%s); only the user changes it, from the control panel"
+                               % (record.handle, caller.handle, "; ".join(above)))
     try:
         value = clean_setting(config, setting, " ".join(args.value))
     except BotError as exc:
@@ -326,7 +365,7 @@ def cmd_bots_new(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
     """Ask the owner, through the control panel, to create a bot. It starts with the default permissions."""
     from . import bots
 
-    caller = calling_bot(config)
+    caller = verified_caller(config)
     require(caller, "bots")
     owner = caller.owner_id if caller is not None else int(os.environ.get("ALFRED_USER_ID") or args.owner or 0)
     if not owner:
@@ -359,6 +398,185 @@ def cmd_bots_new(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
     except Exception as exc:
         raise CommandError("Telegram refused: %s" % exc) from exc
     return {"ok": True, "link": link, "note": "the owner has to confirm it in Telegram; the control panel takes it from there"}
+
+
+SPEC_SIZE_LIMIT = 64 * 1024
+
+
+def read_spec(config: Config, caller, args: argparse.Namespace) -> Any:
+    """The JSON a bot admin passes: --json '<object>' or --file <path in its own directories>."""
+    from .bots import path_is_allowed
+
+    if bool(getattr(args, "json_text", None)) == bool(getattr(args, "file", None)):
+        raise CommandError("give the spec with exactly one of --file <path> or --json '<object>'")
+    if args.file:
+        path = Path(args.file).expanduser()
+        if not path.is_absolute():
+            path = config.workspace / path
+        if not path_is_allowed(config, caller, path):
+            raise CommandError("the spec file must be in your own directories")
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise CommandError("can't read %s: %s" % (path, exc)) from exc
+    else:
+        text = args.json_text
+    if len(text) > SPEC_SIZE_LIMIT:
+        raise CommandError("the spec is too long (at most %d bytes)" % SPEC_SIZE_LIMIT)
+    try:
+        return json.loads(text)
+    except ValueError as exc:
+        raise CommandError("the spec is not valid JSON: %s" % exc) from exc
+
+
+def _refuse(config: Config, caller, problems: List[str], data: Any) -> None:
+    """A refused spec or request goes to the audit log, with what it asked for, and back to the bot."""
+    from . import bots
+
+    bots.audit(config, "admin_refused", caller, caller.handle, "alfred bots", admin=caller.handle,
+               problems=problems, input=json.dumps(data, ensure_ascii=False, default=str)[:4000])
+    raise CommandError("refused: %s" % "; ".join(problems))
+
+
+def cmd_bots_spec(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
+    """Check a spec without sending anything: what the bot would start with, and what would wait for the user."""
+    from . import bot_admin, presets
+
+    caller = admin_caller(config)
+    data = read_spec(config, caller, args)
+    try:
+        checked = bot_admin.parse_spec(config, caller, data)
+    except bot_admin.SpecError as exc:
+        return {"ok": False, "error": "this spec would be refused", "problems": exc.problems}
+    limits = bot_admin.limit_problems(config, caller)
+    return {
+        "ok": True,
+        "spec": checked.as_dict(),
+        "starts_with": presets.name_of(checked.initial),
+        "waits_for_the_users_yes": [bot_admin.EXTRAS[key][0] for key in checked.extras],
+        "limits": limits or "within the limits",
+        "next": "alfred bots create with the same spec sends it to the user" if not limits else "a limit stops it now",
+    }
+
+
+def cmd_bots_create(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
+    """Send the user a request to create a bot from a spec. The user confirms it in Telegram and owns it."""
+    from . import bot_admin, bots
+
+    caller = admin_caller(config)
+    data = read_spec(config, caller, args)
+    try:
+        checked = bot_admin.parse_spec(config, caller, data)
+    except bot_admin.SpecError as exc:
+        _refuse(config, caller, exc.problems, data)
+    limits = bot_admin.limit_problems(config, caller)
+    if limits:
+        _refuse(config, caller, limits, data)
+    chat_id = resolve_chat_id(args)
+    own_chat_only(caller, chat_id)
+    owner = int(caller.owner_id)  # always the admin's owner, whatever the environment says
+    try:
+        from telegram import Bot
+    except ImportError:
+        raise CommandError("python-telegram-bot is not installed for %s" % sys.executable) from None
+    registry = bots.BotRegistry(config)
+
+    async def ask() -> Dict[str, Any]:
+        async with Bot(bot_token(config, 0)) as panel:
+            taken = registry.known_usernames()
+            username = checked.username
+            if not username or username.lower() in {name.lower() for name in taken + [panel.username]}:
+                username = bots.suggest_username(checked.name, panel.username, checked.settings.get("task", ""), taken)
+            request = bot_admin.new_request(caller, checked, data, username, chat_id, resolve_thread_id(args))
+            link = bots.creation_link(panel.username, username, checked.name)
+            request["link"] = link
+            registry.add_pending(owner, owner, checked.name, username, checked.settings, checked.initial, checked.soul,
+                                 request_id=request["id"], admin_bot_id=caller.bot_id)
+            bot_admin.add(config, request)
+            intro = bot_admin.summary(config, caller, checked, username, request["id"]) + (
+                "\n\nTo create it, tap \"Create @%s\" on the keyboard below and confirm in Telegram's window; or "
+                "Cancel. If the keyboard doesn't show, use the link in the next message." % username)
+            try:
+                for text, markup in bot_admin.creation_messages(intro, checked.name, username, link):
+                    await panel.send_message(chat_id=owner, text=text, reply_markup=markup)
+            except Exception:
+                registry.take_pending(owner, username)
+                bot_admin.update(config, request["id"], status="cancelled", problems=["Telegram refused the message"])
+                raise
+            return dict(request, panel=panel.username)
+
+    try:
+        request = asyncio.run(ask())
+    except Exception as exc:
+        raise CommandError("Telegram refused: %s" % exc) from exc
+    bots.audit(config, "admin_requested", caller, caller.handle, "alfred bots create", admin=caller.handle,
+               request=request["id"], username=request["username"], spec=checked.as_dict(),
+               extras=[bot_admin.EXTRAS[key][0] for key in checked.extras])
+    return {
+        "ok": True,
+        "request": request["id"],
+        "username": request["username"],
+        "link": request["link"],
+        "waits_for_the_users_yes": [bot_admin.EXTRAS[key][0] for key in checked.extras],
+        "next": ("Tell the user the request is in their chat with @%s: they tap \"Create @%s\" and confirm. You are "
+                 "woken with an [Event] when the bot exists (or check with alfred bots status %s). The link above "
+                 "is the second option." % (request["panel"], request["username"], request["id"])),
+    }
+
+
+def cmd_bots_status(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
+    from . import bot_admin
+    from .bots import BotRegistry
+
+    caller = admin_caller(config)
+    registry = BotRegistry(config)
+    mine = [item for item in bot_admin.load(config) if int(item["admin_bot_id"]) == caller.bot_id]
+    if args.request:
+        mine = [item for item in mine if item["id"] == args.request]
+        if not mine:
+            raise CommandError("no request %r of yours" % args.request)
+    return {"ok": True, "requests": [bot_admin.public(item, registry) for item in mine[-20:]],
+            "limits": bot_admin.limits(config), "limits_now": bot_admin.limit_problems(config, caller) or "within"}
+
+
+def cmd_bots_configure(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
+    """Finish setting up a bot this admin asked for: task, model, effort, personality, reminders. Never permissions."""
+    from . import bot_admin, bots, soul
+
+    caller = admin_caller(config)
+    registry = bots.BotRegistry(config)
+    record = registry.find(args.name, owner_id=caller.owner_id)
+    if record is None or record.created_by != caller.bot_id:
+        raise CommandError("no bot called %r that you asked for; a bot admin sets up only the bots it requested"
+                           % args.name)
+    above = _caller_level_covers(config, caller, record)
+    if above:
+        raise CommandError("%s may now do more than you (%s); only the user changes it, from the control panel"
+                           % (record.handle, "; ".join(above)))
+    data = read_spec(config, caller, args)
+    try:
+        changes = bot_admin.parse_changes(config, data)
+    except bot_admin.SpecError as exc:
+        bots.audit(config, "admin_refused", record, caller.handle, "alfred bots configure", admin=caller.handle,
+                   problems=exc.problems)
+        raise CommandError("refused: %s" % "; ".join(exc.problems)) from exc
+    if changes.get("reminders") and not record.allows("schedule"):
+        raise CommandError("%s does not have the schedule permission" % record.handle)
+    for key in ("task", "model", "effort"):
+        if key in changes:
+            if changes[key]:
+                record.settings[key] = changes[key]
+            else:
+                record.settings.pop(key, None)
+    registry.save(record)
+    if "soul" in changes:
+        soul.write(registry.workspace(record.bot_id), changes["soul"])
+    scheduled = bot_admin.schedule_reminders(config, record, changes.get("reminders") or [])
+    fields = sorted(changes)
+    bots.audit(config, "admin_configured", record, caller.handle, "alfred bots configure", admin=caller.handle,
+               fields=fields, request=record.request_id)
+    return {"ok": True, "bot": record.username, "changed": fields, "reminders_scheduled": len(scheduled),
+            "note": "applies from its next message"}
 
 
 def cmd_screenshot(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
@@ -756,6 +974,23 @@ def build_parser() -> argparse.ArgumentParser:
     bots_new.add_argument("task", nargs="*")
     bots_new.add_argument("--owner", type=int, help="Telegram user id to ask, outside a bot's turn")
     bots_new.set_defaults(json=cmd_bots_new)
+    # The bot admin's helpers (docs/BOT_ADMIN.md and the alfred:bot-admin skill); they need the admin permission.
+    for verb, handler, text in (("spec", cmd_bots_spec, "check a spec without sending anything"),
+                                ("create", cmd_bots_create, "send the user a request to create a bot from a spec")):
+        sub_parser = bots_actions.add_parser(verb, help=text)
+        sub_parser.add_argument("--file", help="the spec, a JSON file in your own directory")
+        sub_parser.add_argument("--json", dest="json_text", help="the spec as JSON text")
+        sub_parser.add_argument("--chat-id", type=int, help=argparse.SUPPRESS)
+        sub_parser.add_argument("--thread-id", type=int, help=argparse.SUPPRESS)
+        sub_parser.set_defaults(json=handler)
+    bots_status = bots_actions.add_parser("status", help="your bot requests and what became of them")
+    bots_status.add_argument("request", nargs="?")
+    bots_status.set_defaults(json=cmd_bots_status)
+    bots_configure = bots_actions.add_parser("configure", help="set up a bot you asked for: task, model, effort, soul, reminders")
+    bots_configure.add_argument("name", help="@username, name or id")
+    bots_configure.add_argument("--file", help="the changes, a JSON file in your own directory")
+    bots_configure.add_argument("--json", dest="json_text", help="the changes as JSON text")
+    bots_configure.set_defaults(json=cmd_bots_configure)
 
     commands.add_parser("chrome", help="open a window of Consiglieri's own Chrome profile").set_defaults(json=cmd_chrome)
 

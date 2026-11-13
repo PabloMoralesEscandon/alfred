@@ -35,6 +35,13 @@ RECOMMENDED = "assistant"  # what the creation assistant starts with
 # choosing a preset never changes it, it can sit on top of any preset, and `find` never names it.
 SPECIAL_LEVELS: Dict[str, str] = {"cross": "cross_agent"}
 FREEFORM = ("folders", "allow", "deny")
+# Templates: a preset plus a role, offered next to the presets but outside their order (a bot admin is not
+# "more" than Power, only different). template -> (the preset it starts from, what it adds). The `admin`
+# permission is in no preset, Full access included: a bot becomes a bot admin only through this template or
+# its own switch, after a warning (docs/BOT_ADMIN.md).
+TEMPLATES: Dict[str, Tuple[str, Dict[str, str]]] = {
+    "botadmin": ("assistant", {"admin": "on"}),
+}
 
 
 @dataclass(frozen=True)
@@ -83,6 +90,18 @@ PRESET_INFO: Dict[str, PresetInfo] = {
     ),
 }
 
+TEMPLATE_INFO: Dict[str, PresetInfo] = {
+    "botadmin": PresetInfo(
+        "🧑‍💼", "Bot admin",
+        can="everything Assistant can, plus create and set up bots for you from a description: it drafts each "
+            "one (name, task, personality, preset, model, reminders), you confirm it in Telegram and you own it",
+        cannot="give a bot more than it has itself; grant cross-agent access, Full access, bot admin, shared-memory "
+               "or personality edits without your separate yes; or destroy any bot",
+        warning="⚠️ It sends you bot requests and sets up the ones you create. A text it reads could push it to ask "
+                "for bots you don't need, so read each request. All of it goes to the audit log (/bot audit).",
+    ),
+}
+
 # Other words `/bot perm <bot> <preset>` accepts, including the names the presets had before.
 ALIASES: Dict[str, str] = {
     "minimal": "basic", "minimo": "basic", "mínimo": "basic", "basico": "basic", "básico": "basic",
@@ -90,12 +109,14 @@ ALIASES: Dict[str, str] = {
     "asistente": "assistant",
     "broad": "power", "amplio": "power",
     "full-access": "full", "fullaccess": "full", "completo": "full", "total": "full",
+    "bot-admin": "botadmin", "bot_admin": "botadmin", "administrador": "botadmin", "admin-bots": "botadmin",
 }
 
 # How permissions read in a list of changes. A permission missing here reads as "name: value".
 WORDS: Dict[str, str] = {
     "edit": "file edits", "web": "web", "browser": "browser", "mcp": "connectors (MCP)",
     "schedule": "reminders", "contact": "other chats", "bots": "other bots", "sandbox": "sandbox",
+    "admin": "bot admin",
     "shared": "shared-memory writes",
     "soul": "own role and personality edits",
     "usage": "plan usage",
@@ -111,6 +132,23 @@ CUSTOM_ICON, CUSTOM_LABEL = "🎛", "Custom"
 def keys() -> List[str]:
     """The presets that are sets of permissions, from least to most."""
     return list(PRESET_PERMISSIONS)
+
+
+def templates() -> List[str]:
+    return list(TEMPLATES)
+
+
+def choices() -> List[str]:
+    """What the preset buttons offer: the presets, from least to most, then the templates."""
+    return keys() + templates()
+
+
+def is_choice(key: str) -> bool:
+    return key in PRESET_PERMISSIONS or key in TEMPLATES
+
+
+def info(key: str) -> PresetInfo:
+    return PRESET_INFO[key] if key in PRESET_INFO else TEMPLATE_INFO[key]
 
 
 def levels() -> List[str]:
@@ -139,16 +177,19 @@ def values(permissions: Mapping[str, str]) -> Dict[str, str]:
 
 
 def resolve(key: str) -> Dict[str, str]:
+    if key in TEMPLATES:
+        base, extra = TEMPLATES[key]
+        return values(dict(PRESET_PERMISSIONS[base], **extra))
     return values(PRESET_PERMISSIONS[key])
 
 
 def find(text: str) -> Optional[str]:
     """The preset a word names (its key, its label or an alias), or None."""
     word = (text or "").strip().lower()
-    if word in PRESET_PERMISSIONS:
+    if is_choice(word):
         return word
-    for key in keys():  # never a special level: those are granted their own way
-        if word == PRESET_INFO[key].label.lower():
+    for key in choices():  # never a special level: those are granted their own way
+        if word == info(key).label.lower():
             return key
     return ALIASES.get(word)
 
@@ -166,6 +207,9 @@ def detect(permissions: Mapping[str, str]) -> Tuple[Optional[str], str]:
     Closest means the fewest permissions that differ; on a tie, the one with less.
     """
     current = values(permissions)
+    for key in templates():  # a template is named only when it matches exactly; the closest is always a preset
+        if current == resolve(key):
+            return key, TEMPLATES[key][0]
     distances = []
     for index, key in enumerate(PRESET_PERMISSIONS):
         target = resolve(key)
@@ -208,17 +252,17 @@ def gains(current: Mapping[str, str], target: Mapping[str, str]) -> List[str]:
 
 
 def title(key: str, recommended_mark: bool = False) -> str:
-    info = PRESET_INFO[key]
+    text = info(key)
     suffix = " (recommended)" if recommended_mark and key == RECOMMENDED else ""
-    return "%s %s%s" % (info.icon, info.label, suffix)
+    return "%s %s%s" % (text.icon, text.label, suffix)
 
 
 def card(key: str) -> str:
     """A preset in a few lines: what it can and cannot do, and its warning."""
-    info = PRESET_INFO[key]
-    lines = [title(key, recommended_mark=True), "Can: %s." % info.can, "Cannot: %s." % info.cannot]
-    if info.warning:
-        lines.append(info.warning)
+    text = info(key)
+    lines = [title(key, recommended_mark=True), "Can: %s." % text.can, "Cannot: %s." % text.cannot]
+    if text.warning:
+        lines.append(text.warning)
     return "\n".join(lines)
 
 
@@ -231,7 +275,7 @@ def name_of(permissions: Mapping[str, str], base: Optional[str] = None) -> str:
     exact, closest = detect(permissions)
     if exact is not None:
         return title(exact)
-    base = base if base in PRESET_PERMISSIONS else closest
+    base = base if base is not None and is_choice(base) else closest
     changes = differences(base, permissions)
     return "%s %s (from %s: %s)" % (CUSTOM_ICON, CUSTOM_LABEL, title(base), ", ".join(changes))
 

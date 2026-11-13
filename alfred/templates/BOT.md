@@ -12,7 +12,7 @@ $workdir_section## What you may do
 
 $permissions
 
-$agents_section## How you run
+$agents_section$admin_section## How you run
 
 You are one long-running process for this chat. You sleep between turns and wake up when something arrives:
 

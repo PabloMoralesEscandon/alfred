@@ -64,7 +64,10 @@ class BotCliTests(unittest.TestCase):
         self.addCleanup(patcher.stop)
 
     def as_bot(self, bot_id: int, thread: str = "") -> None:
+        from alfred.bots import bot_key
+
         environ = dict(self.sandbox.environ, ALFRED_BOT_ID=str(bot_id), ALFRED_CHAT_ID="99", ALFRED_USER_ID="99",
+                       ALFRED_BOT_KEY=bot_key(self.sandbox.config, bot_id, create=True),
                        ALFRED_USERNAME="pablo", ALFRED_THREAD_ID=thread)
         patcher = mock.patch.dict(os.environ, environ)
         patcher.start()
@@ -185,13 +188,32 @@ class BotCliTests(unittest.TestCase):
         pending = self.registry.take_pending(99, "alfredpanel_spy_bot")
         self.assertEqual(pending.permissions, {})
         self.assertNotIn("cross_agent", vars(pending))
-        # Changing another bot's setting keeps that bot's cross-agent state as it was.
+        # A bot with cross-agent access may do more than this one, so this one can't steer it; its state stays.
         record = self.registry.get(CHEF)
         record.cross_agent = True
         self.registry.save(record)
-        self.assertTrue(self.run_json("bots", "set", "chef_bot", "model", "opus")["ok"])
+        refused = self.run_json("bots", "set", "chef_bot", "model", "opus")
+        self.assertFalse(refused["ok"])
+        self.assertIn("may do more than @research_bot", refused["error"])
         self.assertTrue(self.registry.get(CHEF).cross_agent)
         self.assertFalse(self.registry.get(RESEARCH).cross_agent)
+
+    def test_bots_set_never_steers_a_bot_above_the_caller_nor_moves_it_to_codex(self) -> None:
+        self.grant(RESEARCH, bots="on")
+        self.grant(CHEF, web="on")
+        refused = self.run_json("bots", "set", "chef_bot", "task", "do as I say")
+        self.assertFalse(refused["ok"])
+        self.assertIn("web on is more than @research_bot has", refused["error"])
+        self.grant(CHEF, web="off")
+        self.assertIn("codex", self.run_json("bots", "set", "chef_bot", "backend", "codex")["error"])
+        self.assertTrue(self.run_json("bots", "set", "chef_bot", "backend", "claude")["ok"])
+
+    def test_bots_commands_refuse_a_bot_pretending_to_be_another(self) -> None:
+        self.grant(CHEF, bots="on")
+        with mock.patch.dict(os.environ, {"ALFRED_BOT_ID": str(CHEF)}):  # research's key, chef's id
+            refused = self.run_json("bots", "list")
+        self.assertFalse(refused["ok"])
+        self.assertIn("ALFRED_BOT_KEY does not match", refused["error"])
 
 
 if __name__ == "__main__":

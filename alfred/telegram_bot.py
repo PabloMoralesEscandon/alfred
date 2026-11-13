@@ -38,12 +38,12 @@ from telegram.ext import (
     filters,
 )
 
-from . import bots, home, menus, orca, presets, shared_memory, soul, soul_writer, usage, usage_monitor
+from . import bot_admin, bots, home, menus, orca, presets, shared_memory, soul, soul_writer, usage, usage_monitor
 from .agent import Agent, Chat, Listener
 from .backends import BACKENDS, BackendError, RunResult
 from .bots import BotError, BotRecord, BotRegistry
 from .config import Config
-from .scheduler import KIND_EVENT, KIND_TASK, Item, Postpone, SchedulerStore, parse_time, run_scheduler
+from .scheduler import KIND_EVENT, KIND_TASK, Item, Postpone, SchedulerStore, parse_time, run_scheduler, utc_now
 from .text import split_message
 
 log = logging.getLogger("alfred.telegram")
@@ -81,7 +81,7 @@ ATTACHMENT_KINDS = (("document", ""), ("voice", ".ogg"), ("audio", ".mp3"), ("vi
 MAIN_UPDATES = ["message", "callback_query", "managed_bot"]
 BOT_UPDATES = ["message", "callback_query"]
 CONFIRM_SECONDS = 300
-CANCEL_CREATION = "Cancel"  # the second key of the creation keyboard
+CANCEL_CREATION = bot_admin.CANCEL_CREATION  # the second key of the creation keyboard
 BOT_USAGE = """I am the Consiglieri control panel. There is no main agent: I create and run your bots, each with its own chat, task, model, permissions, memory, tools and Claude session. You see and manage only your own.
 
 /bot - the menu, where everything is managed with buttons: create a bot step by step; in My bots change its settings, permissions, folders and rules, see and cancel its reminders and usage alerts, pause, resume or destroy it; the shared memory; the audit log
@@ -94,7 +94,8 @@ Text shortcuts:
 /bot perm <bot> <permission> <value> - change a permission
 /bot perm <bot> <preset> - switch to a preset: %s
 /bot perm <bot> cross on|off - cross-agent access: read other agents' memory and use their tools (asks first)
-/bot audit - the last grants and withdrawals of cross-agent access
+/bot audit - cross-agent access, bot admins and their requests: who asked, granted or approved what
+/bot perm <bot> admin on - make it a bot admin, which creates bots for you from a description (asks first)
 /shared - the shared memory every agent reads (list, show, add, remove); bots only read it
 /bot pause <bot>, /bot resume <bot> - disconnect or reconnect it
 /bot destroy <bot> - delete it, its schedule and its state (asks first)
@@ -103,7 +104,7 @@ Text shortcuts:
 
 Settings: %s.
 Permissions: %s.
-Options for /bot new: +web +browser +shell +edit +mcp +contact +bots +usage +bypass, -schedule, -sandbox, and setting=value or permission=value (for example model=sonnet folders=~/notes).
+Options for /bot new: +web +browser +shell +edit +mcp +contact +bots +admin +usage +bypass, -schedule, -sandbox, and setting=value or permission=value (for example model=sonnet folders=~/notes).
 A new bot starts with the least: its own directory, the alfred command, reminders, nothing else.
 At every level, even full access, a bot can't read the memory of your other bots or use their tools. Only cross-agent access lifts that, and only you can grant it here.
 <bot> is its @username, its name or its id.""" % (", ".join(presets.keys()), ", ".join(bots.SETTING_NAMES), ", ".join(bots.PERMISSION_NAMES))
@@ -572,7 +573,9 @@ class ControlPanel:
             return
         if text == CANCEL_CREATION:
             if self.pool is not None:
-                self.pool.registry.take_pending(update.effective_user.id, "")
+                pending = self.pool.registry.take_pending(update.effective_user.id, "")
+                if pending is not None and pending.request_id:
+                    self.pool.admin_request_cancelled(pending, update.effective_user.id)
             await message.reply_text("Cancelled; no bot was created.", reply_markup=ReplyKeyboardRemove())
             return
         await message.reply_text(
@@ -749,29 +752,15 @@ class ControlPanel:
         """Ask Telegram to create a bot: a keyboard button, then the link. Returns the suggested username."""
         link, username = await self.pool.request_creation(user_id, chat_id, name, settings, permissions, soul_text)
         draft = bots.BotRecord(bot_id=0, username=username, name=name, owner_id=0, settings=settings, permissions=permissions)
-        # First way: a keyboard button that asks Telegram to create the bot (KeyboardButtonRequestManagedBot).
-        # python-telegram-bot 22.5 has no class for it, so the button carries the Bot API's own JSON.
-        request = {"request_id": bots.new_request_id(), "suggested_name": name[:64], "suggested_username": username}
-        keyboard = ReplyKeyboardMarkup(
-            [[KeyboardButton("Create @%s" % username, api_kwargs={"request_managed_bot": request})],
-             [KeyboardButton(CANCEL_CREATION)]],
-            resize_keyboard=True, one_time_keyboard=True,
-        )
-        await self.bot.send_message(
-            chat_id=chat_id,
-            text="To create it, tap \"Create @%s\" on the keyboard below and confirm in the window Telegram opens. "
+        intro = (
+            "To create it, tap \"Create @%s\" on the keyboard below and confirm in the window Telegram opens. "
             "You can change the name and username there. When it exists I connect to it and tell you here.\n\n"
             "If the keyboard doesn't show or the button does nothing (an older Telegram app), use the link in the "
             "next message instead.\n\nIt will start with %s (change it any time from /bot or with /bot perm):\n%s"
-            % (username, presets.name_of(permissions), bots.permission_summary(draft, for_owner=True)),
-            reply_markup=keyboard,
+            % (username, presets.name_of(permissions), bots.permission_summary(draft, for_owner=True))
         )
-        # Second way: the creation link. It works where the Telegram app opens t.me/newbot links itself.
-        await self.bot.send_message(
-            chat_id=chat_id,
-            text="Second option, the link: %s" % link,
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Create @%s by link" % username, url=link)]]),
-        )
+        for text, markup in bot_admin.creation_messages(intro, name, username, link):
+            await self.bot.send_message(chat_id=chat_id, text=text, reply_markup=markup)
         return username
 
     async def _bot_set(self, update: Update, record: BotRecord, rest: str) -> None:
@@ -803,8 +792,15 @@ class ControlPanel:
         if name.lower() == "preset" and key is None:
             await update.effective_message.reply_text("Which preset? One of: %s." % ", ".join(presets.keys()))
             return
+        target = presets.apply(key, record.permissions) if key is not None else None
+        if target is None and name.lower() == "admin" and value.strip().lower() in bots.ON_WORDS:
+            target = dict(record.permissions, admin="on")
+        if target is not None and target.get("admin") == "on" and not record.allows("admin"):
+            await self._ask_admin(update, record, target)  # becoming a bot admin asks first, as cross-agent access
+            return
         if key is not None:
-            updated = await self.pool.set_permissions(record, presets.apply(key, record.permissions))
+            updated = await self.pool.set_permissions(record, presets.apply(key, record.permissions),
+                                                      by=update.effective_user.id)
             backend = updated.settings.get("backend") or self.config.default_backend
             warnings = menus.permission_warnings(updated, backend)
             await update.effective_message.reply_text(
@@ -813,7 +809,7 @@ class ControlPanel:
                     "".join("\n" + warning for warning in warnings))
             )
             return
-        updated = await self.pool.set_permission(record, name, value)
+        updated = await self.pool.set_permission(record, name, value, by=update.effective_user.id)
         note = usage_monitor.permission_note(self.config, updated)
         await update.effective_message.reply_text(
             "%s of %s: %s. It applies from its next message.\n\n%s%s" % (
@@ -846,6 +842,16 @@ class ControlPanel:
         ]])
         await reply(bots.CROSS_AGENT_WARNING.format(name=record.name, handle=record.handle, username=record.username),
                     reply_markup=markup)
+
+    async def _ask_admin(self, update: Update, record: BotRecord, target: Dict[str, str]) -> None:
+        nonce = self.pool.ask_confirmation(record.bot_id, update.effective_user.id, "admingrant", payload=target)
+        markup = InlineKeyboardMarkup([[
+            InlineKeyboardButton("🧑‍💼 Make it a bot admin", callback_data="bot:admingrant:%s" % nonce),
+            InlineKeyboardButton("Cancel", callback_data="bot:cancel:%s" % nonce),
+        ]])
+        await update.effective_message.reply_text(
+            "%s\n\nIt would have: %s" % (bots.ADMIN_WARNING.format(handle=record.handle), presets.name_of(target)),
+            reply_markup=markup)
 
     def _audit_text(self, user_id: int) -> str:
         """The audit lines about the user's own bots (docs/PANEL_ONLY.md: the open question of a global view)."""
@@ -927,15 +933,24 @@ class ControlPanel:
             await query.answer()
             return
         _, action, nonce = (query.data.split(":", 2) + ["", ""])[:3]
+        payload = self.pool.confirmation_payload(nonce)
         taken = self.pool.take_confirmation(nonce, update.effective_user.id, None if action == "cancel" else action)
         await query.answer()
         if taken is None:
-            ask = "/bot perm <bot> cross on" if action == "crossgrant" else "/bot destroy"
-            await query.edit_message_text("That button has expired. Ask again with %s." % ask)
+            ask = {"crossgrant": "Ask again with /bot perm <bot> cross on.",
+                   "admingrant": "Ask again with /bot perm <bot> admin on.",
+                   "adminok": "Grant what you want yourself from /bot → My bots → Permissions.",
+                   }.get(action, "Ask again with /bot destroy.")
+            await query.edit_message_text("That button has expired. %s" % ask)
             return
         bot_id, asked = taken
+        if action == "cancel" and asked == "adminok":
+            record = self.pool.registry.get_owned(bot_id, update.effective_user.id)
+            await query.edit_message_text(await self.pool.answer_admin_extras(record, False, update.effective_user.id, payload or "")
+                                          if record is not None else "That bot is already gone.")
+            return
         if action == "cancel":
-            await query.edit_message_text("Nothing was granted." if asked == "crossgrant" else "Nothing was destroyed.")
+            await query.edit_message_text("Nothing was destroyed." if asked == "destroy" else "Nothing was granted.")
             return
         record = self.pool.registry.get(bot_id)
         if record is None:
@@ -948,6 +963,17 @@ class ControlPanel:
             updated = await self.pool.set_cross_agent(record, True, update.effective_user.id, "command")
             await query.edit_message_text("Cross-agent access granted to %s. It applies from its next message.\n\n%s"
                                           % (record.handle, bots.cross_agent_line(updated)))
+            return
+        if action == "adminok":
+            await query.edit_message_text(await self.pool.answer_admin_extras(record, True, update.effective_user.id,
+                                                                              payload or ""))
+            return
+        if action == "admingrant":
+            updated = await self.pool.set_permissions(record, payload or dict(record.permissions, admin="on"),
+                                                      by=update.effective_user.id, via="command")
+            await query.edit_message_text("%s is now a bot admin (%s). It applies from its next message.\n\n%s"
+                                          % (record.handle, presets.level_name(updated),
+                                             bots.permission_summary(updated, for_owner=True)))
             return
         await query.edit_message_text("Destroying %s…" % record.handle)
         await self._send(context.bot, chat_of(update), await self.pool.destroy(record))
@@ -975,6 +1001,7 @@ class BotPool:
         self.manager_username = ""
         self.can_manage: Optional[bool] = None
         self._confirmations: Dict[str, Tuple[int, int, float, str]] = {}  # nonce -> bot, user, expiry, action
+        self._payloads: Dict[str, Any] = {}  # nonce -> what a confirmation applies (the permissions it sets)
         self._scheduler: Optional["asyncio.Future[None]"] = None
         # One per process, not one per bot: the plan limits belong to the Claude account all the bots share.
         self.usage_monitor: Optional[usage_monitor.UsageMonitor] = None
@@ -1163,17 +1190,25 @@ class BotPool:
             bot_id=bot_id,
             username=username,
             name=str(bot.get("first_name") or (pending.name if pending else username)),
-            owner_id=creator_id,
+            owner_id=creator_id,  # always the user who confirmed it in Telegram, also when a bot admin asked for it
             settings=dict(pending.settings) if pending else {},
             # Without a request of its own, a bot gets the defaults: the least it can do.
             permissions=dict(pending.permissions) if pending else {},
             notify_chat_id=pending.chat_id if pending else creator_id,
         )
+        soul_text = pending.soul if pending is not None else ""
+        adopted = None
+        if pending is not None and pending.request_id:
+            # A bot admin asked for it: its request is checked again now, against the admin as it is now.
+            adopted = self._adopt(record, pending)
+            soul_text = adopted[2].soul if adopted[2] is not None else ""
         token = await bots.fetch_token(manager, bot_id)
         self.registry.save(record)
         self.registry.set_token(bot_id, token)
-        if pending is not None and pending.soul.strip():  # its own personality from the assistant; else the base
-            soul.write(self.registry.workspace(bot_id), pending.soul)
+        if soul_text.strip():  # its own personality from the assistant or the admin's spec; else the base
+            soul.write(self.registry.workspace(bot_id), soul_text)
+        if record.allows("admin"):  # born a bot admin (the creation assistant or /bot new +admin): in the log too
+            bots.audit(self.config, "admin_permission_granted", record, creator_id, "creation")
         try:
             await bots.restrict_access(manager, bot_id)
         except Exception as exc:  # Consiglieri's own allow-list still guards the bot
@@ -1186,13 +1221,131 @@ class BotPool:
         lines.append(bots.permission_summary(record, for_owner=True))
         if not pending:
             lines.append("(I hadn't asked for it, but you created it with me as manager, so I took it on.)")
-        if not record.settings.get("task"):
+        if adopted is not None:
+            request, admin, checked, problems = adopted
+            if checked is None:
+                lines.append("⚠️ %s asked for it (request %s), but that request no longer holds (%s), so it starts "
+                             "with the least: 🔒 Basic, no task and the base personality. Set it up from /bot."
+                             % (request.get("admin"), request["id"], "; ".join(problems)))
+            else:
+                lines.append("Created for you at %s's request (%s). You own it; %s will finish setting it up and "
+                             "remind you to press Start." % (request.get("admin"), request["id"], request.get("admin")))
+        elif not record.settings.get("task"):
             lines.append("Give it a job with /bot set %s task <what it should do>." % record.username)
         if not running:
             lines = ["%s was created, but I could not connect to it. Try /bot resume %s." % (record.handle, record.username)]
         # This message also takes the creation keyboard away.
         await self._notify(record.notify_chat_id, "\n".join(lines), reply_markup=ReplyKeyboardRemove())
+        if adopted is not None:
+            await self._after_adoption(record, *adopted)
         return record
+
+    # -- bots a bot admin asked for (docs/BOT_ADMIN.md) -------------------------
+
+    def _adopt(self, record: BotRecord, pending: Any) -> Tuple[Dict[str, Any], Optional[BotRecord], Any, List[str]]:
+        """Fill a new bot from the bot admin's request, checked again now. A request that no longer holds (the admin
+        is gone, is no longer one, or now has less) leaves it with the least: Basic, no settings, the base soul."""
+        request = bot_admin.get(self.config, pending.request_id) or {
+            "id": pending.request_id, "admin_bot_id": pending.admin_bot_id, "owner_id": pending.owner_id, "input": None}
+        admin, checked, problems = bot_admin.revalidate(self.config, request)
+        if int(request.get("owner_id") or 0) != int(record.owner_id):
+            admin, checked, problems = admin, None, ["it was asked for another user"]
+        record.created_by = int(request.get("admin_bot_id") or 0)
+        record.request_id = request["id"]
+        if checked is None:
+            record.settings, record.permissions = {}, {}
+        else:
+            record.settings, record.permissions = dict(checked.settings), dict(checked.initial)
+        return request, admin, checked, problems
+
+    async def _after_adoption(self, record: BotRecord, request: Dict[str, Any], admin: Optional[BotRecord],
+                              checked: Any, problems: List[str]) -> None:
+        via = "bot admin request %s by %s" % (request["id"], request.get("admin"))
+        if checked is None:
+            bots.audit(self.config, "admin_request_invalid", record, record.owner_id, via, admin=request.get("admin"),
+                       request=request["id"], problems=problems)
+            bot_admin.update(self.config, request["id"], status="invalid", bot_id=record.bot_id, bot=record.handle,
+                             problems=problems)
+            self._wake_admin(admin, request, bot_admin.created_event(record, request, None, problems))
+            return
+        scheduled = bot_admin.schedule_reminders(self.config, record, checked.reminders)
+        status = "awaiting_approval" if checked.extras else "created"
+        bot_admin.update(self.config, request["id"], status=status, bot_id=record.bot_id, bot=record.handle,
+                         reminders=scheduled, skipped=checked.skipped)
+        bots.audit(self.config, "admin_bot_created", record, record.owner_id, via, admin=request.get("admin"),
+                   request=request["id"], permissions=record.permissions, settings=record.settings,
+                   soul=bool(checked.soul), reminders=len(scheduled),
+                   extras=[bot_admin.EXTRAS[key][0] for key in checked.extras])
+        if checked.extras:
+            nonce = self.ask_confirmation(record.bot_id, record.owner_id, "adminok", payload=request["id"],
+                                          seconds=bot_admin.APPROVAL_SECONDS)
+            markup = InlineKeyboardMarkup([[
+                InlineKeyboardButton("⚠️ Approve them", callback_data="bot:adminok:%s" % nonce),
+                InlineKeyboardButton("No, keep it without", callback_data="bot:cancel:%s" % nonce),
+            ]])
+            await self._notify(record.owner_id, bot_admin.approval_text(record, request), reply_markup=markup)
+        self._wake_admin(admin, request, bot_admin.created_event(record, request, checked, problems))
+
+    def _wake_admin(self, admin: Optional[BotRecord], request: Dict[str, Any], text: str) -> None:
+        """Tell the bot admin, in the chat it asked from, with an [Event]: it wakes up and carries on."""
+        if admin is None or int(admin.owner_id) != int(request.get("owner_id") or 0):
+            return
+        chat_id = int(request.get("chat_id") or admin.owner_id)
+        if chat_id not in admin.own_chats():
+            chat_id = admin.owner_id
+        self.store.add(chat_id=chat_id, due=utc_now(), text=text, kind=KIND_EVENT, user_id=admin.owner_id,
+                       bot_id=admin.bot_id, thread_id=request.get("thread_id"))
+
+    async def answer_admin_extras(self, record: BotRecord, yes: bool, by: int, request_id: str = "") -> str:
+        """The user's answer to the extras a bot admin asked for. Checked again: never above the admin as it is now."""
+        request = bot_admin.for_bot(self.config, record.bot_id)
+        if request is None or request["status"] != "awaiting_approval" or (request_id and request["id"] != request_id):
+            return "Nothing from a bot admin is waiting for your answer about %s." % record.handle
+        extras = request["spec"].get("extras", [])
+        names = [bot_admin.EXTRAS[key][0] for key in extras if key in bot_admin.EXTRAS]
+        via = "bot admin request %s by %s" % (request["id"], request.get("admin"))
+        admin = self.registry.get(int(request["admin_bot_id"]))
+        if not yes:
+            bot_admin.update(self.config, request["id"], status="declined", answered_by=by)
+            bots.audit(self.config, "admin_extras_declined", record, by, via, admin=request.get("admin"),
+                       request=request["id"], extras=names)
+            self._wake_admin(admin, request, bot_admin.answered_event(record, request, "declined"))
+            return ("Declined. %s keeps running without: %s. You can grant any of it yourself from /bot → My bots → "
+                    "Permissions." % (record.handle, ", ".join(names)))
+        values = bot_admin.extra_values(request["spec"]["permissions"], extras)
+        problems: List[str] = []
+        if admin is None or not admin.allows("admin") or int(admin.owner_id) != int(record.owner_id):
+            problems.append("the bot admin that asked is gone or no longer one")
+        else:
+            problems += bot_admin.ceiling_problems(self.config, admin, values, "cross" in extras, {})
+        if problems:
+            bot_admin.update(self.config, request["id"], status="refused", answered_by=by, problems=problems)
+            bots.audit(self.config, "admin_extras_refused", record, by, via, admin=request.get("admin"),
+                       request=request["id"], extras=names, problems=problems)
+            self._wake_admin(admin, request, bot_admin.answered_event(record, request, "refused", "; ".join(problems)))
+            return ("I can't approve that: %s. %s keeps running without it; grant it yourself from /bot if you want."
+                    % ("; ".join(problems), record.handle))
+        current = self.registry.get(record.bot_id) or record
+        updated = await self.set_permissions(current, dict(current.permissions, **values), by=by, via=via)
+        if "cross" in extras:
+            updated = await self.set_cross_agent(updated, True, by, via)
+        bot_admin.update(self.config, request["id"], status="approved", answered_by=by)
+        bots.audit(self.config, "admin_extras_approved", updated, by, via, admin=request.get("admin"),
+                   request=request["id"], extras=names)
+        self._wake_admin(admin, request, bot_admin.answered_event(updated, request, "approved"))
+        return "Approved for %s: %s. It applies from its next message. Now: %s." % (
+            record.handle, ", ".join(names), presets.level_name(updated))
+
+    def admin_request_cancelled(self, pending: Any, by: int) -> None:
+        request = bot_admin.get(self.config, pending.request_id)
+        if request is None or request["status"] != "waiting":
+            return
+        bot_admin.update(self.config, request["id"], status="cancelled", answered_by=by)
+        admin = self.registry.get(int(request["admin_bot_id"]))
+        if admin is not None:
+            bots.audit(self.config, "admin_request_cancelled", admin, by, "the Cancel key", admin=admin.handle,
+                       request=request["id"])
+        self._wake_admin(admin, request, bot_admin.answered_event(None, request, "cancelled"))
 
     async def _token_changed(self, record: BotRecord, creator_id: int) -> BotRecord:
         token = await bots.fetch_token(self.main.bot, record.bot_id)
@@ -1248,12 +1401,15 @@ class BotPool:
                 await self._sync_profile(record)
         return record
 
-    async def set_permission(self, record: BotRecord, permission: str, value: str) -> BotRecord:
+    async def set_permission(self, record: BotRecord, permission: str, value: str, by: Optional[int] = None,
+                             via: str = "command") -> BotRecord:
         cleaned = bots.clean_permission(self.config, permission, value)
         record = self.registry.get(record.bot_id) or record
+        was_admin = record.allows("admin")
         record.permissions[permission.strip().lower()] = cleaned
         self.registry.save(record)
         record = self.registry.get(record.bot_id) or record
+        self._audit_admin(record, was_admin, by, via)
         frontend = self.frontends.get(record.bot_id)
         if frontend is not None:
             frontend.record = record
@@ -1261,17 +1417,27 @@ class BotPool:
             # command line and manual change). A turn in progress finishes under the old rules.
         return record
 
-    async def set_permissions(self, record: BotRecord, permissions: Dict[str, str]) -> BotRecord:
+    async def set_permissions(self, record: BotRecord, permissions: Dict[str, str], by: Optional[int] = None,
+                              via: str = "command") -> BotRecord:
         """Replace all of a bot's permissions at once (a preset): checked, then saved in one write."""
         cleaned = {name: bots.clean_permission(self.config, name, value) for name, value in permissions.items()}
         record = self.registry.get(record.bot_id) or record
+        was_admin = record.allows("admin")
         record.permissions = cleaned
         self.registry.save(record)
         record = self.registry.get(record.bot_id) or record
+        self._audit_admin(record, was_admin, by, via)
         frontend = self.frontends.get(record.bot_id)
         if frontend is not None:
             frontend.record = record  # applies from its next message, as with set_permission
         return record
+
+    def _audit_admin(self, record: BotRecord, was_admin: bool, by: Optional[int], via: str) -> None:
+        """Becoming a bot admin, or ceasing to be one, goes to the audit log like cross-agent access."""
+        if record.allows("admin") != was_admin:
+            event = "admin_permission_granted" if record.allows("admin") else "admin_permission_revoked"
+            bots.audit(self.config, event, record, by, via)
+            log.warning("%s %s", event.replace("_", " "), record.handle)
 
     async def set_soul(self, record: BotRecord, text: Optional[str]) -> str:
         """Replace a bot's personality, or with None put the base back. Its next message reopens its process
@@ -1301,12 +1467,20 @@ class BotPool:
 
     # -- destroying -----------------------------------------------------------
 
-    def ask_confirmation(self, bot_id: int, user_id: int, action: str = "destroy") -> str:
+    def ask_confirmation(self, bot_id: int, user_id: int, action: str = "destroy", payload: Any = None,
+                         seconds: float = CONFIRM_SECONDS) -> str:
         now = time.time()
         self._confirmations = {key: value for key, value in self._confirmations.items() if value[2] > now}
+        self._payloads = {key: value for key, value in self._payloads.items() if key in self._confirmations}
         nonce = secrets.token_urlsafe(9)
-        self._confirmations[nonce] = (int(bot_id), int(user_id), now + CONFIRM_SECONDS, action)
+        self._confirmations[nonce] = (int(bot_id), int(user_id), now + seconds, action)
+        if payload is not None:
+            self._payloads[nonce] = payload
         return nonce
+
+    def confirmation_payload(self, nonce: str) -> Any:
+        """What a confirmation applies; read it before take_confirmation, which forgets the button."""
+        return self._payloads.get(nonce)
 
     def take_confirmation(self, nonce: str, user_id: int, action: Optional[str] = None) -> Optional[Tuple[int, str]]:
         """(bot, action) of a confirmation button, if it is fresh, pressed by the person who asked, and (when

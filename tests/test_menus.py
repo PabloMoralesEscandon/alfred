@@ -357,8 +357,8 @@ class MenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
         async def scenario() -> None:
             await self.walk_to_permissions()
             self.assertEqual(self.labels(), ["🔒 Basic", "● ⭐ Assistant (recommended)", "🛠 Power", "🔓 Full access",
-                                             "🎛 Customize", "⬅️ Back", "✖️ Cancel"])
-            for key in presets.keys():
+                                             "🧑‍💼 Bot admin", "🎛 Customize", "⬅️ Back", "✖️ Cancel"])
+            for key in presets.choices():
                 self.assertIn(presets.card(key), self.text)
             self.assertIn("Now: ⭐ Assistant", self.text)
             self.assertNotIn("Web search and pages", " ".join(self.labels()))  # no switches here
