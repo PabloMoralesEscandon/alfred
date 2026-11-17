@@ -56,7 +56,8 @@ class PresetInfo:
 PRESET_INFO: Dict[str, PresetInfo] = {
     "basic": PresetInfo(
         "🔒", "Basic",
-        can="talk with you, set reminders, keep notes and files in its own folder",
+        can="talk with you, set reminders, keep notes and files in its own folder, and check the plan usage "
+            "when you allow it",
         cannot="go online, touch your other files, run commands, use your browser or message anyone else",
     ),
     "assistant": PresetInfo(

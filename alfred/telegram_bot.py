@@ -104,8 +104,8 @@ Text shortcuts:
 
 Settings: %s.
 Permissions: %s.
-Options for /bot new: +web +browser +shell +edit +mcp +contact +bots +admin +usage +bypass, -schedule, -sandbox, and setting=value or permission=value (for example model=sonnet folders=~/notes).
-A new bot starts with the least: its own directory, the alfred command, reminders, nothing else.
+Options for /bot new: +web +browser +shell +edit +mcp +contact +bots +admin +bypass, -schedule, -usage, -sandbox, and setting=value or permission=value (for example model=sonnet folders=~/notes).
+A new bot starts with the least: its own directory, the alfred command, reminders and the plan usage tool (used only with your express permission), nothing else.
 At every level, even full access, a bot can't read the memory of your other bots or use their tools. Only cross-agent access lifts that, and only you can grant it here.
 <bot> is its @username, its name or its id.""" % (", ".join(presets.keys()), ", ".join(bots.SETTING_NAMES), ", ".join(bots.PERMISSION_NAMES))
 

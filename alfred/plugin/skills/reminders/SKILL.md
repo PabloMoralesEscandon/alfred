@@ -41,7 +41,8 @@ alfred schedule add --at 2026-06-12T07:30 --task "Note to self: the user flies a
 
 ## Only when the plan limits allow
 
-With the usage permission, a reminder or task can carry a usage condition, checked just before each
+Only with the user's express permission (they asked for it, gave you a usage rule, or said yes when you
+asked; see the `alfred:usage` skill), a reminder or task can carry a usage condition, checked just before each
 delivery. When it holds the item back, nothing is sent and you are not woken (a recurring item moves on to
 its next time):
 

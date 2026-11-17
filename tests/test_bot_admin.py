@@ -351,6 +351,8 @@ class SpecTests(unittest.TestCase):
         for name, value in (("browser", "on"), ("shell", "full"), ("mode", "acceptEdits"), ("mcp", "on"),
                             ("contact", "on"), ("usage", "on"), ("sandbox", "off")):
             with self.subTest(name):
+                if name == "usage":  # on by default now: only an admin that has it switched off can't grant it
+                    self.admin_with(usage="off")
                 problems = self.refused(permissions={name: value})
                 self.assertIn("%s %s is more than @boss_bot has" % (name, value), problems)
         problems = self.refused(preset="power")

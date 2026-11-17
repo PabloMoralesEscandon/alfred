@@ -666,7 +666,7 @@ class MenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
         from alfred import usage_alerts
 
         async def scenario() -> None:
-            await self.create(RESEARCH, "alfredpanel_research_bot", "Research", "/bot new Research")
+            await self.create(RESEARCH, "alfredpanel_research_bot", "Research", "/bot new Research -usage")
             store = usage_alerts.AlertStore.for_bot(self.config, RESEARCH)
             store.add("session.used > 80", note="slow down", chat_id=OWNER)
             await self.open()

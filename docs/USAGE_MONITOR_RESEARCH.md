@@ -682,6 +682,15 @@ subida del semanal dividida por la de la ventana en un mismo tramo da la proporc
 
 ## 11. Permiso `usage` por bot
 
+> **Cambio posterior (rama `usage-default-tool`):** el permiso pasó a estar **activado por defecto**, como
+> `schedule` (recordatorios), y por tanto en todos los presets. A cambio, cada agente **solo puede usar la
+> herramienta con permiso expreso del usuario** (que se lo pida, que le dé una regla sobre el uso, o que diga
+> que sí cuando el agente pregunta). La regla está en el manual del bot (`bots.USAGE_CONSENT_RULE` en
+> `permission_summary()` y una línea en `templates/BOT.md`), en la skill `alfred:usage` y en
+> `docs/SECURITY_PRESETS.md`. Es una instrucción, no un candado: el candado sigue siendo el interruptor,
+> que con `usage off` deniega las órdenes igual que antes. Lo que sigue describe el diseño original
+> (`off` por defecto); los mecanismos de aplicación no han cambiado.
+
 ### Qué es
 
 Un permiso más de cada bot, `usage`, **desactivado por defecto y en todos los presets de seguridad**
