@@ -7,7 +7,7 @@ Python, never by the bot: the spec is data, checked field by field, and
 - nothing in it may be above what the admin itself has: each permission, its folders, its backend and
   cross-agent access (`ceiling_problems`). A spec that asks for more is refused, with every reason;
 - some things, even within that ceiling, need the user's own yes after the bot exists, on a button in the
-  panel's chat, after a warning (`EXTRAS`): bot admin, bots, personality and shared-memory writes, Full access
+  panel's chat, after a warning (`EXTRAS`): bot admin, bots, personality and shared-memory writes, the calendar, Full access
   and cross-agent access. Until then the bot runs without them (`safe_permissions`);
 - the owner of every bot is the user who confirms it in Telegram, never the admin;
 - an admin has limits (bots per admin, bots per user, requests per hour) and never destroys a bot;
@@ -56,7 +56,7 @@ DEFAULT_PER_HOUR = 3  # ALFRED_ADMIN_REQUESTS_PER_HOUR: requests one admin sends
 APPROVAL_SECONDS = 24 * 3600  # how long the button that approves the extras is honoured
 
 # What needs the user's own yes, even within the admin's ceiling: key -> (label, warning).
-SENSITIVE_SWITCHES = ("admin", "bots", "soul", "shared")
+SENSITIVE_SWITCHES = ("admin", "bots", "soul", "shared", "calendar")
 EXTRAS: Dict[str, Tuple[str, str]] = {
     "full": ("🔓 Full access (a shell with no sandbox, or bypassPermissions)",
              "it can do anything your user can on this Mac, without asking, and get around the other rules"),
@@ -64,6 +64,7 @@ EXTRAS: Dict[str, Tuple[str, str]] = {
     "bots": ("🤖 List, configure and request your other bots", "it could change the task and model of your other bots"),
     "soul": ("🎭 Edit its own personality", "it could rewrite its SOUL.md, and with it how it behaves"),
     "shared": ("🧠 Write the shared memory", "every other agent reads what it writes there, instructions included"),
+    "calendar": ("📅 Read and create calendar events", "it could read your Google Calendar and add events to it"),
     "cross": ("⚠️ Cross-agent access", "it could read the memory of your other bots and use their tools"),
 }
 STATUS_WORDS = {

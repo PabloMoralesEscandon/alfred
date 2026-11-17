@@ -120,6 +120,7 @@ WORDS: Dict[str, str] = {
     "shared": "shared-memory writes",
     "soul": "own role and personality edits",
     "usage": "plan usage",
+    "calendar": "calendar",
 }
 # Permission modes from the tightest to the loosest, for telling whether a change grants more.
 MODE_RISK = {"dontAsk": 0, "plan": 0, "default": 0, "acceptEdits": 1, "auto": 2, "bypassPermissions": 3}

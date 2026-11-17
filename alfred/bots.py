@@ -88,6 +88,7 @@ PERMISSIONS = (
     ("admin", "off", "bot admin: create and set up bots for its owner from a spec, up to its own permissions; "
                      "the owner confirms each one in Telegram (never destroy)"),
     ("usage", "off", "read the Claude plan usage and set usage alerts; needs ALFRED_USAGE_MONITOR on"),
+    ("calendar", "off", "read and create events in your Google Calendar (the claude.ai connector), even with mcp off"),
     ("shared", "off", "write the shared memory every agent reads (reading it is always allowed)"),
     ("soul", "off", "edit its own SOUL.md: its role and mission as well as its tone, so what it does; never what it may do"),
     ("allow", "", "extra Claude Code allow rules, separated by ;"),
@@ -95,7 +96,7 @@ PERMISSIONS = (
 )
 PERMISSION_NAMES = tuple(name for name, _, _ in PERMISSIONS)
 DEFAULT_PERMISSIONS = {name: default for name, default, _ in PERMISSIONS}
-SWITCHES = ("sandbox", "edit", "web", "browser", "mcp", "schedule", "contact", "bots", "admin", "usage", "shared", "soul")
+SWITCHES = ("sandbox", "edit", "web", "browser", "mcp", "schedule", "contact", "bots", "admin", "usage", "calendar", "shared", "soul")
 # `+name` / `-name` when creating a bot: on and off, or for shell: full and alfred.
 SHORTHANDS = {"bypass": ("mode", "bypassPermissions")}
 
@@ -126,6 +127,11 @@ USAGE_RULES = ("Bash(alfred usage)", "Bash(alfred usage *)", "Bash(alfred usage-
                # usage conditions on scheduled items; `alfred schedule add` refuses them without the permission too
                "Bash(alfred schedule * --skip-if*)", "Bash(alfred schedule * --only-if*)")
 USAGE_UNSANDBOXED = ("alfred usage", "alfred usage *", "alfred usage-alert *")  # usage * covers check, running_low, forecast
+# The calendar permission: the Google Calendar connector of the user's claude.ai account, as Claude Code names
+# its tools (server "claude.ai Google Calendar"). Allowed with the permission, denied without it, whatever `mcp`
+# and the mode say: like the browser's Chrome server, the mcp switch neither grants nor takes it away.
+CALENDAR_SERVER = "claude_ai_Google_Calendar"
+CALENDAR_RULES = ("mcp__%s__*" % CALENDAR_SERVER,)
 
 # Cross-agent access: the level above full access. It is not a permission like the others (no preset,
 # switch, `/bot perm` value, `/bot new` option or `alfred` command reaches it); only the control panel
@@ -642,7 +648,9 @@ def permission_summary(record: BotRecord, for_owner: bool = False) -> str:
                                    "(the owner confirms each one)" % ("its" if for_owner else "your")),
                          ("usage", "read the Claude plan usage and set usage alerts (`alfred usage check`, "
                                    "`alfred usage running_low`, `alfred usage-alert`, and `alfred schedule add "
-                                   "--skip-if-low`; the alfred:usage skill)")):
+                                   "--skip-if-low`; the alfred:usage skill)"),
+                         ("calendar", "read and create events in the user's Google Calendar (the alfred:calendar "
+                                      "skill; create one only when the user asked for it or said yes)")):
         (can if record.allows(name) else cannot).append(phrase)
     can.append("read the shared memory every agent reads")
     (can if record.allows("shared") else cannot).append("write the shared memory")
@@ -986,9 +994,13 @@ def claude_settings(config: Config, record: BotRecord) -> Dict[str, Any]:
         allow += list(BROWSER_RULES)
     else:
         deny += list(BROWSER_RULES)
+    if record.allows("calendar"):
+        allow += list(CALENDAR_RULES)
+    else:
+        deny += list(CALENDAR_RULES)  # with mcp on too: the calendar needs its own permission
     if not record.allows("mcp"):
-        if record.allows("browser"):
-            pass  # Claude in Chrome is an MCP server; a blanket deny would remove it too
+        if record.allows("browser") or record.allows("calendar"):
+            pass  # Claude in Chrome and the calendar connector are MCP servers; a blanket deny would remove them too
         else:
             deny.append("mcp__*")
     if record.allows("edit"):
