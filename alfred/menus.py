@@ -44,6 +44,7 @@ SWITCH_LABELS = (
     ("bots", "🤖 List and request bots"),
     ("admin", "🧑‍💼 Create bots for you (bot admin)"),
     ("usage", "📊 Plan usage and alerts"),
+    ("calendar", "📅 Read and create calendar events"),
     ("shared", "🧠 Write the shared memory"),
     ("soul", "🎭 Edit its own role and personality"),
 )
@@ -147,6 +148,12 @@ def _mark(on: bool) -> str:
     return "✅" if on else "⬜"
 
 
+CALENDAR_WARNING = (
+    "⚠️ Calendar: it reads your Google Calendar and can add events to it, through the Google Calendar connector of "
+    "your claude.ai account (connect it once in claude.ai → Settings → Connectors; every bot with this switch "
+    "sees the same calendar). It adds an event only when you asked for it or said yes.")
+
+
 def permission_warnings(record: BotRecord, backend: str = "claude") -> List[str]:
     """Plain warnings for the risky choices, shown on the permissions and summary screens."""
     warnings = []
@@ -167,6 +174,9 @@ def permission_warnings(record: BotRecord, backend: str = "claude") -> List[str]
                         "memory and tools is not enforced; only the manual asks it to stay out.")
     if record.allows("browser"):
         warnings.append("⚠️ Browser: it uses the sessions you are logged in to there.")
+    if record.allows("calendar"):
+        warnings.append(CALENDAR_WARNING if backend != "codex" else
+                        "⚠️ Calendar: Codex can't use the Google Calendar connector, so this switch does nothing there.")
     if record.allows("contact"):
         warnings.append("⚠️ Other chats: it can message people other than you.")
     if record.allows("shared"):

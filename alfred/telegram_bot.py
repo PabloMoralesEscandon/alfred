@@ -104,7 +104,7 @@ Text shortcuts:
 
 Settings: %s.
 Permissions: %s.
-Options for /bot new: +web +browser +shell +edit +mcp +contact +bots +admin +usage +bypass, -schedule, -sandbox, and setting=value or permission=value (for example model=sonnet folders=~/notes).
+Options for /bot new: +web +browser +shell +edit +mcp +contact +bots +admin +usage +calendar +bypass, -schedule, -sandbox, and setting=value or permission=value (for example model=sonnet folders=~/notes).
 A new bot starts with the least: its own directory, the alfred command, reminders, nothing else.
 At every level, even full access, a bot can't read the memory of your other bots or use their tools. Only cross-agent access lifts that, and only you can grant it here.
 <bot> is its @username, its name or its id.""" % (", ".join(presets.keys()), ", ".join(bots.SETTING_NAMES), ", ".join(bots.PERMISSION_NAMES))
@@ -811,6 +811,8 @@ class ControlPanel:
             return
         updated = await self.pool.set_permission(record, name, value, by=update.effective_user.id)
         note = usage_monitor.permission_note(self.config, updated)
+        if name.lower() == "calendar" and updated.allows("calendar"):  # where the calendar comes from
+            note = "\n\n".join(part for part in (note, menus.CALENDAR_WARNING) if part)
         await update.effective_message.reply_text(
             "%s of %s: %s. It applies from its next message.\n\n%s%s" % (
                 name.lower(), record.handle, updated.permission(name.lower()) or "none",

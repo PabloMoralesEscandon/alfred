@@ -129,7 +129,7 @@ class CliTests(unittest.TestCase):
         self.assertIn(str(self.sandbox.home), output)
 
         _, payload = self.run_json("skills")
-        self.assertEqual([skill["name"] for skill in payload["skills"]], ["alfred:bot-admin", "alfred:browser", "alfred:extensions", "alfred:orca-agents", "alfred:reminders", "alfred:usage", "alfred:web-logins"])
+        self.assertEqual([skill["name"] for skill in payload["skills"]], ["alfred:bot-admin", "alfred:browser", "alfred:calendar", "alfred:extensions", "alfred:orca-agents", "alfred:reminders", "alfred:usage", "alfred:web-logins"])
 
         self.sandbox.fake_cli("claude", {"fresh": claude_lines("At your service.", "sess-A")})
         with mock.patch.dict(os.environ, self.sandbox.environ):

@@ -123,6 +123,7 @@ Dentro del techo, estos esperan a un botón explícito en el chat del usuario co
 | 🤖 Bots | `bots on` |
 | 🎭 Personalidad propia | `soul on` |
 | 🧠 Memoria compartida | `shared on` |
+| 📅 Calendario | `calendar on` |
 | ⚠️ Acceso entre agentes | `cross_agent: true` (con el aviso de siempre, `CROSS_AGENT_WARNING`) |
 
 Hasta entonces el bot corre sin ellos (`safe_permissions`: esos interruptores apagados, `sandbox on` y

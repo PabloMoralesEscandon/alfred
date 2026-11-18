@@ -102,6 +102,14 @@ it. Writing needs the `shared` switch under Customize. A bot with an unsandboxed
 still write it with shell commands, as it can anything else. `docs/AGENT_CHATS_RESEARCH.md` §6.4, "Memoria
 compartida", has the details and the remaining ways around.
 
+## The calendar under every preset
+
+The `calendar` permission ([docs/CALENDAR.md](CALENDAR.md)) gives a bot the Google Calendar connector of the
+user's claude.ai account: reading events and creating them. It is off in every preset and template, Full access
+included, and is turned on only from Customize (📅), with `/bot perm <bot> calendar on` or `+calendar`. Without it
+the connector's tools are denied even with `mcp on` and `bypassPermissions`; with it they are allowed even with
+`mcp off`. For a bot admin it is one of the extras that wait for the user's yes.
+
 ## Bot admins under every preset
 
 The `admin` permission (docs/BOT_ADMIN.md) lets a bot ask the panel to create bots for its owner from a spec, up to
