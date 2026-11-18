@@ -292,7 +292,11 @@ class PermissionTests(BotsTestCase):
         self.assertIn("Bash(alfred *)", rules["allow"])
         self.assertNotIn("Bash", rules["allow"])
         self.assertIn("Edit(%s/**)" % workspace, rules["allow"])
-        for denied in ("WebFetch", "WebSearch", "mcp__*", "Bash(orca *)", "Bash(alfred bots *)", "Bash(alfred run *)",
+        # The calendar connector is on by default: no blanket mcp__* deny (it would remove it), and in dontAsk
+        # any other MCP tool, having no allow rule, is refused anyway.
+        self.assertIn("mcp__claude_ai_Google_Calendar__*", rules["allow"])
+        self.assertNotIn("mcp__*", rules["deny"])
+        for denied in ("WebFetch", "WebSearch", "Bash(orca *)", "Bash(alfred bots *)", "Bash(alfred run *)",
                        "Read(//%s/**)" % str(self.config.home).lstrip("/"), "Edit(%s/CLAUDE.md)" % workspace):
             self.assertIn(denied, rules["deny"], denied)
         self.assertNotIn("Bash(alfred schedule *)", rules["deny"])  # reminders are on by default

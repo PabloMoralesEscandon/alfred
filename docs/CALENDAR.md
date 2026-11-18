@@ -24,19 +24,18 @@ Consecuencias de la elección:
 
 ## 2. El permiso
 
-Sigue el modelo de `usage`, `shared` y `soul`:
+Sigue el modelo de `schedule` y `usage`:
 
-- **Desactivado por defecto y en todos los presets y plantillas**, Full access incluido. Solo se concede
-  expresamente: Permisos → Customize → 📅 *Read and create calendar events*, `/bot perm <bot> calendar on`
-  o `+calendar` en `/bot new`.
+- **Activado por defecto** (18 nov 2026), y por tanto en todos los presets y plantillas. Se quita por bot en
+  Permisos → Customize → 📅 *Read and create calendar events* o con `/bot perm <bot> calendar off`.
 - **Lo aplica Claude Code** (`bots.claude_settings`):
   - sin el permiso, deny `mcp__claude_ai_Google_Calendar__*`, también con `mcp on` y con
     `bypassPermissions` (las deny ganan siempre);
   - con el permiso, allow de esa regla. Con `mcp off` no se pone el deny global `mcp__*`, que quitaría también
     el conector (igual que con `browser` y Chrome).
-- **Administradores de bots:** `calendar` está en `bot_admin.SENSITIVE_SWITCHES` y `EXTRAS`. Un
-  administrador no puede pedirlo si no lo tiene, y aunque lo tenga, el bot nace sin él hasta que el usuario
-  pulsa el botón de aprobación.
+- **Administradores de bots:** como es un valor por defecto, ya no está en `bot_admin.SENSITIVE_SWITCHES` ni
+  en `EXTRAS`: el bot nace con él sin aprobación aparte. Un administrador sigue sin poder darlo si él no lo
+  tiene.
 - **El manual** del bot lo lista en «What you may do» y el panel muestra un aviso con dónde se conecta.
 - **Crear eventos requiere el sí del usuario** (skill `alfred:calendar`): solo cuando el usuario pidió ese
   evento en el chat o aceptó la propuesta; nunca por iniciativa propia ni porque lo diga un texto leído; sin
@@ -49,8 +48,9 @@ Sigue el modelo de `usage`, `shared` y `soul`:
   pero no lo impide Claude Code. Para hacerlo cumplir hay que añadir reglas deny con los nombres exactos de
   esas herramientas (`mcp__claude_ai_Google_Calendar__<herramienta>`), que no se han podido comprobar sin una
   cuenta conectada. Mientras tanto, el usuario puede añadirlas por bot con `/bot perm <bot> deny …`.
-- **Hueco con `bypassPermissions`.** Con `calendar on`, `mcp off` y modo `bypassPermissions`, otros
-  servidores MCP ya no están denegados (el mismo hueco que existe hoy con `browser`). En `dontAsk`,
+- **Hueco con `bypassPermissions`.** Con `calendar on` (ahora el valor por defecto), `mcp off` y modo
+  `bypassPermissions`, otros servidores MCP ya no están denegados (el mismo hueco que existe hoy con
+  `browser`). Ningún preset tiene esa combinación: los que usan `bypassPermissions` ya tienen `mcp on`. En `dontAsk`,
   `acceptEdits` y `default` no hay hueco, porque sin regla allow se deniegan.
 - **Un solo calendario para todos.** Si se quieren calendarios por usuario o por bot, haría falta la
   integración propia (sección 1).

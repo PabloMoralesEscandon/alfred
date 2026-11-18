@@ -57,7 +57,7 @@ DEFAULT_PER_HOUR = 0  # ALFRED_ADMIN_REQUESTS_PER_HOUR: requests one admin sends
 APPROVAL_SECONDS = 24 * 3600  # how long the button that approves the extras is honoured
 
 # What needs the user's own yes, even within the admin's ceiling: key -> (label, warning).
-SENSITIVE_SWITCHES = ("admin", "bots", "soul", "shared", "calendar")
+SENSITIVE_SWITCHES = ("admin", "bots", "soul", "shared")
 EXTRAS: Dict[str, Tuple[str, str]] = {
     "full": ("🔓 Full access (a shell with no sandbox, or bypassPermissions)",
              "it can do anything your user can on this Mac, without asking, and get around the other rules"),
@@ -65,7 +65,6 @@ EXTRAS: Dict[str, Tuple[str, str]] = {
     "bots": ("🤖 List, configure and request your other bots", "it could change the task and model of your other bots"),
     "soul": ("🎭 Edit its own personality", "it could rewrite its SOUL.md, and with it how it behaves"),
     "shared": ("🧠 Write the shared memory", "every other agent reads what it writes there, instructions included"),
-    "calendar": ("📅 Read and create calendar events", "it could read your Google Calendar and add events to it"),
     "cross": ("⚠️ Cross-agent access", "it could read the memory of your other bots and use their tools"),
 }
 STATUS_WORDS = {

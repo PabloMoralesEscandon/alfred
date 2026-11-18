@@ -89,7 +89,7 @@ PERMISSIONS = (
                      "the owner confirms each one in Telegram (never destroy)"),
     ("usage", "on", "read the Claude plan usage and set usage alerts, only with the user's express permission; "
                     "the report and the alerts need ALFRED_USAGE_MONITOR on"),
-    ("calendar", "off", "read and create events in your Google Calendar (the claude.ai connector), even with mcp off"),
+    ("calendar", "on", "read and create events in your Google Calendar (the claude.ai connector), even with mcp off"),
     ("shared", "off", "write the shared memory every agent reads (reading it is always allowed)"),
     ("soul", "off", "edit its own SOUL.md: its role and mission as well as its tone, so what it does; never what it may do"),
     ("allow", "", "extra Claude Code allow rules, separated by ;"),

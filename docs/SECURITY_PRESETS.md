@@ -125,10 +125,12 @@ compartida", has the details and the remaining ways around.
 ## The calendar under every preset
 
 The `calendar` permission ([docs/CALENDAR.md](CALENDAR.md)) gives a bot the Google Calendar connector of the
-user's claude.ai account: reading events and creating them. It is off in every preset and template, Full access
-included, and is turned on only from Customize (📅), with `/bot perm <bot> calendar on` or `+calendar`. Without it
-the connector's tools are denied even with `mcp on` and `bypassPermissions`; with it they are allowed even with
-`mcp off`. For a bot admin it is one of the extras that wait for the user's yes.
+user's claude.ai account: reading events and creating them. It is on by default, so in every preset and template,
+and is turned off per bot from Customize (📅) or with `/bot perm <bot> calendar off`. Without it the connector's
+tools are denied even with `mcp on` and `bypassPermissions`; with it they are allowed even with `mcp off`. A bot
+admin gives it like any default, without a separate yes. With it on and `mcp off`, the blanket `mcp__*` deny is not
+written (it would remove the connector); other MCP tools are still refused in `dontAsk`, `acceptEdits` and `default`
+for lack of an allow rule, but not under `bypassPermissions`.
 
 ## Bot admins under every preset
 
