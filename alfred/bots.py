@@ -87,7 +87,8 @@ PERMISSIONS = (
     ("bots", "off", "list bots, change their settings and ask for new ones (never destroy)"),
     ("admin", "off", "bot admin: create and set up bots for its owner from a spec, up to its own permissions; "
                      "the owner confirms each one in Telegram (never destroy)"),
-    ("usage", "off", "read the Claude plan usage and set usage alerts; needs ALFRED_USAGE_MONITOR on"),
+    ("usage", "on", "read the Claude plan usage and set usage alerts, only with the user's express permission; "
+                    "the report and the alerts need ALFRED_USAGE_MONITOR on"),
     ("calendar", "off", "read and create events in your Google Calendar (the claude.ai connector), even with mcp off"),
     ("shared", "off", "write the shared memory every agent reads (reading it is always allowed)"),
     ("soul", "off", "edit its own SOUL.md: its role and mission as well as its tone, so what it does; never what it may do"),
@@ -121,6 +122,13 @@ ADMIN_WARNING = (
     "A text it reads (a web page, a message) could push it to ask for bots you don't need: read each request "
     "before you confirm it. Every request and every approval is written to the audit log (/bot audit)."
 )
+# The usage tool is on by default, like reminders, but a bot uses it only with its user's express permission:
+# the rule is in its manual (permission_summary), in the alfred:usage skill and in docs/SECURITY_PRESETS.md.
+# Turning the switch off still removes the tool altogether (the rules below and `alfred` itself).
+USAGE_CONSENT_RULE = (
+    "Only use the usage tool with the user's express permission: when they ask you to check the usage, give "
+    "you a rule about it, or say yes when you ask. Without that, don't run those commands and don't put "
+    "usage conditions on scheduled items; ask first.")
 # The usage permission: the commands it opens, as deny rules when it is off and as sandbox exclusions when on
 # (they need Consiglieri's state and Claude Code's own login).
 USAGE_RULES = ("Bash(alfred usage)", "Bash(alfred usage *)", "Bash(alfred usage-alert)", "Bash(alfred usage-alert *)",
@@ -662,6 +670,9 @@ def permission_summary(record: BotRecord, for_owner: bool = False) -> str:
         if not for_owner:
             text += " Those tools are switched off for you, so do not try them; if the task needs one, tell the " \
                     "user, who can grant it from the Consiglieri control panel."
+    if record.allows("usage"):
+        text += " " + (USAGE_CONSENT_RULE if not for_owner else
+                       "It uses the plan usage tool only with your express permission.")
     if record.cross_agent:
         text += (" %s cross-agent access: %s read the memory of the owner's other bots and use their tools "
                  "(read and run, never change)." % ("It has" if for_owner else "You have", "it can" if for_owner else "you can"))

@@ -123,7 +123,7 @@ The same can be done with text shortcuts:
 | `/status`, `/usage`, `/help` | Bot management on or off and how many bots run; plan limits; help. |
 
 `<bot>` is the bot's `@username`, its name or its id. Options for `/bot new` come before the task:
-`+web`, `+browser`, `+shell`, `+edit`, `+mcp`, `+contact`, `+bots`, `+usage`, `+calendar`, `+bypass`, `-schedule`, `-sandbox`,
+`+web`, `+browser`, `+shell`, `+edit`, `+mcp`, `+contact`, `+bots`, `+calendar`, `+bypass`, `-schedule`, `-usage`, `-sandbox`,
 and `setting=value` or `permission=value`, for example:
 
 ```text
@@ -179,7 +179,7 @@ nothing else. Grant more when you create it or later with `/bot perm`:
 | `contact` | `off` | Post or schedule messages to chats other than yours |
 | `bots` | `off` | List bots, change other bots' settings, ask you for new ones. Never destroy |
 | `shared` | `off` | Write the shared memory. Reading it is always allowed; no preset turns this on. Every other agent reads what it writes |
-| `usage` | `off` | Ask the usage monitor for a verdict (`alfred usage running_low`, `alfred usage check '<condition>'`, `alfred usage forecast`), read the plan usage (`alfred usage`), set usage alerts that wake it (`alfred usage-alert`, `usage-alert waste`), and put a usage condition on a scheduled item so it is not delivered when the limits are nearly used (`alfred schedule add --skip-if-low`, `--skip-if`, `--only-if`, `--only-if-waste`). The questions and the conditions on scheduled items work with `ALFRED_USAGE_MONITOR` off; the report and the alerts need it on, and the panel says so. See the `alfred:usage` skill and [docs/USAGE_MONITOR_RESEARCH.md](docs/USAGE_MONITOR_RESEARCH.md) |
+| `usage` | `on` | **Used only with your express permission**: on by default, like `schedule`, but the bot runs these commands only when you ask it to check the usage, give it a rule about usage, or say yes when it asks; otherwise it asks first (its manual and the `alfred:usage` skill say so; `usage off` removes the tool). Ask the usage monitor for a verdict (`alfred usage running_low`, `alfred usage check '<condition>'`, `alfred usage forecast`), read the plan usage (`alfred usage`), set usage alerts that wake it (`alfred usage-alert`, `usage-alert waste`), and put a usage condition on a scheduled item so it is not delivered when the limits are nearly used (`alfred schedule add --skip-if-low`, `--skip-if`, `--only-if`, `--only-if-waste`). The questions and the conditions on scheduled items work with `ALFRED_USAGE_MONITOR` off; the report and the alerts need it on, and the panel says so. See the `alfred:usage` skill and [docs/USAGE_MONITOR_RESEARCH.md](docs/USAGE_MONITOR_RESEARCH.md) |
 | `calendar` | `off` | Read your Google Calendar and add events to it, through the Google Calendar connector of your claude.ai account (connect it once in claude.ai → Settings → Connectors). It works with `mcp` off, and `mcp on` alone does not give it. No preset turns it on, and a bot admin can ask for it only with your separate yes. The bot adds an event only when you asked for it or said yes. See the `alfred:calendar` skill and [docs/CALENDAR.md](docs/CALENDAR.md) |
 | `soul` | `off` | Edit its own `SOUL.md`: its role and mission as well as its tone, so what it does and how, never what it may do. No preset turns this on, and it never opens another bot's |
 | `allow`, `deny` | none | Extra Claude Code permission rules, separated by `;` |

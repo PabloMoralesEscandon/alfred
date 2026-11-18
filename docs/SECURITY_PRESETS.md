@@ -11,7 +11,7 @@ does not name keeps its default.
 
 | Preset | Can | Cannot | Permissions it sets |
 | --- | --- | --- | --- |
-| 🔒 **Basic** | Talk with you, set reminders, keep notes and files in its own folder | Go online, touch your other files, run commands, use your browser, message anyone else | none (the defaults) |
+| 🔒 **Basic** | Talk with you, set reminders, keep notes and files in its own folder, check the plan usage when you allow it | Go online, touch your other files, run commands, use your browser, message anyone else | none (the defaults) |
 | ⭐ **Assistant** (recommended) | Basic, plus search the web, read web pages, edit files in its work folder | Run commands, use your browser or logins, use your connectors, message anyone else | `web on`, `edit on` |
 | 🛠 **Power** ⚠️ | Assistant, plus your browser and any command inside Claude Code's sandbox (writes only in its folders) | Run commands outside the sandbox, use connectors, message others, manage other bots | also `browser on`, `shell full`, `sandbox on`, `mode acceptEdits` |
 | 🔓 **Full access** ⚠️⚠️ | Anything your user can do on this Mac, without asking | Almost nothing: an unsandboxed shell gets around the remaining rules | everything `on`, `shell full`, `sandbox off`, `mode bypassPermissions` |
@@ -22,6 +22,26 @@ never Consiglieri's home, which also holds what an old home kept of the former m
 permissions. It is a flag on the bot (`BotRecord.cross_agent`), granted only to a bot that exists, only from
 the control panel, after a warning, and every grant and withdrawal goes to the audit log (`/bot audit`). It can
 sit on top of any preset, and choosing a preset never changes it.
+
+## The plan usage tool: on in every preset, used only with your express permission
+
+The `usage` permission (`alfred usage check`, `alfred usage running_low`, `alfred usage-alert`,
+`alfred schedule add --skip-if-low` and the other usage conditions, and the `alfred:usage` skill) is **on by
+default**, like `schedule` (reminders), so it is in every preset, Basic included. Having the tool is not leave
+to use it: **a bot uses it only with its user's express permission**, that is, when the user asks it to check
+the usage, gives it a rule about usage, or says yes when the bot asks. Without that it does not run the
+commands and asks first. This rule is written in three places the bot reads or that describe it:
+
+- the bot's manual: `bots.permission_summary()` adds `bots.USAGE_CONSENT_RULE` under "What you may do", and
+  `templates/BOT.md` repeats it next to the `alfred` tools;
+- the `alfred:usage` skill, in its description and in its first section (and the `alfred:reminders` skill,
+  where it mentions usage conditions);
+- this document and the permission table in the README.
+
+The rule is an instruction, not a lock: nothing in Claude Code or in `alfred` can tell whether the user said
+yes. The lock is the switch: `/bot perm <bot> usage off` (or **Customize**, or `-usage` in `/bot new`) denies
+the commands in Claude Code, `alfred` refuses them, and the service skips the usage conditions of that bot's
+scheduled items. Choosing a preset turns it back on, since it is the default.
 
 Basic is what a bot gets when nothing is chosen: `/bot new` without options, and a bot you create in
 @BotFather yourself. The creation assistant starts on Assistant, the recommended one.
@@ -127,7 +147,9 @@ a bot matching it exactly reads as "🧑‍💼 Bot admin". Turning `admin` on f
   value is not `on`, add it to `LOOSER`. An unknown permission counts as "grants more", so a change to it is
   always confirmed. To show it under Customize, add it to `menus.SWITCH_LABELS`.
   The usage monitor's `usage` permission (`docs/USAGE_MONITOR_RESEARCH.md`, section 11) was added this
-  way: off in every preset, `"usage": "plan usage"` in `WORDS`, and a row in `menus.SWITCH_LABELS`.
+  way: off in every preset, `"usage": "plan usage"` in `WORDS`, and a row in `menus.SWITCH_LABELS`. Its
+  default later became `on` (one value in `bots.PERMISSIONS`), which put it in every preset, with the rule
+  that the bot uses it only with the user's express permission (above).
   So was `shared`, writing the shared memory: off in every preset (Full access included), only under
   Customize, `"shared": "shared-memory writes"` in `WORDS`, and a warning that every other agent reads what
   it writes.

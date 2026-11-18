@@ -49,14 +49,15 @@ class PresetDataTests(unittest.TestCase):
             with mock.patch.dict(presets.PRESET_PERMISSIONS, {"power": dict(presets.PRESET_PERMISSIONS["power"], future="on")}):
                 self.assertEqual(presets.resolve("power")["future"], "on")
 
-    def test_the_usage_permission_is_off_in_every_preset(self) -> None:
-        # The usage monitor's permission (monitor-claude-usage), the case the test above stands for.
+    def test_the_usage_permission_is_on_in_every_preset(self) -> None:
+        # The usage tool is on by default, like reminders (the bot uses it only with the user's express
+        # permission, an instruction in its manual and skill), so every preset has it.
         for key in presets.keys():
-            self.assertEqual(presets.resolve(key)["usage"], "off", key)
-            self.assertNotIn("usage", presets.apply(key, {"usage": "on"}), key)  # choosing a preset turns it off
-        self.assertEqual(presets.name_of({"web": "on", "edit": "on", "usage": "on"}),
-                         "🎛 Custom (from ⭐ Assistant: + plan usage)")
-        self.assertEqual(presets.gains({}, {"usage": "on"}), ["+ plan usage"])
+            self.assertEqual(presets.resolve(key)["usage"], "on", key)
+            self.assertNotIn("usage", presets.apply(key, {"usage": "off"}), key)  # choosing a preset turns it back on
+        self.assertEqual(presets.name_of({"web": "on", "edit": "on", "usage": "off"}),
+                         "🎛 Custom (from ⭐ Assistant: − plan usage)")
+        self.assertEqual(presets.gains({"usage": "off"}, {}), ["+ plan usage"])
 
 
 class MatchingTests(unittest.TestCase):

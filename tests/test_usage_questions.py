@@ -197,7 +197,8 @@ class QuestionCommandTests(unittest.TestCase):
         self.assertEqual(len(self.sandbox.calls("claude")), 1)  # only the question asked with the permission
 
     def test_claude_code_rules_cover_the_new_commands(self) -> None:
-        record = BotRecord(bot_id=BOT, username="research_bot", name="Research", owner_id=99, chat_ids=[99])
+        record = BotRecord(bot_id=BOT, username="research_bot", name="Research", owner_id=99, chat_ids=[99],
+                           permissions={"usage": "off"})
         deny = bots.claude_settings(self.sandbox.config, record)["permissions"]["deny"]
         self.assertIn("Bash(alfred usage *)", deny)  # running_low, check, forecast
         self.assertIn("Bash(alfred usage-alert *)", deny)  # waste

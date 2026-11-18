@@ -427,7 +427,7 @@ class PanelTests(PanelHarness):
             return usage_gate.Decision(len(asked) > 1, "week 92% used (resets in 2d 3h)")
 
         async def scenario() -> None:
-            await self.create(RESEARCH, "research_bot", "Research", "/bot new Research")
+            await self.create(RESEARCH, "research_bot", "Research", "/bot new Research -usage")
             soon = scheduler.utc_now() - timedelta(seconds=1)
             with mock.patch.object(usage_gate, "check", side_effect=check):
                 store.add(chat_id=OWNER, due=soon, text="report", kind=scheduler.KIND_TASK, bot_id=RESEARCH, gate=gate)
