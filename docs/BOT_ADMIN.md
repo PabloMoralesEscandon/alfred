@@ -57,8 +57,8 @@ vuelve a comprobar.
 ## 3. El permiso y la plantilla
 
 - `admin` está **apagado en todos los presets**, Full access incluido. Un test lo comprueba.
-- **Plantilla 🧑‍💼 Bot admin** (`presets.TEMPLATES`): Assistant + `admin`. Aparece junto a los presets (en el
-  asistente y en Mis bots → Permisos) pero fuera de su orden, porque no es «más» que Power, es otra cosa. Un bot
+- **Plantilla 🧑‍💼 Bot admin** (`presets.TEMPLATES`): Full access + `admin`. Aparece junto a los presets (en el
+  asistente y en Mis bots → Permisos) pero fuera de su orden, porque no es «más» que Full access, es otra cosa. Un bot
   con exactamente esos permisos se muestra como «🧑‍💼 Bot admin»; con algo más, como Custom.
 - **Aviso y confirmación** (`bots.ADMIN_WARNING`): convertir un bot existente en administrador pide
   confirmación siempre, por el menú (interruptor «🧑‍💼 Create bots for you» o la plantilla) y por texto
@@ -167,9 +167,9 @@ sube los permisos, el administrador deja de poder dirigirlo. Permisos, carpetas 
 
 | Variable | Por defecto | Qué cuenta |
 |---|---|---|
-| `ALFRED_ADMIN_MAX_BOTS` | 5 | Bots que un administrador pidió: creados (`created_by`) y peticiones esperando |
-| `ALFRED_ADMIN_MAX_BOTS_PER_USER` | 10 | Bots del usuario y peticiones esperando. Solo frena a los administradores: el usuario puede crear más desde el panel |
-| `ALFRED_ADMIN_REQUESTS_PER_HOUR` | 3 | Peticiones enviadas por un administrador en la última hora (persistido en disco, un reinicio no lo pone a cero) |
+| `ALFRED_ADMIN_MAX_BOTS` | 0 (sin límite) | Bots que un administrador pidió: creados (`created_by`) y peticiones esperando |
+| `ALFRED_ADMIN_MAX_BOTS_PER_USER` | 0 (sin límite) | Bots del usuario y peticiones esperando. Solo frena a los administradores: el usuario puede crear más desde el panel |
+| `ALFRED_ADMIN_REQUESTS_PER_HOUR` | 0 (sin límite) | Peticiones enviadas por un administrador en la última hora (persistido en disco, un reinicio no lo pone a cero) |
 
 Telegram tiene su propio límite de bots por usuario (20, 40 con Premium, contando el panel).
 

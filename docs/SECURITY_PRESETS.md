@@ -106,7 +106,7 @@ compartida", has the details and the remaining ways around.
 
 The `admin` permission (docs/BOT_ADMIN.md) lets a bot ask the panel to create bots for its owner from a spec, up to
 its own permissions. It is off in every preset, Full access included. The **🧑‍💼 Bot admin** template
-(`presets.TEMPLATES`: Assistant + `admin`) sits next to the presets on the preset screens, outside their order, and
+(`presets.TEMPLATES`: Full access + `admin`) sits next to the presets on the preset screens, outside their order, and
 a bot matching it exactly reads as "🧑‍💼 Bot admin". Turning `admin` on for an existing bot, from the menu or with
 `/bot perm`, always shows `bots.ADMIN_WARNING` and asks to confirm; every grant and withdrawal is in the audit log.
 

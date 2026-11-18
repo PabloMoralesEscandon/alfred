@@ -36,11 +36,11 @@ RECOMMENDED = "assistant"  # what the creation assistant starts with
 SPECIAL_LEVELS: Dict[str, str] = {"cross": "cross_agent"}
 FREEFORM = ("folders", "allow", "deny")
 # Templates: a preset plus a role, offered next to the presets but outside their order (a bot admin is not
-# "more" than Power, only different). template -> (the preset it starts from, what it adds). The `admin`
+# "more" than Full access, only different). template -> (the preset it starts from, what it adds). The `admin`
 # permission is in no preset, Full access included: a bot becomes a bot admin only through this template or
 # its own switch, after a warning (docs/BOT_ADMIN.md).
 TEMPLATES: Dict[str, Tuple[str, Dict[str, str]]] = {
-    "botadmin": ("assistant", {"admin": "on"}),
+    "botadmin": ("full", {"admin": "on"}),  # it manages bots, so it has what they may get
 }
 
 
@@ -93,12 +93,13 @@ PRESET_INFO: Dict[str, PresetInfo] = {
 TEMPLATE_INFO: Dict[str, PresetInfo] = {
     "botadmin": PresetInfo(
         "🧑‍💼", "Bot admin",
-        can="everything Assistant can, plus create and set up bots for you from a description: it drafts each "
+        can="everything Full access can, plus create and set up bots for you from a description: it drafts each "
             "one (name, task, personality, preset, model, reminders), you confirm it in Telegram and you own it",
-        cannot="give a bot more than it has itself; grant cross-agent access, Full access, bot admin, shared-memory "
-               "or personality edits without your separate yes; or destroy any bot",
-        warning="⚠️ It sends you bot requests and sets up the ones you create. A text it reads could push it to ask "
-                "for bots you don't need, so read each request. All of it goes to the audit log (/bot audit).",
+        cannot="grant cross-agent access, Full access, bot admin, shared-memory or personality edits without your "
+               "separate yes, or destroy any bot; with an unsandboxed shell the remaining rules can be got around",
+        warning="⚠️⚠️ Full access with no checks, plus it sends you bot requests and sets up the ones you create. It "
+                "can delete files, spend from your accounts and write to anyone, and a text it reads could push it "
+                "to ask for bots you don't need, so read each request. All of it goes to the audit log (/bot audit).",
     ),
 }
 

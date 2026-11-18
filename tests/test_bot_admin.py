@@ -33,6 +33,10 @@ HELPER = 5000000200
 USER = 99
 
 
+# A bot admin with Assistant as its ceiling: the template starts from Full access, which is above every limit.
+ASSISTANT_ADMIN = dict(presets.apply("assistant", {}), admin="on")
+
+
 def spec(**fields: Any) -> str:
     return json.dumps(dict({"name": "Chef", "task": "Plan the week's meals", "preset": "assistant"}, **fields))
 
@@ -47,7 +51,7 @@ class AdminCli(unittest.TestCase):
         self.config = self.sandbox.config
         home.prepare(self.config)
         self.registry = BotRegistry(self.config)
-        self.add(ADMIN, "boss_bot", presets.apply("botadmin", {}))
+        self.add(ADMIN, "boss_bot", dict(ASSISTANT_ADMIN))
         self.add(HELPER, "helper_bot", {"web": "on", "edit": "on"})
         self.as_bot(ADMIN)
         FakeTelegramBot.sent = []
@@ -107,7 +111,7 @@ class AdminCliTests(AdminCli):
         self.assertEqual(FakeTelegramBot.sent, [])
 
     def test_spec_checks_without_sending_anything(self) -> None:
-        checked = self.run_json("bots", "spec", "--json", spec(preset="botadmin"))
+        checked = self.run_json("bots", "spec", "--json", spec(preset="assistant", permissions={"admin": "on"}))
         self.assertTrue(checked["ok"], checked)
         self.assertEqual(checked["starts_with"], "⭐ Assistant")
         self.assertEqual(checked["waits_for_the_users_yes"], ["🧑‍💼 Bot admin"])
@@ -129,7 +133,7 @@ class AdminCliTests(AdminCli):
 
     def test_create_sends_the_user_the_request_and_remembers_it(self) -> None:
         asked = self.run_json("bots", "create", "--json", spec(
-            preset="botadmin", soul="Cheerful and brief.", note="You asked for a cooking helper.",
+            preset="assistant", permissions={"admin": "on"}, soul="Cheerful and brief.", note="You asked for a cooking helper.",
             reminders=[{"in": "1d", "message": "Shopping list?"}]))
         self.assertTrue(asked["ok"], asked)
         first, second = FakeTelegramBot.sent
@@ -178,6 +182,12 @@ class AdminCliTests(AdminCli):
             self.assertIn("the user already has 5", self.run_json("bots", "create", "--json", spec())["error"])
         self.assertEqual(len(FakeTelegramBot.sent), 4)  # two requests, two messages each
         self.assertEqual([entry["event"] for entry in bots.read_audit(self.config)].count("admin_refused"), 4)
+
+    def test_no_limits_unless_set(self) -> None:
+        self.assertEqual(bot_admin.limits(self.config), {"bots_per_admin": 0, "bots_per_user": 0, "requests_per_hour": 0})
+        for index in range(12):  # more than any old default, all within one hour
+            self.assertTrue(self.run_json("bots", "create", "--json", spec(name="Bot%d" % index))["ok"])
+        self.assertEqual(bot_admin.limit_problems(self.config, BotRegistry(self.config).get(ADMIN)), [])
 
     def test_configure_only_the_bots_it_asked_for_and_never_their_permissions(self) -> None:
         self.add(5000000300, "made_bot", {"web": "on"}, created_by=ADMIN, request_id="r1")
@@ -232,15 +242,16 @@ class AdminPermissionTests(unittest.TestCase):
         self.assertEqual(bots.DEFAULT_PERMISSIONS["admin"], "off")
         for key in presets.keys():
             self.assertEqual(presets.resolve(key)["admin"], "off", key)  # Full access included
-        self.assertEqual(presets.resolve("botadmin"), presets.values({"web": "on", "edit": "on", "admin": "on"}))
+        admin = dict(presets.resolve("full"), admin="on")
+        self.assertEqual(presets.resolve("botadmin"), admin)
         self.assertNotIn("botadmin", presets.keys())  # not part of the order from least to most
-        self.assertEqual(presets.detect({"web": "on", "edit": "on", "admin": "on"}), ("botadmin", "assistant"))
-        self.assertEqual(presets.name_of({"web": "on", "edit": "on", "admin": "on"}), "🧑‍💼 Bot admin")
+        self.assertEqual(presets.detect(admin), ("botadmin", "full"))
+        self.assertEqual(presets.name_of(admin), "🧑‍💼 Bot admin")
         self.assertEqual(presets.name_of({"admin": "on"}), "🎛 Custom (from 🔒 Basic: + bot admin)")
         self.assertEqual(presets.find("Bot admin"), "botadmin")
         self.assertEqual(presets.find("admin"), None)  # the word is the permission's, not a preset's
         self.assertIn("⚠️", presets.card("botadmin"))
-        self.assertIn("+ bot admin", presets.gains({"web": "on", "edit": "on"}, presets.resolve("botadmin")))
+        self.assertIn("+ bot admin", presets.gains(presets.resolve("full"), presets.resolve("botadmin")))
 
     def test_claude_code_rules_close_each_helper_without_its_permission(self) -> None:
         none = rules_of(self.sandbox)["permissions"]["deny"]
@@ -318,7 +329,7 @@ class SpecTests(unittest.TestCase):
         (self.folder / "site").mkdir(parents=True)
         self.admin, _ = self.sandbox.add_bot(
             bot_id=5000000100, username="boss_bot", name="Boss",
-            permissions=dict(presets.apply("botadmin", {}), folders=str(self.folder)))
+            permissions=dict(dict(ASSISTANT_ADMIN), folders=str(self.folder)))
 
     def admin_with(self, **permissions: str) -> BotRecord:
         self.admin.permissions.update(permissions)
@@ -368,7 +379,7 @@ class SpecTests(unittest.TestCase):
 
     def test_even_within_the_admin_the_sensitive_ones_wait_for_the_users_yes(self) -> None:
         admin = self.admin_with(bots="on", soul="on", shared="on")
-        checked = self.check(admin, preset="botadmin", permissions={"bots": "on", "soul": "on", "shared": "on"})
+        checked = self.check(admin, preset="assistant", permissions={"admin": "on", "bots": "on", "soul": "on", "shared": "on"})
         self.assertEqual(checked.extras, ["admin", "bots", "soul", "shared"])
         self.assertEqual(checked.initial, {"web": "on", "edit": "on"})  # it starts without any of them
         self.assertEqual(bot_admin.extra_values(checked.permissions, checked.extras),
@@ -507,7 +518,8 @@ class AdminPermissionPanelTests(MenuDriver, PanelHarness):  # type: ignore[misc,
 
             await self.tap("Back")
             await self.tap("Bot admin")  # the template
-            self.assertIn("It gains: + file edits, + web, + bot admin", self.text)
+            self.assertIn("It gains: − sandbox, + file edits, + web, + browser, + connectors (MCP), + other chats, + other bots, "
+                          "+ bot admin, mode: bypassPermissions, shell: any command", self.text)
             self.assertIn("⚠️ Bot admin for @research_bot?", self.text)
             await self.tap("Yes, switch to Bot admin")
             self.assertIn("● 🧑‍💼 Bot admin", self.labels())
@@ -527,7 +539,7 @@ class AdminFlowTests(PanelHarness):  # type: ignore[misc,valid-type]
         super().setUp()
         self.registry = BotRegistry(self.config)
         admin = BotRecord(bot_id=ADMIN, username="boss_bot", name="Boss", owner_id=OWNER, chat_ids=[OWNER],
-                          permissions=presets.apply("botadmin", {}))
+                          permissions=dict(ASSISTANT_ADMIN))
         self.registry.save(admin)
         self.registry.set_token(ADMIN, "%d:%s" % (ADMIN, "B" * 35))
         FakeTelegramBot.sent = []
@@ -551,7 +563,7 @@ class AdminFlowTests(PanelHarness):  # type: ignore[misc,valid-type]
         return [item["message"] for item in items if item["kind"] == "event"]
 
     def test_the_whole_flow_with_the_users_confirmation_and_approval(self) -> None:
-        asked = self.ask(preset="botadmin", soul="Cheerful and brief.", model="sonnet",
+        asked = self.ask(preset="assistant", permissions={"admin": "on"}, soul="Cheerful and brief.", model="sonnet",
                          reminders=[{"in": "1d", "every": "1d", "message": "What's for dinner?"}])
 
         async def scenario() -> None:
@@ -597,7 +609,7 @@ class AdminFlowTests(PanelHarness):  # type: ignore[misc,valid-type]
         self.play(scenario)
 
     def test_declining_keeps_the_bot_without_the_extras(self) -> None:
-        asked = self.ask(preset="botadmin")
+        asked = self.ask(preset="assistant", permissions={"admin": "on"})
 
         async def scenario() -> None:
             await self.confirm(asked["username"])
