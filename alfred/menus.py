@@ -45,6 +45,7 @@ SWITCH_LABELS = (
     ("admin", "🧑‍💼 Create bots for you (bot admin)"),
     ("usage", "📊 Plan usage and alerts"),
     ("calendar", "📅 Read and create calendar events"),
+    ("creds", "🔑 Log in with the credentials you grant it"),
     ("shared", "🧠 Write the shared memory"),
     ("soul", "🎭 Edit its own role and personality"),
 )
@@ -153,6 +154,11 @@ CALENDAR_WARNING = (
     "your claude.ai account (connect it once in claude.ai → Settings → Connectors; every bot with this switch "
     "sees the same calendar). It adds an event only when you asked for it or said yes.")
 
+CREDS_WARNING = (
+    "🔑 Credentials: KeePassXC fills the credentials you grant it into its own browser, only on their sites; it "
+    "never sees them. You grant each one on the machine (alfred creds grant <name> <bot>). It needs "
+    "ALFRED_BROWSER=bot. With an open shell it is not walled off from them: keep those bots on Basic or Assistant.")
+
 
 def permission_warnings(record: BotRecord, backend: str = "claude") -> List[str]:
     """Plain warnings for the risky choices, shown on the permissions and summary screens."""
@@ -177,6 +183,8 @@ def permission_warnings(record: BotRecord, backend: str = "claude") -> List[str]
     if record.allows("calendar"):
         warnings.append(CALENDAR_WARNING if backend != "codex" else
                         "⚠️ Calendar: Codex can't use the Google Calendar connector, so this switch does nothing there.")
+    if record.allows("creds"):
+        warnings.append(CREDS_WARNING)
     if record.allows("contact"):
         warnings.append("⚠️ Other chats: it can message people other than you.")
     if record.allows("shared"):

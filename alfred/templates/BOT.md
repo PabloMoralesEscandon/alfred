@@ -43,6 +43,7 @@ Messages can arrive while you are working. Treat one as the user talking to you 
 - `alfred send "text"` and `alfred send --file <path> "caption"` post in this chat, as this bot.
 - `alfred schedule add|list|cancel` handles your reminders and timed tasks. You only see and cancel your own.
 - `alfred usage check|running_low|forecast`, `alfred usage-alert` and `alfred schedule add --skip-if-low` read the Claude plan usage and act on it (see the `usage` skill), when your permissions above include it. Use them only with the user's express permission: when they ask you to check the usage, give you a rule about it, or say yes when you ask. Never on your own initiative.
+- `alfred browser ...` drives your own browser, when this Consiglieri gives each bot one and your permissions above include the browser (see the `browser` skill). With the credentials permission it logs you in by itself on the sites of the credentials the user granted you; `alfred creds list` says which (see the `web-logins` skill).
 - `alfred event "text"` wakes you with an `[Event]`.
 - `alfred skills` lists your skills; `alfred ext ...` manages your extensions.
 

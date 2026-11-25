@@ -80,7 +80,7 @@ PERMISSIONS = (
     ("edit", "off", "edit files in its working directory and extra folders (its own directory always)"),
     ("folders", "", "extra folders it may read (and edit, with edit on), separated by commas"),
     ("web", "off", "WebSearch and WebFetch"),
-    ("browser", "off", "Consiglieri's browser (Orca's, or Chrome)"),
+    ("browser", "off", "Consiglieri's browser (Orca's, Chrome, or with ALFRED_BROWSER=bot its own)"),
     ("mcp", "off", "MCP tools (your connectors and servers, its extensions'); off removes them all"),
     ("schedule", "on", "reminders and timed tasks with alfred schedule"),
     ("contact", "off", "post or schedule messages to chats other than its owner's"),
@@ -90,6 +90,8 @@ PERMISSIONS = (
     ("usage", "on", "read the Claude plan usage and set usage alerts, only with the user's express permission; "
                     "the report and the alerts need ALFRED_USAGE_MONITOR on"),
     ("calendar", "on", "read and create events in your Google Calendar (the claude.ai connector), even with mcp off"),
+    ("creds", "off", "log in with the credentials you grant it: KeePassXC fills them into its own browser, only on their "
+                     "sites, and it never sees them; you grant each one on the machine (alfred creds grant), never a bot admin"),
     ("shared", "off", "write the shared memory every agent reads (reading it is always allowed)"),
     ("soul", "off", "edit its own SOUL.md: its role and mission as well as its tone, so what it does; never what it may do"),
     ("allow", "", "extra Claude Code allow rules, separated by ;"),
@@ -97,17 +99,30 @@ PERMISSIONS = (
 )
 PERMISSION_NAMES = tuple(name for name, _, _ in PERMISSIONS)
 DEFAULT_PERMISSIONS = {name: default for name, default, _ in PERMISSIONS}
-SWITCHES = ("sandbox", "edit", "web", "browser", "mcp", "schedule", "contact", "bots", "admin", "usage", "calendar", "shared", "soul")
+SWITCHES = ("sandbox", "edit", "web", "browser", "mcp", "schedule", "contact", "bots", "admin", "usage", "calendar", "creds",
+            "shared", "soul")
 # `+name` / `-name` when creating a bot: on and off, or for shell: full and alfred.
 SHORTHANDS = {"bypass": ("mode", "bypassPermissions")}
 
 # alfred subcommands a bot never runs: they start or install Consiglieri itself.
 ALWAYS_DENIED = ("Bash(alfred run)", "Bash(alfred run *)", "Bash(alfred service *)", "Bash(alfred init)",
-                 "Bash(alfred chat)", "Bash(alfred chat *)", "Bash(alfred browser-setup *)")
+                 "Bash(alfred chat)", "Bash(alfred chat *)", "Bash(alfred browser-setup *)",
+                 "Bash(*alfred browser install*)")
+# Credentials (docs/CREDENTIALS.md). The user's subcommands: no bot ever sets up, adds, removes, grants or revokes
+# one, nor starts or stops KeePassXC, whatever its permissions (`alfred creds` refuses them in a bot's turn too).
+CREDS_OWNER_RULES = tuple("Bash(*alfred creds %s*)" % verb
+                          for verb in ("setup", "add", "remove", "grant", "revoke", "start", "stop"))
+# KeePassXC itself, its CLI and its proxy: denied to every bot. Text rules, so they stop the obvious spellings;
+# the store is in the home's state/, which every bot is denied anyway.
+KEEPASS_RULES = ("Bash(*keepassxc*)", "Bash(*KeePassXC*)")
+# The `creds` permission: what a bot runs itself. The filling is done by its browser's extension, not by a command.
+CREDS_RULES = ("Bash(alfred creds)", "Bash(alfred creds *)")
+CREDS_UNSANDBOXED = ("alfred creds list", "alfred creds status")
 # alfred subcommands that run outside the sandbox: they need Consiglieri's state and Telegram, and check
 # the bot's permissions themselves.
 UNSANDBOXED_ALFRED = ("alfred send *", "alfred schedule *", "alfred event *", "alfred skills", "alfred bots *")
-BROWSER_RULES = ("Bash(orca *)", "mcp__claude-in-chrome__*")
+BROWSER_RULES = ("Bash(orca *)", "mcp__claude-in-chrome__*", "Bash(alfred browser)", "Bash(alfred browser *)")
+BROWSER_UNSANDBOXED = ("alfred browser *",)  # it starts the bot's Chromium and keeps its state in the home
 # `alfred bots` subcommands and the permission each needs: `list` takes either; the bot admin's helpers
 # (docs/BOT_ADMIN.md) need `admin`; changing other bots' settings and the old bare request need `bots`.
 ADMIN_SUBCOMMANDS = ("spec", "create", "status", "configure")
@@ -344,9 +359,19 @@ class BotRegistry:
         write_private(self.state_dir(record.bot_id) / "bot.json", json.dumps(asdict(record), indent=2, sort_keys=True) + "\n")
 
     def remove(self, bot_id: int) -> List[str]:
-        """Delete a bot's settings, sessions, token and its own directory. Returns what was removed."""
+        """Delete a bot's settings, sessions, token, browser and its own directory, and take it out of every
+        credential. Returns what was removed."""
         removed: List[str] = []
-        for path in (self.state_dir(bot_id), self.workspace(bot_id)):
+        from .bot_browser import BotBrowser
+        from .keepass import CredentialError, KeePass
+
+        try:
+            BotBrowser(self.config, bot_id).stop()
+            KeePass(self.config).forget_bot(bot_id)
+        except (OSError, CredentialError):
+            pass
+        browser_dir = self.config.state_dir / "browsers" / str(int(bot_id))
+        for path in (self.state_dir(bot_id), self.workspace(bot_id), browser_dir):
             if path.exists():
                 shutil.rmtree(path)
                 removed.append(str(path))
@@ -658,7 +683,10 @@ def permission_summary(record: BotRecord, for_owner: bool = False) -> str:
                                    "`alfred usage running_low`, `alfred usage-alert`, and `alfred schedule add "
                                    "--skip-if-low`; the alfred:usage skill)"),
                          ("calendar", "read and create events in the user's Google Calendar (the alfred:calendar "
-                                      "skill; create one only when the user asked for it or said yes)")):
+                                      "skill; create one only when the user asked for it or said yes)"),
+                         ("creds", "log in with the credentials the user granted %s: %s browser fills them in by itself "
+                                   "on their sites, without showing them (`alfred creds list`; the alfred:web-logins "
+                                   "skill)" % (("it", "its") if for_owner else ("you", "your")))):
         (can if record.allows(name) else cannot).append(phrase)
     can.append("read the shared memory every agent reads")
     (can if record.allows("shared") else cannot).append("write the shared memory")
@@ -878,9 +906,10 @@ def audit_report(config: Config, user_id: int) -> str:
     mine = {record.bot_id for record in BotRegistry(config).list(owner_id=user_id)}
     entries = [entry for entry in read_audit(config, limit=500) if audit_entry_is_for(entry, user_id, mine)][-20:]
     if not entries:
-        return ("The audit log has nothing about your bots: no cross-agent access, bot admin permission or bot admin "
-                "request yet.")
-    lines = ["Cross-agent access, bot admins and their requests, latest last (%s):" % (config.state_dir / AUDIT_FILE)]
+        return ("The audit log has nothing about your bots: no cross-agent access, bot admin permission, bot admin "
+                "request or credential yet.")
+    lines = ["Cross-agent access, bot admins and their requests, credentials, latest last (%s):"
+             % (config.state_dir / AUDIT_FILE)]
     for entry in entries:
         lines.append(audit_line(entry))
     return "\n".join(lines)
@@ -900,6 +929,8 @@ AUDIT_WORDS = {
     "admin_extras_declined": "declined the extra permissions a bot admin asked for",
     "admin_extras_refused": "could not approve the extras (the admin no longer has them) for",
     "admin_configured": "set up by its bot admin:",
+    "credential_granted": "credential granted to",
+    "credential_revoked": "credential withdrawn from",
 }
 
 
@@ -908,6 +939,8 @@ def audit_line(entry: Dict[str, Any]) -> str:
     words = AUDIT_WORDS.get(str(entry.get("event")), str(entry.get("event")))
     line = "%s %s %s by %s (%s)" % (entry.get("time"), words, entry.get("bot"), entry.get("by"), entry.get("via"))
     extra = []
+    if entry.get("credential"):
+        extra.append("credential %s" % entry["credential"])
     if entry.get("request"):
         extra.append("request %s" % entry["request"])
     if entry.get("admin") and entry.get("admin") != entry.get("bot"):
@@ -963,7 +996,7 @@ def claude_settings(config: Config, record: BotRecord) -> Dict[str, Any]:
     workspace = config.workspace
     shell_full = record.permission("shell") == "full"
     allow = ["Skill", "Read", "Glob", "Grep", "TodoWrite", "Agent", "Edit(%s/**)" % absolute(workspace)]
-    deny = list(ALWAYS_DENIED)
+    deny = list(ALWAYS_DENIED) + list(CREDS_OWNER_RULES) + list(KEEPASS_RULES)
     # Other agents' memory and tools, Consiglieri's home (.env, every bot's token) and the .env next to the code:
     # denied at every level, whatever the switches, the extra rules or the mode say. Deny rules win over
     # allow rules, so nothing in `allow` can open them again; only cross-agent access changes them.
@@ -997,6 +1030,8 @@ def claude_settings(config: Config, record: BotRecord) -> Dict[str, Any]:
             deny += _subcommand_rules(BOTS_SUBCOMMANDS)
     if not record.allows("usage"):
         deny += list(USAGE_RULES)
+    if not record.allows("creds"):
+        deny += list(CREDS_RULES)
     if record.allows("web"):
         allow += ["WebFetch", "WebFetch(domain:*)", "WebSearch"]  # the domain form also opens the sandbox's network
     else:
@@ -1057,7 +1092,9 @@ def claude_settings(config: Config, record: BotRecord) -> Dict[str, Any]:
             "failIfUnavailable": True,
             "excludedCommands": [command for command in UNSANDBOXED_ALFRED
                                  if record.allows("bots") or record.allows("admin") or "bots" not in command]
-            + (list(USAGE_UNSANDBOXED) if record.allows("usage") else []),
+            + (list(USAGE_UNSANDBOXED) if record.allows("usage") else [])
+            + (list(BROWSER_UNSANDBOXED) if record.allows("browser") else [])
+            + (list(CREDS_UNSANDBOXED) if record.allows("creds") else []),
             "filesystem": filesystem,
         }
     return settings
