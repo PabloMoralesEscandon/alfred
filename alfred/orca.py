@@ -86,6 +86,13 @@ def summary(config: Config) -> str:
     """One line for logs and /status. Never raises."""
     if config.browser == "none":
         return "off"
+    if config.browser == "bot":
+        from .keepass import KeePass
+
+        store = KeePass(config)
+        creds = ("credentials set up, KeePassXC %s" % ("running" if store.running() else "starts on first use")
+                 if store.is_set_up() else "no credentials (alfred creds setup)")
+        return "each bot its own Chromium (alfred browser); %s" % creds
     if config.browser == "chrome":
         # Whether the extension is connected is only knowable from inside a Claude turn.
         if config.chrome_profile:

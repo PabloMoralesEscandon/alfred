@@ -150,9 +150,10 @@ class Config:
 
     @property
     def browser(self) -> str:
-        """Which browser the agent drives: `orca` (default), `chrome` (Claude in Chrome), or `none`."""
+        """Which browser the agent drives: `orca` (default), `chrome` (Claude in Chrome), `bot` (each bot its own
+        Chromium, driven with `alfred browser`, where KeePassXC fills in its credentials), or `none`."""
         value = self.get("ALFRED_BROWSER", "orca").lower()
-        return value if value in ("orca", "chrome", "none") else "orca"
+        return value if value in ("orca", "chrome", "bot", "none") else "orca"
 
     @property
     def chrome_profile(self) -> str:

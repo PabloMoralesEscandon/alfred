@@ -1313,6 +1313,12 @@ def build_parser() -> argparse.ArgumentParser:
     bots_configure.add_argument("--json", dest="json_text", help="the changes as JSON text")
     bots_configure.set_defaults(json=cmd_bots_configure)
 
+    from .browser_cli import add_parser as add_browser_parser
+    from .creds_cli import add_parser as add_creds_parser
+
+    add_browser_parser(commands)  # alfred browser: each bot's own browser (ALFRED_BROWSER=bot)
+    add_creds_parser(commands)  # alfred creds: the credentials KeePassXC fills in (docs/CREDENTIALS.md)
+
     commands.add_parser("chrome", help="open a window of Consiglieri's own Chrome profile").set_defaults(json=cmd_chrome)
 
     shot = commands.add_parser("screenshot", help="save a screenshot of the browser tab to a file")
