@@ -181,6 +181,7 @@ nothing else. Grant more when you create it or later with `/bot perm`:
 | `shared` | `off` | Write the shared memory. Reading it is always allowed; no preset turns this on. Every other agent reads what it writes |
 | `usage` | `on` | **Used only with your express permission**: on by default, like `schedule`, but the bot runs these commands only when you ask it to check the usage, give it a rule about usage, or say yes when it asks; otherwise it asks first (its manual and the `alfred:usage` skill say so; `usage off` removes the tool). Ask the usage monitor for a verdict (`alfred usage running_low`, `alfred usage check '<condition>'`, `alfred usage forecast`), read the plan usage (`alfred usage`), set usage alerts that wake it (`alfred usage-alert`, `usage-alert waste`), and put a usage condition on a scheduled item so it is not delivered when the limits are nearly used (`alfred schedule add --skip-if-low`, `--skip-if`, `--only-if`, `--only-if-waste`). The questions and the conditions on scheduled items work with `ALFRED_USAGE_MONITOR` off; the report and the alerts need it on, and the panel says so. See the `alfred:usage` skill and [docs/USAGE_MONITOR_RESEARCH.md](docs/USAGE_MONITOR_RESEARCH.md) |
 | `calendar` | `on` | Read your Google Calendar and add events to it, through the Google Calendar connector of your claude.ai account (connect it once in claude.ai → Settings → Connectors). On by default for every bot and preset; turn it off per bot with `/bot perm <bot> calendar off`. It works with `mcp` off, and `mcp on` alone does not give it. The bot adds an event only when you asked for it or said yes. See the `alfred:calendar` skill and [docs/CALENDAR.md](docs/CALENDAR.md) |
+| `creds` | `off` | Log in by itself with the credentials you grant it. They live in KeePassXC; its browser extension, loaded in the bot's own browser (`ALFRED_BROWSER=bot`), fills them in, only on each credential's sites, and the bot never sees them. You add them and grant each one to each bot on the machine (`alfred creds add`, `alfred creds grant <name> <bot>`), never through chat and never through a bot admin. In no preset. See [Credentials](#credentials) and [docs/CREDENTIALS.md](docs/CREDENTIALS.md) |
 | `soul` | `off` | Edit its own `SOUL.md`: its role and mission as well as its tone, so what it does and how, never what it may do. No preset turns this on, and it never opens another bot's |
 | `allow`, `deny` | none | Extra Claude Code permission rules, separated by `;` |
 
@@ -244,8 +245,9 @@ venv/bin/alfred chat -m "disk report" # one message
 
 ## Browser
 
-A bot with the `browser` permission has a real browser, the same for all of them. It can open pages, click, fill in forms, upload and download files, and send
-you screenshots, using sites you are already logged in to. Pick one with `ALFRED_BROWSER`:
+A bot with the `browser` permission has a real browser. It can open pages, click, fill in forms, upload and download files, and send
+you screenshots, using sites you are already logged in to. Pick one with `ALFRED_BROWSER`: `orca` and `chrome` are one
+browser for all the bots; `bot` gives each bot a browser of its own (see [Each bot its own browser](#each-bot-its-own-browser)).
 
 | | `orca` (default) | `chrome` |
 | --- | --- | --- |
@@ -277,10 +279,47 @@ from away, use macOS Screen Sharing. Consiglieri never asks for or types passwor
 tabs open in its own workspace instead of in whatever you have on screen. `/status` in Telegram shows
 which browser is configured.
 
-Either way:
+### Each bot its own browser
 
-- When a site needs a login or a 2FA code, Consiglieri asks you to log in once in that browser. It is told
-  never to ask for passwords in chat.
+With `ALFRED_BROWSER=bot`, every bot with the `browser` permission gets a Chromium of its own: its own profile,
+cookies and sessions, which no other bot shares. Consiglieri starts it without a window on the bot's first browser
+command, and the bot drives it with `alfred browser open|snapshot|click|fill|...`: ordinary commands, so it works the
+same with Claude or Codex and needs neither Orca nor the Claude in Chrome extension.
+
+```bash
+venv/bin/pip install -e '.[browser]'   # Playwright
+venv/bin/alfred browser install         # Playwright's Chromium and the KeePassXC-Browser extension (checked by its hash)
+echo ALFRED_BROWSER=bot >> ~/.alfred/.env
+```
+
+To log in by hand in a bot's browser (a site with a captcha, or your first login), `alfred browser show --bot <bot>`
+opens it in a window on the machine; `alfred browser hide --bot <bot>` when you are done.
+
+### Credentials
+
+With the own browsers, a bot can log in by itself, with credentials you grant it one by one. They are kept in
+[KeePassXC](https://keepassxc.org), which its browser extension types into the login form, only on the sites saved
+with the credential; the bot only presses "Log in" and never sees the password. A TOTP 2FA code is filled in the same
+way.
+
+```bash
+brew install --cask keepassxc                       # or your system's package; quit any other KeePassXC you run
+venv/bin/alfred creds setup                          # the store, in ~/.alfred/state/credentials
+venv/bin/alfred creds add tum --url moodle.tum.de --url login.tum.de --username ge12abc --totp
+venv/bin/alfred creds grant tum @uni_bot             # and /bot perm uni_bot creds on
+venv/bin/alfred creds list
+venv/bin/alfred creds revoke tum @uni_bot
+```
+
+`add` asks for the password (and the TOTP key, from the site's QR code) at the terminal, without echo; there is no
+other way in. Each credential is its own KeePassXC database, and a bot's browser only gets answers from the ones
+granted to it. KeePassXC runs while the bots work; Consiglieri starts it when needed. See
+[docs/CREDENTIALS.md](docs/CREDENTIALS.md) for how it works, what it protects and what it does not.
+
+Whichever browser:
+
+- When a site needs a login or a 2FA code and no credential of the bot covers it, Consiglieri asks you to log in once
+  in that browser. It is told never to ask for passwords in chat.
 - Consiglieri asks before the step that pays, orders, posts or sends.
 - Consiglieri opens its own tabs and leaves yours alone.
 
@@ -437,6 +476,10 @@ tokens like SSH keys.
 - The browser carries your logged-in sessions. A web page can contain text written to manipulate an
   agent. Bots are told to treat page content as data; keeping `browser off`, and a browser profile with
   fewer logins, are the stronger protections.
+- Credentials you grant a bot (`creds`) are filled in by KeePassXC's extension, only on their own sites, so a page
+  can't get a bot to type your password elsewhere, and what the bot reads of a page has them hidden. A bot whose shell
+  is open (`shell full`, or `bypassPermissions`) runs as your user and could reach the store or another bot's browser
+  anyway: grant credentials to bots on Basic or Assistant, or run Consiglieri as a dedicated user.
 - Bots are instructed to confirm before destructive, costly or outward-facing actions. That is an
   instruction to a model, so it reduces risk without removing it; the permissions above are the part
   Claude Code enforces.

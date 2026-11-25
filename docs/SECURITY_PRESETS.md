@@ -132,6 +132,16 @@ admin gives it like any default, without a separate yes. With it on and `mcp off
 written (it would remove the connector); other MCP tools are still refused in `dontAsk`, `acceptEdits` and `default`
 for lack of an allow rule, but not under `bypassPermissions`.
 
+## Credentials under every preset
+
+The `creds` permission ([docs/CREDENTIALS.md](CREDENTIALS.md)) lets a bot's own browser (`ALFRED_BROWSER=bot`) load
+KeePassXC's extension with the bot's identity, so it fills in the credentials the user granted that bot on the machine
+(`alfred creds grant`), only on their sites, never showing it the secret. It is off in every preset and template, Full
+access included, and a bot admin can never turn it on. Whatever a bot's permissions, Claude Code denies it the owner's
+subcommands (`alfred creds setup`, `add`, `remove`, `grant`, `revoke`, `start`, `stop`, `alfred browser install`) and
+anything naming KeePassXC. With `shell alfred` (Basic, Assistant) a bot reaches its credentials only through its
+browser; with an open shell it runs as the user and the wall between bots is a convention (docs/CREDENTIALS.md §7).
+
 ## Bot admins under every preset
 
 The `admin` permission (docs/BOT_ADMIN.md) lets a bot ask the panel to create bots for its owner from a spec, up to
