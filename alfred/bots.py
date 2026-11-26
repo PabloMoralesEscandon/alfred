@@ -57,6 +57,7 @@ TEMPLATES = Path(__file__).resolve().parent / "templates"
 CLAUDE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
 PERMISSION_MODES = ("dontAsk", "acceptEdits", "auto", "plan", "default", "bypassPermissions")
 BACKEND_NAMES = ("claude", "codex")
+BROWSER_NAMES = ("orca", "chrome", "bot")
 CLEAR_WORDS = ("default", "none", "unset", "-")
 ON_WORDS = ("on", "yes", "true", "1")
 OFF_WORDS = ("off", "no", "false", "0")
@@ -68,6 +69,7 @@ SETTINGS = (
     ("effort", "low, medium, high, xhigh or max; default: Consiglieri's"),
     ("backend", "claude or codex; default: Consiglieri's"),
     ("workdir", "the directory it does its job in (it keeps its own memory either way)"),
+    ("browser", "orca, chrome or bot (a browser of its own, where credentials are filled in); default: Consiglieri's"),
 )
 SETTING_NAMES = tuple(name for name, _ in SETTINGS)
 
@@ -423,7 +425,8 @@ class BotRegistry:
             prefix + "_EFFORT": settings.get("effort", ""),
             "ALFRED_CLAUDE_PERMISSION_MODE": mode,
             "ALFRED_CODEX_SANDBOX": codex_sandbox,
-            "ALFRED_BROWSER": "" if record.allows("browser") else "none",
+            # Its own browser setting, else Consiglieri's (.env); none without the permission.
+            "ALFRED_BROWSER": settings.get("browser", "") if record.allows("browser") else "none",
             "ALFRED_WORKDIR": settings.get("workdir", ""),
             "ALFRED_ADD_DIRS": os.pathsep.join(str(path) for path in record.working_dirs()),
             "ALFRED_CLAUDE_SETTINGS": str(self.settings_file(bot_id)),
@@ -537,6 +540,10 @@ def clean_setting(config: Config, name: str, value: str) -> str:
     if name == "backend":
         if value.lower() not in BACKEND_NAMES:
             raise BotError("backend is one of: %s" % ", ".join(BACKEND_NAMES))
+        return value.lower()
+    if name == "browser":
+        if value.lower() not in BROWSER_NAMES:
+            raise BotError("browser is one of: %s" % ", ".join(BROWSER_NAMES))
         return value.lower()
     return _check_directory(config, value, "the working directory")
 

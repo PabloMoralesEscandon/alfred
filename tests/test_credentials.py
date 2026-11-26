@@ -355,9 +355,14 @@ class CommandTests(Base):
         record = self.registry.get(BOT_B)
         record.permissions = {}
         self.registry.save(record)
+        notes = creds_cli._bot_warnings(self.config, self.registry.get(BOT_B))
+        self.assertEqual(len(notes), 2)  # creds and browser
+        record.permissions = {"browser": "on", "creds": "on"}
+        self.registry.save(record)
         self.sandbox.environ["ALFRED_BROWSER"] = "orca"
         notes = creds_cli._bot_warnings(self.config, self.registry.get(BOT_B))
-        self.assertEqual(len(notes), 3)
+        self.assertEqual(len(notes), 1)
+        self.assertIn("browser bot", notes[0])
 
     def test_browser_is_each_bots_own(self) -> None:
         with self.as_bot(BOT_A):
@@ -379,6 +384,12 @@ class CommandTests(Base):
         self.sandbox.environ["ALFRED_BROWSER"] = "orca"
         with self.as_bot(BOT_A):
             self.assertIn("Orca's browser", self.run_json("browser", "tabs")["error"])
+        self.assertIn("Orca's browser", self.run_json("browser", "tabs", "--bot", "@bot_a")["error"])
+        record.settings = {"browser": "bot"}  # its own setting wins over .env's, from a terminal too
+        self.registry.save(record)
+        result = self.run_json("browser", "status", "--bot", "@bot_a")
+        self.assertTrue(result["ok"], result)
+        self.assertFalse(result["running"])
 
     def test_creds_list_needs_the_permission(self) -> None:
         record = self.registry.get(BOT_A)
@@ -390,6 +401,23 @@ class CommandTests(Base):
                 result = self.run_json("creds", "list")
         self.assertFalse(result["ok"])
         self.assertIn("creds permission", result["error"])
+
+
+class BrowserSettingTests(Base):
+    def test_each_bot_may_have_its_own(self) -> None:
+        self.sandbox.environ["ALFRED_BROWSER"] = "chrome"
+        self.assertEqual(bots.clean_setting(self.config, "browser", "Bot"), "bot")
+        self.assertEqual(bots.clean_setting(self.config, "browser", "default"), "")
+        with self.assertRaises(bots.BotError):
+            bots.clean_setting(self.config, "browser", "firefox")
+        record = self.registry.get(BOT_A)
+        record.settings = {"browser": "bot"}
+        self.registry.save(record)
+        self.assertEqual(self.registry.config_for(BOT_A).browser, "bot")
+        self.assertEqual(self.registry.config_for(BOT_B).browser, "chrome")  # the others keep .env's
+        record.permissions = {}
+        self.registry.save(record)
+        self.assertEqual(self.registry.config_for(BOT_A).browser, "none")  # no permission, no browser
 
 
 class PermissionTests(Base):

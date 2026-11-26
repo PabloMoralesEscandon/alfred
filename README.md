@@ -281,7 +281,8 @@ which browser is configured.
 
 ### Each bot its own browser
 
-With `ALFRED_BROWSER=bot`, every bot with the `browser` permission gets a Chromium of its own: its own profile,
+With `ALFRED_BROWSER=bot` (or, for one bot only, `/bot set <bot> browser bot`), every bot with the `browser`
+permission gets a Chromium of its own: its own profile,
 cookies and sessions, which no other bot shares. Consiglieri starts it without a window on the bot's first browser
 command, and the bot drives it with `alfred browser open|snapshot|click|fill|...`: ordinary commands, so it works the
 same with Claude or Codex and needs neither Orca nor the Claude in Chrome extension.

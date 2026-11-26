@@ -76,7 +76,7 @@ En la máquina, en una terminal:
 ```bash
 brew install --cask keepassxc
 venv/bin/pip install -e '.[browser]' && venv/bin/alfred browser install
-echo ALFRED_BROWSER=bot >> ~/.alfred/.env
+echo ALFRED_BROWSER=bot >> ~/.alfred/.env      # todos los bots; o solo uno: /bot set <bot> browser bot
 venv/bin/alfred creds setup
 venv/bin/alfred creds add tum --url moodle.tum.de --url login.tum.de --username ge12abc --totp
 venv/bin/alfred creds grant tum @uni_bot            # y /bot perm uni_bot creds on
@@ -198,4 +198,5 @@ descartaba la salida de `goto`.
 - **Aviso en cada uso**: la extensión rellena sin pasar por Consiglieri, así que solo se auditan concesiones y
   retiradas, no cada inicio de sesión.
 - **El panel**: ver y retirar credenciales desde Telegram (`/creds`); hoy solo en la terminal.
-- **Por defecto** sigue `ALFRED_BROWSER=orca`; los navegadores propios se activan a mano.
+- **Por defecto** sigue `ALFRED_BROWSER=orca`; los navegadores propios se activan a mano, para todos o bot a bot
+  (`/bot set <bot> browser bot`).

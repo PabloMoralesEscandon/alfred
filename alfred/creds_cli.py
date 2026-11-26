@@ -78,9 +78,12 @@ def _bot_warnings(config: Config, record: Any) -> List[str]:
         notes.append("%s does not have the creds permission yet: /bot perm %s creds on" % (record.handle, record.username))
     if not record.allows("browser"):
         notes.append("%s does not have the browser permission" % record.handle)
-    if config.browser != "bot":
-        notes.append("the bots' browser is %r: credentials are only typed in each bot's own browser "
-                     "(ALFRED_BROWSER=bot)" % config.browser)
+    from .bots import BotRegistry
+
+    browser = BotRegistry(config).config_for(record.bot_id).browser
+    if record.allows("browser") and browser != "bot":
+        notes.append("%s uses %r: credentials are only filled in a bot's own browser (/bot set %s browser bot)"
+                     % (record.handle, browser, record.username))
     return notes
 
 

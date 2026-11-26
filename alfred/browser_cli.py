@@ -22,7 +22,8 @@ WAIT_SECONDS = 15
 
 
 def _target(config: Config, args: argparse.Namespace):
-    """The bot whose browser this is: the caller in its turn, else --bot from a terminal."""
+    """The bot whose browser this is: the caller in its turn, else --bot from a terminal. Its browser is its own
+    setting, else Consiglieri's."""
     from .cli import CommandError, require, verified_caller
 
     caller = verified_caller(config)
@@ -39,10 +40,14 @@ def _target(config: Config, args: argparse.Namespace):
         record = BotRegistry(config).find(args.bot)
         if record is None:
             raise CommandError("no bot %r" % args.bot)
-    if config.browser != "bot":
-        raise CommandError("this Consiglieri gives its bots %s, not a browser of their own (ALFRED_BROWSER=bot); "
-                           "see the alfred:browser skill" % {"orca": "Orca's browser", "chrome": "the Chrome profile",
-                                                             "none": "no browser"}.get(config.browser, config.browser))
+    from .bots import BotRegistry
+
+    browser = BotRegistry(config).config_for(record.bot_id).browser
+    if browser != "bot":
+        raise CommandError("%s uses %s, not a browser of its own (/bot set %s browser bot, or ALFRED_BROWSER=bot for "
+                           "every bot); see the alfred:browser skill"
+                           % (record.handle, {"orca": "Orca's browser", "chrome": "the Chrome profile",
+                                              "none": "no browser"}.get(browser, browser), record.username))
     return record
 
 
@@ -54,8 +59,11 @@ class Driver:
     """One command: the bot's browser, running as its permissions say now, and the secrets to hide from it."""
 
     def __init__(self, config: Config, args: argparse.Namespace, headless: Optional[bool] = None) -> None:
-        self.config = config
+        from .bots import BotRegistry
+
         self.record = _target(config, args)
+        self.config = BotRegistry(config).config_for(self.record.bot_id)  # its own directory: outbox/ for screenshots
+        config = self.config
         self.browser = BotBrowser(config, self.record.bot_id)
         self.creds = _creds(config, self.record)
         self.state = self.browser.ensure(self.creds, headless)
