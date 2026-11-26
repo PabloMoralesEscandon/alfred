@@ -89,6 +89,9 @@ venv/bin/alfred creds list | revoke | remove | status | start | stop
 - Para un SSO, todas las URLs del recorrido: el sitio y el proveedor de identidad.
 - `grant` y `revoke` dejan una línea en la auditoría (`/bot audit`) y un aviso en el chat del bot, y dicen qué le falta
   al bot (el permiso `creds`, el de navegador o `ALFRED_BROWSER=bot`).
+- Desde el panel de Telegram (`/bot` → **My bots** → un bot) también se puede elegir el navegador (**Browser**) y ver o
+  retirar sus credenciales (**Credentials**, con confirmación, auditoría y aviso); concederlas solo se hace en la
+  máquina.
 
 El bot: `alfred creds list` (sus credenciales: nombre, usuario, sitios, si hay TOTP; nunca el secreto) y su navegador.
 La skill `web-logins` le dice qué hacer: cargar la página de inicio de sesión, comprobar en la instantánea que el
@@ -197,6 +200,5 @@ descartaba la salida de `goto`.
 - **Tokens de API**: fuera de esta rama; la vía es un proxy que inyecte el token (§2).
 - **Aviso en cada uso**: la extensión rellena sin pasar por Consiglieri, así que solo se auditan concesiones y
   retiradas, no cada inicio de sesión.
-- **El panel**: ver y retirar credenciales desde Telegram (`/creds`); hoy solo en la terminal.
 - **Por defecto** sigue `ALFRED_BROWSER=orca`; los navegadores propios se activan a mano, para todos o bot a bot
-  (`/bot set <bot> browser bot`).
+  (`/bot set <bot> browser bot` o en `/bot` → **My bots** → **Browser**).

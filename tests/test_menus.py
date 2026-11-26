@@ -6,13 +6,17 @@ import asyncio
 import unittest
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Tuple
+from unittest import mock
 
 try:
     from test_panel import CHEF as CHEF_ID, OWNER, RESEARCH, STRANGER, PanelHarness, update_for
 except ImportError:  # pragma: no cover
     PanelHarness = None  # type: ignore
 
-from alfred import menus, presets
+from alfred import bots, keepass, menus, presets, scheduler
+
+HAS_CLI = bool(keepass._find([str(keepass.MAC_APP / "keepassxc-cli"), "keepassxc-cli"]))
+TOTP_SEED = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"  # RFC 6238 SHA1 test key
 
 
 class MenuDriver:
@@ -722,6 +726,252 @@ class MenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
             await self.tap("🗑 1")
             self.assertIn("Removed this fact", self.text)
             self.assertEqual(shared_memory.facts(self.config, "user"), ["Works as a designer"])
+
+        self.play(scenario)
+
+    # -- per-bot browser and credentials --
+
+    def test_menu_browser_choice_stores_clears_and_shows_on_screen(self) -> None:
+        async def scenario() -> None:
+            await self.create(RESEARCH, "alfredpanel_research_bot", "Research", "/bot new Research +browser")
+            await self.open()
+            await self.tap("My bots")
+            await self.tap("Research")
+            self.assertIn("Browser: default (Orca)", self.text)
+            self.assertIn("🧭 Browser: default (Orca)", self.labels())
+
+            await self.tap("Browser")
+            self.assertIn("Default uses Consiglieri's setting in .env (now: Orca)", self.text)
+            self.assertEqual(self.labels(), ["● Default (Orca)", "Orca", "Chrome", "Own browser", "⬅️ Back"])
+            for row in self.rows:
+                for _, data in row:
+                    self.assertLessEqual(len(data.encode("utf-8")), 64, data)
+
+            await self.tap("Own browser")
+            self.assertIn("Browser set to Own browser", self.text)
+            self.assertIn("Browser: Own browser", self.text)
+            self.assertIn("🧭 Browser: Own browser", self.labels())
+            self.assertEqual(self.pool.registry.get(RESEARCH).settings["browser"], "bot")
+            self.assertEqual(self.pool.registry.config_for(RESEARCH).browser, "bot")
+
+            await self.tap("Browser")
+            self.assertIn("● Own browser", self.labels())
+            await self.tap("Chrome")
+            self.assertEqual(self.pool.registry.get(RESEARCH).settings["browser"], "chrome")
+            self.assertIn("Browser: Chrome", self.text)
+            self.assertIn("🧭 Browser: Chrome", self.labels())
+
+            # Default follows the panel config's .env value and clears the per-bot override.
+            self.sandbox.environ["ALFRED_BROWSER"] = "chrome"
+            await self.tap("Browser")
+            self.assertIn("Default (Chrome)", self.labels())
+            self.assertIn("now: Chrome", self.text)
+            await self.tap("Default")
+            self.assertNotIn("browser", self.pool.registry.get(RESEARCH).settings)
+            self.assertIn("Browser set to the default (Chrome)", self.text)
+            self.assertIn("Browser: default (Chrome)", self.text)
+            self.assertIn("🧭 Browser: default (Chrome)", self.labels())
+
+            # With browser permission off, the choice screen says so.
+            await self.pool.set_permission(self.pool.registry.get(RESEARCH), "browser", "off")
+            self.sandbox.environ["ALFRED_BROWSER"] = "bot"
+            await self.tap("Browser")
+            self.assertIn("● Default (Own browser)", self.labels())
+            self.assertIn("Browser permission is off", self.text)
+
+        self.play(scenario)
+
+    def test_menu_credentials_status_errors_thread_and_no_grant_path(self) -> None:
+        async def scenario() -> None:
+            await self.create(RESEARCH, "alfredpanel_research_bot", "Research", "/bot new Research")
+            await self.open()
+            await self.tap("My bots")
+            await self.tap("Research")
+            self.assertIn("🔑 Credentials", self.labels())
+
+            # Store not set up, neither creds nor own browser enabled.
+            await self.tap("Credentials")
+            self.assertIn("alfred creds setup", self.text)
+            self.assertIn("alfred creds grant", self.text)
+            self.assertIn("Creds permission: off", self.text)
+            self.assertIn("Without both the creds permission and its own browser", self.text)
+            self.assertEqual(self.labels(), ["⬅️ Back"])
+
+            # Turn on creds + browser + Own browser: readiness warning clears.
+            await self.pool.set_permission(self.pool.registry.get(RESEARCH), "creds", "on")
+            await self.pool.set_permission(self.pool.registry.get(RESEARCH), "browser", "on")
+            await self.pool.set_setting(self.pool.registry.get(RESEARCH), "browser", "bot")
+            await self.tap("Back")
+            await self.tap("Credentials")
+            self.assertIn("Creds permission: on", self.text)
+            self.assertIn("Browser: Own browser", self.text)
+            self.assertNotIn("Without both", self.text)
+
+            # CredentialError becomes a friendly message instead of failing the handler.
+            with mock.patch.object(keepass.KeePass, "is_set_up", return_value=True), \
+                    mock.patch.object(keepass.KeePass, "granted_to",
+                                      side_effect=keepass.CredentialError("keepassxc-cli is not installed")), \
+                    mock.patch.object(keepass.KeePass, "secrets_for", side_effect=AssertionError("must not read secrets")):
+                await self.tap("Back")
+                await self.tap("Credentials")
+            self.assertIn("⚠️ Could not read credentials: keepassxc-cli is not installed", self.text)
+            self.assertEqual(self.labels(), ["⬅️ Back"])
+
+            # Runs KeePass off the event loop (asyncio.to_thread), handles revoke CredentialError, and withdraws
+            # with confirmation, audit and chat notice even without keepassxc-cli installed.
+            tum = keepass.Credential(name="tum", username="ge12abc",
+                                     urls=["https://moodle.tum.de", "https://login.tum.de"], totp=True, bots=[RESEARCH])
+            granted: List[keepass.Credential] = [tum]
+
+            def fake_revoke(store_self: Any, name: str, bot_id: int) -> bool:
+                self.assertEqual((name, bot_id), ("tum", RESEARCH))
+                granted.clear()
+                return True
+
+            with mock.patch.object(keepass.KeePass, "is_set_up", return_value=True), \
+                    mock.patch.object(keepass.KeePass, "granted_to", side_effect=lambda bot_id: list(granted)), \
+                    mock.patch.object(keepass.KeePass, "secrets_for", side_effect=AssertionError("must not read secrets")), \
+                    mock.patch.object(keepass.KeePass, "grant", side_effect=AssertionError("no grant path from Telegram")), \
+                    mock.patch.object(menus.asyncio, "to_thread", wraps=asyncio.to_thread) as to_thread:
+                await self.tap("Back")
+                await self.tap("Credentials")
+                self.assertTrue(to_thread.called)
+                self.assertIn("tum", self.text)
+                self.assertIn("ge12abc", self.text)
+                self.assertIn("https://moodle.tum.de, https://login.tum.de", self.text)
+                self.assertIn("TOTP: yes", self.text)
+                self.assertIn("🔒 Withdraw tum", self.labels())
+
+                # Forged actions cannot grant or skip confirmation.
+                token = self.pool.main.menus.sessions[OWNER].token
+                for forged in ("credgrant:tum", "grant:tum", "creds:grant", "credrevoke!"):
+                    await self.tap("", data=menus.callback(token, forged))
+                self.assertEqual(len(granted), 1)
+
+                # Revoke error is turned into a friendly notice with no audit or chat notice.
+                with mock.patch.object(keepass.KeePass, "revoke",
+                                       side_effect=keepass.CredentialError("database busy")):
+                    await self.tap("Withdraw tum")
+                    self.assertIn("Withdraw credential «tum»", self.text)
+                    await self.tap("Yes, withdraw tum")
+                self.assertIn("⚠️ Could not withdraw tum: database busy", self.text)
+                self.assertEqual(bots.read_audit(self.config), [])
+                self.assertEqual(self.pool.store.pending_for_bot(RESEARCH), [])
+
+                # Successful withdraw revokes, writes audit (by=OWNER, via="panel") and notifies the bot's chat.
+                with mock.patch.object(keepass.KeePass, "revoke", fake_revoke):
+                    await self.tap("Withdraw tum")
+                    await self.tap("No, back")
+                    self.assertEqual(len(granted), 1)
+                    await self.tap("Withdraw tum")
+                    calls_before = to_thread.call_count
+                    await self.tap("Yes, withdraw tum")
+                    self.assertGreater(to_thread.call_count, calls_before)
+
+            self.assertIn("Withdrew «tum» from @alfredpanel_research_bot", self.text)
+            self.assertIn("No credentials are granted", self.text)
+            entries = bots.read_audit(self.config)
+            self.assertEqual(len(entries), 1)
+            self.assertEqual((entries[0]["event"], entries[0]["by"], entries[0]["via"],
+                              entries[0]["credential"], entries[0]["bot_id"]),
+                             ("credential_revoked", OWNER, "panel", "tum", RESEARCH))
+            item = self.pool.store.claim_due()
+            self.assertIsNotNone(item)
+            self.assertEqual((item["bot_id"], item["chat_id"]), (RESEARCH, OWNER))
+            self.assertIn("You withdrew the credential «tum» from me.", item["message"])
+            await self.pool.deliver(item)
+            self.assertTrue(any("You withdrew the credential «tum» from me." in t
+                                for t in self.pool.frontends[RESEARCH].bot.texts))
+
+        self.play(scenario)
+
+    @unittest.skipUnless(HAS_CLI, "keepassxc-cli is not installed")
+    def test_menu_credentials_with_real_keepass_lists_only_bots_own_never_secrets_and_withdraws(self) -> None:
+        async def scenario() -> None:
+            await self.create(RESEARCH, "alfredpanel_research_bot", "Research", "/bot new Research +browser +creds")
+            await self.create(CHEF_ID, "alfredpanel_chef_bot", "Chef", "/bot new Chef +browser +creds")
+            await self.pool.set_setting(self.pool.registry.get(RESEARCH), "browser", "bot")
+
+            store = keepass.KeePass(self.config)
+            store.setup()
+            secret_pw = 'p&ss<w"rd-only-for-keepass'
+            other_pw = "chef-mail-secret-pw"
+            store.add("tum", ["moodle.tum.de", "login.tum.de"], "ge12abc", secret_pw, TOTP_SEED)
+            store.add("mail", ["mail.example.org"], "chef@example.org", other_pw, "")
+            store.grant("tum", RESEARCH)
+            store.grant("mail", CHEF_ID)
+            current_totp = keepass.totp_code(keepass.check_totp(TOTP_SEED))
+
+            with mock.patch.object(keepass.KeePass, "secrets_for",
+                                   side_effect=AssertionError("panel must never read secrets")):
+                await self.open()
+                for label in ("My bots", "Research", "Credentials"):
+                    await self.tap(label)
+                # Lists only Research's credentials, with metadata, never any secret.
+                self.assertIn("tum", self.text)
+                self.assertIn("ge12abc", self.text)
+                self.assertIn("https://moodle.tum.de, https://login.tum.de", self.text)
+                self.assertIn("TOTP: yes", self.text)
+                self.assertIn("🔒 Withdraw tum", self.labels())
+                self.assertNotIn("mail", self.text)
+                self.assertNotIn("chef@example.org", self.text)
+                for secret in (secret_pw, other_pw, TOTP_SEED, current_totp):
+                    self.assertNotIn(secret, self.text)
+                for row in self.rows:
+                    for _, data in row:
+                        self.assertLessEqual(len(data.encode("utf-8")), 64, data)
+
+                # Chef sees only mail (no TOTP), never tum.
+                for label in ("Back", "Back", "Chef", "Credentials"):
+                    await self.tap(label)
+                self.assertIn("mail", self.text)
+                self.assertIn("chef@example.org", self.text)
+                self.assertIn("https://mail.example.org", self.text)
+                self.assertIn("TOTP: no", self.text)
+                self.assertIn("🔒 Withdraw mail", self.labels())
+                self.assertNotIn("tum", self.text)
+                for secret in (secret_pw, other_pw, TOTP_SEED, current_totp):
+                    self.assertNotIn(secret, self.text)
+
+                # Withdraw tum from Research: asks first, then revokes in KeePassXC, audits and notifies.
+                for label in ("Back", "Back", "Research", "Credentials", "Withdraw tum"):
+                    await self.tap(label)
+                self.assertIn("Withdraw credential «tum» from @alfredpanel_research_bot?", self.text)
+                for row in self.rows:
+                    for _, data in row:
+                        self.assertLessEqual(len(data.encode("utf-8")), 64, data)
+                self.assertEqual([c.name for c in store.granted_to(RESEARCH)], ["tum"])
+                self.assertEqual(bots.read_audit(self.config), [])
+
+                await self.tap("No, back")
+                self.assertEqual([c.name for c in store.granted_to(RESEARCH)], ["tum"])
+
+                await self.tap("Withdraw tum")
+                await self.tap("Yes, withdraw tum")
+                self.assertEqual(store.granted_to(RESEARCH), [])
+                self.assertEqual([c.name for c in store.granted_to(CHEF_ID)], ["mail"])
+                self.assertIn("Withdrew «tum»", self.text)
+                self.assertIn("No credentials are granted", self.text)
+                self.assertEqual(self.labels(), ["⬅️ Back"])
+
+                # Audit line matches creds_cli (by=OWNER, via="panel") and shows in the Audit screen.
+                entries = bots.read_audit(self.config)
+                self.assertEqual([(e["event"], e["by"], e["via"], e["credential"], e["bot_id"]) for e in entries],
+                                 [("credential_revoked", OWNER, "panel", "tum", RESEARCH)])
+                await self.open()
+                await self.tap("Audit")
+                self.assertIn("credential withdrawn from @alfredpanel_research_bot by %d (panel) [credential tum]" % OWNER,
+                              self.text)
+
+                # Bot chat notification is queued and delivered only to Research's chat.
+                while True:
+                    item = self.pool.store.claim_due()
+                    if item is None:
+                        break
+                    await self.pool.deliver(item)
+                self.assertTrue(any("You withdrew the credential «tum» from me." in t
+                                    for t in self.pool.frontends[RESEARCH].bot.texts))
+                self.assertEqual(self.pool.frontends[CHEF_ID].bot.texts, [])
 
         self.play(scenario)
 
