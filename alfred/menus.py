@@ -11,12 +11,13 @@ that no longer exists says so and asks for /bot again, instead of acting on stal
 
 from __future__ import annotations
 
+import asyncio
 import secrets
 import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
-from . import bots, presets, scheduler, shared_memory, soul, soul_writer, usage_alerts, usage_monitor
+from . import bots, creds_cli, keepass, presets, scheduler, shared_memory, soul, soul_writer, usage_alerts, usage_monitor
 from .bots import BotError, BotRecord, DEFAULT_PERMISSIONS
 
 SESSION_SECONDS = 30 * 60
@@ -30,6 +31,9 @@ CLAUDE_MODELS = (("Default", ""), ("Fable", "fable"), ("Opus", "opus"), ("Sonnet
 CODEX_MODELS = (("Default", ""),)
 CLAUDE_EFFORTS = ("", "low", "medium", "high", "xhigh", "max")
 CODEX_EFFORTS = ("", "low", "medium", "high")
+# What the bot editor's Browser screen offers. The empty value means Consiglieri's default from .env (ALFRED_BROWSER).
+BROWSERS = (("Default", ""), ("Orca", "orca"), ("Chrome", "chrome"), ("Own browser", "bot"))
+BROWSER_LABELS = {"orca": "Orca", "chrome": "Chrome", "bot": "Own browser", "none": "none"}
 # The modes the selector cycles through. plan and default are left to /bot perm: with nobody there to
 # answer, plan never acts and default denies whatever would ask.
 MODE_CYCLE = ("dontAsk", "acceptEdits", "auto", "bypassPermissions")
@@ -101,6 +105,11 @@ class Session:
     shared_topic: str = ""  # the shared topic on screen
     item_ids: List[str] = field(default_factory=list)  # the scheduled items as last listed, for their cancel buttons
     alert_ids: List[str] = field(default_factory=list)  # a bot's usage alerts as last listed, for their buttons
+    # A bot's credentials as last read from KeePassXC (metadata only, never secrets), plus one waiting for withdraw.
+    creds_set_up: bool = False
+    creds: List[keepass.Credential] = field(default_factory=list)
+    creds_error: str = ""
+    cred_name: str = ""
     notice: str = ""  # one line shown above the next screen, then cleared
     touched: float = field(default_factory=time.time)
 
@@ -251,7 +260,8 @@ class Menus:
         verb, _, argument = action.partition(":")
         try:
             return await self._press(session, verb, argument)
-        except (BotError, shared_memory.SharedMemoryError, soul.SoulError, soul_writer.SoulWriterError) as exc:
+        except (BotError, shared_memory.SharedMemoryError, soul.SoulError, soul_writer.SoulWriterError,
+                keepass.CredentialError) as exc:
             session.notice = "⚠️ %s" % exc
             return self.render(session)
 
@@ -263,11 +273,16 @@ class Menus:
         if verb == "home":
             return self.go(session, "home")
         if verb == "back":
-            return self.go(session, self.parent(session.screen))
+            target = self.parent(session.screen)
+            if target == "bot_creds":
+                return await self._open_creds(session)
+            return self.go(session, target)
         if verb == "go":
             if argument == "new_name":
                 session.name, session.settings, session.soul = "", {}, ""
                 session.preset, session.permissions = presets.RECOMMENDED, presets.apply(presets.RECOMMENDED, {})
+            if argument in ("bot_creds", "bot_creds_revoke"):
+                return await self._open_creds(session)
             return self.go(session, argument)
         if verb == "skip":  # the task is optional
             session.settings.pop("task", None)
@@ -344,6 +359,8 @@ class Menus:
             return await self._choose(session, "model", argument)
         if verb == "effort":
             return await self._choose(session, "effort", argument)
+        if verb == "browser":
+            return await self._choose(session, "browser", argument)
         if verb == "typemodel":
             session.awaiting = "bot_model" if session.screen == "bot_model" else "model"
             return self.render(session)
@@ -391,12 +408,23 @@ class Menus:
             )
         if verb == "bot":
             # A button carries only the bot's id: whose bot it is is checked here, not trusted from the button.
+            session.creds_set_up, session.creds, session.creds_error, session.cred_name = False, [], "", ""
             if not argument.isdigit() or self.pool.registry.get_owned(int(argument), session.user_id) is None:
                 session.bot_id = 0
                 session.notice = "⚠️ That bot is not one of yours."
                 return self.go(session, "list")
             session.bot_id = int(argument)
             return self.go(session, "bot")
+        if verb == "credrevoke":
+            self._record(session)
+            index = int(argument) if argument.isdigit() else -1
+            if not (0 <= index < len(session.creds)):
+                session.notice = "⚠️ That credential is no longer listed."
+                return await self._open_creds(session)
+            session.cred_name = session.creds[index].name
+            return self.go(session, "bot_creds_revoke")
+        if verb == "credrevoke!":
+            return await self._revoke_cred(session)
         if verb == "edittask":
             session.awaiting = "bot_task"
             return self.go(session, "bot_task")
@@ -548,16 +576,21 @@ class Menus:
     # -- choices --
 
     async def _choose(self, session: Session, name: str, argument: str) -> Screen:
-        """A model, effort or backend button: on the draft in the wizard, on the bot in the editor."""
-        editing = session.screen.startswith("bot_")
+        """A model, effort, backend or browser button: on the draft in the wizard, on the bot in the editor."""
+        editing = name == "browser" or session.screen.startswith("bot_")
         current = self._record(session).settings if editing else session.settings
         backend = current.get("backend") or self.pool.config.default_backend
         if name == "backend":
-            value = ("claude", "codex")[int(argument)]
+            options: Tuple[str, ...] = ("claude", "codex")
         elif name == "model":
-            value = (CODEX_MODELS if backend == "codex" else CLAUDE_MODELS)[int(argument)][1]
+            options = tuple(value for _, value in (CODEX_MODELS if backend == "codex" else CLAUDE_MODELS))
+        elif name == "browser":
+            options = tuple(value for _, value in BROWSERS)
         else:
-            value = (CODEX_EFFORTS if backend == "codex" else CLAUDE_EFFORTS)[int(argument)]
+            options = CODEX_EFFORTS if backend == "codex" else CLAUDE_EFFORTS
+        if not argument.isdigit() or not (0 <= int(argument) < len(options)):
+            return self.render(session)
+        value = options[int(argument)]
         if editing:
             record = self._record(session)
             await self.pool.set_setting(record, name, value or "default")
@@ -565,7 +598,12 @@ class Menus:
                 await self.pool.set_setting(record, "model", "default")
                 await self.pool.set_setting(record, "effort", "default")
                 return self.render(session)
-            session.notice = "%s set to %s. It applies from its next message." % (name.capitalize(), value or "the default")
+            if name == "browser":
+                shown = (self._browser_label(value) if value
+                         else "the default (%s)" % self._browser_label(self.pool.config.browser))
+            else:
+                shown = value or "the default"
+            session.notice = "%s set to %s. It applies from its next message." % (name.capitalize(), shown)
             return self.go(session, "bot")
         if value:
             session.settings[name] = value
@@ -576,6 +614,50 @@ class Menus:
             session.settings.pop("effort", None)
             return self.render(session)
         return self.go(session, "new_effort" if name == "model" else "new_perms")
+
+    # -- credentials (read-only + withdraw; granting is only on the machine) --
+
+    @staticmethod
+    def _read_creds(config: Any, bot_id: int) -> Tuple[bool, List[keepass.Credential]]:
+        """Read the bot's credentials from KeePassXC (metadata only, never secrets). Runs off the event loop."""
+        store = keepass.KeePass(config)
+        if not store.is_set_up():
+            return False, []
+        return True, store.granted_to(bot_id)
+
+    async def _open_creds(self, session: Session) -> Screen:
+        """Load this bot's credentials in a worker thread so keepassxc-cli never blocks the event loop."""
+        record = self._record(session)
+        session.cred_name = ""
+        session.creds_error = ""
+        try:
+            session.creds_set_up, session.creds = await asyncio.to_thread(
+                self._read_creds, self.pool.config, record.bot_id)
+        except keepass.CredentialError as exc:
+            session.creds_set_up = True
+            session.creds = []
+            session.creds_error = str(exc)
+        return self.go(session, "bot_creds")
+
+    async def _revoke_cred(self, session: Session) -> Screen:
+        """Withdraw one credential from the bot after confirmation, then audit and notify its chat."""
+        record = self._record(session)
+        if session.screen != "bot_creds_revoke" or not session.cred_name:
+            return await self._open_creds(session)
+        name, session.cred_name = session.cred_name, ""
+        try:
+            changed = await asyncio.to_thread(keepass.KeePass(self.pool.config).revoke, name, record.bot_id)
+        except keepass.CredentialError as exc:
+            session.notice = "⚠️ Could not withdraw %s: %s" % (name, exc)
+            return await self._open_creds(session)
+        if changed:
+            bots.audit(self.pool.config, "credential_revoked", record, by=session.user_id, via="panel", credential=name)
+            creds_cli.notify(self.pool.config, record, "🔑 You withdrew the credential «%s» from me." % name)
+            session.notice = ("Withdrew «%s» from %s. A session it already opened with it stays open until it expires "
+                              "or it logs out." % (name, record.handle))
+        else:
+            session.notice = "«%s» was already withdrawn from %s." % (name, record.handle)
+        return await self._open_creds(session)
 
     async def _permission(self, session: Session, verb: str, argument: str) -> Screen:
         editing = session.screen.startswith("bot_")
@@ -652,6 +734,8 @@ class Menus:
             return WIZARD[index - 1] if index else "home"
         if screen == "bot_cross":
             return "bot_perms"
+        if screen == "bot_creds_revoke":
+            return "bot_creds"
         if screen in ("shared_topic", "shared_add"):
             return "shared"
         if screen in ("audit", "old_schedule", "base_soul"):
@@ -699,9 +783,9 @@ class Menus:
             "How it works\n\n"
             "Create bot walks you through name, task, model, effort and permissions, then sends a button "
             "that asks Telegram to create the bot. Confirm there and the bot is ready in its own chat.\n\n"
-            "My bots lets you change a bot's model, effort, task, permissions, folders and rules, see and cancel "
-            "its reminders and usage alerts, pause it, resume it or destroy it. You only ever see your own bots; "
-            "there is no main agent.\n\n"
+            "My bots lets you change a bot's model, effort, task, permissions, browser, folders and rules, see and "
+            "withdraw its credentials, see and cancel its reminders and usage alerts, pause it, resume it or destroy "
+            "it. You only ever see your own bots; there is no main agent.\n\n"
             "What a bot may do is a security preset: %s, %s, %s or %s, from least to most. Customize turns "
             "single permissions on and off; the bot then shows as Custom. Claude Code enforces the permissions; "
             "with a full shell and no sandbox a bot can do anything your user can.\n\n"
@@ -814,6 +898,26 @@ class Menus:
         buttons = [("%s%s" % ("● " if value == chosen else "", value or "Default"), "effort:%d" % index)
                    for index, value in enumerate(choices)]
         return [buttons[i:i + 3] for i in range(0, len(buttons), 3)]
+
+    @staticmethod
+    def _browser_label(value: str) -> str:
+        return BROWSER_LABELS.get(value, value)
+
+    def _browser_current(self, settings: Dict[str, str]) -> str:
+        """How a bot's browser setting reads on its button and summary screen."""
+        chosen = settings.get("browser", "")
+        if chosen:
+            return self._browser_label(chosen)
+        default = self.pool.config.browser if self.pool is not None else "orca"
+        return "default (%s)" % self._browser_label(default)
+
+    def _browser_rows(self, settings: Dict[str, str]) -> List[Row]:
+        chosen = settings.get("browser", "")
+        default = self._browser_label(self.pool.config.browser if self.pool is not None else "orca")
+        default_button = ("%sDefault (%s)" % ("● " if not chosen else "", default), "browser:0")
+        others = [("%s%s" % ("● " if value == chosen else "", label), "browser:%d" % index)
+                  for index, (label, value) in enumerate(BROWSERS[1:], 1)]
+        return [[default_button], others]
 
     def _backend(self, settings: Dict[str, str]) -> str:
         return settings.get("backend") or self.pool.config.default_backend
@@ -932,6 +1036,7 @@ class Menus:
         if record.cross_agent:
             lines += [bots.cross_agent_line(record), ""]
         lines += self._settings_lines(record.settings)
+        lines.append("Browser: %s" % self._browser_current(record.settings))
         if record.settings.get("workdir"):
             lines.append("Works in: %s" % record.settings["workdir"])
         lines += ["Permissions: %s" % presets.level_name(record), "", self._permission_text(record)]
@@ -939,6 +1044,8 @@ class Menus:
             [("🧠 Model", "go:bot_model"), ("⚙️ Effort", "go:bot_effort")],
             [("📝 Task", "edittask"), ("🔐 Permissions", "go:bot_perms")],
             [("🎭 Personality", "go:bot_soul")],
+            [("🧭 Browser: %s" % self._browser_current(record.settings), "go:bot_browser")],
+            [("🔑 Credentials", "go:bot_creds")],
             [("⏰ Reminders", "go:bot_schedule"), ("📊 Usage alerts", "go:bot_alerts")],
             [("📂 Folders and rules", "go:bot_advanced")],
             [("⏸ Pause", "pause") if record.enabled else ("▶️ Resume", "resume"), ("🗑 Destroy", "destroy")],
@@ -968,6 +1075,82 @@ class Menus:
             return self._screen_list(session)
         return Screen("Effort for %s." % record.handle,
                       self._effort_rows(record.settings, self._backend(record.settings)) + [[("⬅️ Back", "back")]])
+
+    def _screen_bot_browser(self, session: Session) -> Screen:
+        record = self._safe_record(session)
+        if record is None:
+            return self._screen_list(session)
+        default = self._browser_label(self.pool.config.browser)
+        lines = [
+            "Browser for %s. It applies from its next message." % record.handle,
+            "",
+            "Default uses Consiglieri's setting in .env (now: %s). Own browser gives this bot a Chromium of its own, "
+            "where KeePassXC fills in its credentials." % default,
+        ]
+        if not record.allows("browser"):
+            lines += ["", "Its Browser permission is off (Permissions → Customize), so it cannot use a browser yet."]
+        return Screen("\n".join(lines), self._browser_rows(record.settings) + [[("⬅️ Back", "back")]])
+
+    def _creds_status_lines(self, record: BotRecord) -> List[str]:
+        """Whether this bot has both pieces needed for KeePassXC to fill credentials into its browser."""
+        has_creds = record.allows("creds")
+        has_browser = record.allows("browser")
+        effective = record.settings.get("browser") or self.pool.config.browser
+        own_browser = has_browser and effective == "bot"
+        lines = [
+            "Creds permission: %s" % ("on" if has_creds else "off (turn on in Permissions → Customize)"),
+            "Browser: %s" % (
+                "Own browser" if own_browser else
+                "%s (needs Own browser — change in Browser)" % self._browser_label(effective) if has_browser else
+                "permission off (turn on Browser in Permissions → Customize%s)"
+                % ("" if effective == "bot" else " and choose Own browser")
+            ),
+        ]
+        if not (has_creds and own_browser):
+            lines.append("Without both the creds permission and its own browser, nothing is filled in.")
+        return lines
+
+    def _screen_bot_creds(self, session: Session) -> Screen:
+        record = self._safe_record(session)
+        if record is None:
+            return self._screen_list(session)
+        lines = ["Credentials of %s" % record.handle, ""]
+        lines += self._creds_status_lines(record)
+        lines.append("")
+        rows: List[Row] = []
+        if session.creds_error:
+            lines.append("⚠️ Could not read credentials: %s" % session.creds_error)
+        elif not session.creds_set_up:
+            lines.append("The credential store is not set up yet. Set it up on the machine with:\nalfred creds setup")
+        elif not session.creds:
+            lines.append("No credentials are granted to %s." % record.handle)
+        else:
+            for index, cred in enumerate(session.creds[:50]):
+                sites = ", ".join(cred.urls) or "none"
+                user = cred.username or "(none)"
+                totp = "yes" if cred.totp else "no"
+                lines.append("• %s — user: %s · sites: %s · TOTP: %s" % (cred.name, user, sites, totp))
+                rows.append([("🔒 Withdraw %s" % cred.name, "credrevoke:%d" % index)])
+        lines += [
+            "",
+            "Granting is only done on the machine, never from Telegram:\nalfred creds grant <name> %s" % record.handle,
+        ]
+        return Screen("\n".join(lines), rows + [[("⬅️ Back", "back")]])
+
+    def _screen_bot_creds_revoke(self, session: Session) -> Screen:
+        record = self._safe_record(session)
+        if record is None:
+            return self._screen_list(session)
+        if not session.cred_name:
+            return self._screen_bot_creds(session)
+        name = session.cred_name
+        return Screen(
+            "Withdraw credential «%s» from %s?\n\n"
+            "Its browser will stop filling it in on the next page load. A session it already opened with it stays "
+            "open until it expires or it logs out. To grant it again later, run on the machine:\n"
+            "alfred creds grant %s %s" % (name, record.handle, name, record.handle),
+            [[("🔒 Yes, withdraw %s" % name, "credrevoke!")], [("⬅️ No, back", "back")]],
+        )
 
     def _screen_bot_task(self, session: Session) -> Screen:
         record = self._safe_record(session)

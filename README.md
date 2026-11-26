@@ -93,9 +93,9 @@ Mode**. That is what lets the panel create bots. `/status` in the panel says whe
 Send `/bot` for the menu, where everything is managed with buttons. **Create bot** walks you through
 name, task (a short label), role and personality, model, effort and permissions (Back and Cancel on every step) and ends with a
 summary and the proposed username, which extends the panel's (`manolito_bot` → `manolito_<what it
-does>_bot`). **My bots** lists your bots; a bot's screen changes its model, effort, task, personality,
-permissions (presets, single switches, cross-agent access), working folder, extra folders and rules, shows
-and cancels its reminders and usage alerts, and pauses, resumes or destroys it. The home screen also has
+does>_bot`). **My bots** lists your bots; a bot's screen changes its model, effort, task, personality, browser,
+permissions (presets, single switches, cross-agent access), working folder, extra folders and rules, lists and
+withdraws its credentials, shows and cancels its reminders and usage alerts, and pauses, resumes or destroys it. The home screen also has
 **Shared memory**, **Audit** (cross-agent grants and withdrawals of your bots), **Base personality** and,
 if the main bot had scheduled anything before it became a panel, **Old reminders**. A menu expires after
 30 minutes, when you open a newer one, or when Consiglieri restarts; its old buttons then just say so.
@@ -111,7 +111,7 @@ The same can be done with text shortcuts:
 | `/bot new <name> [options] [task]` | Create a bot. The panel shows a "Create @…" keyboard button: tap it and confirm in the window Telegram opens, where you can still change the name and username. A `t.me/newbot/…` link follows as a second option, for apps where the button does not show. The panel connects to the new bot at once, no restart, and removes the keyboard. |
 | `/bots` | List your bots. |
 | `/bot show <bot>` | Its settings and permissions. |
-| `/bot set <bot> <setting> <value>` | `task`, `model`, `effort`, `backend` or `workdir`. `default` clears one. |
+| `/bot set <bot> <setting> <value>` | `task`, `model`, `effort`, `backend`, `workdir` or `browser`. `default` clears one. |
 | `/bot perm <bot> <permission> <value>` | Change a permission (below). |
 | `/bot perm <bot> <preset>` | Switch it to a security preset: `basic`, `assistant`, `power` or `full`. Its extra folders and rules are kept. |
 | `/bot pause <bot>`, `/bot resume <bot>` | Disconnect or reconnect it. Messages sent to a paused bot are dropped; its reminders wait. |
@@ -281,8 +281,8 @@ which browser is configured.
 
 ### Each bot its own browser
 
-With `ALFRED_BROWSER=bot` (or, for one bot only, `/bot set <bot> browser bot`), every bot with the `browser`
-permission gets a Chromium of its own: its own profile,
+With `ALFRED_BROWSER=bot` (or, for one bot only, `/bot set <bot> browser bot`, or **My bots → a bot → Browser** in
+`/bot`), every bot with the `browser` permission gets a Chromium of its own: its own profile,
 cookies and sessions, which no other bot shares. Consiglieri starts it without a window on the bot's first browser
 command, and the bot drives it with `alfred browser open|snapshot|click|fill|...`: ordinary commands, so it works the
 same with Claude or Codex and needs neither Orca nor the Claude in Chrome extension.
@@ -314,7 +314,8 @@ venv/bin/alfred creds revoke tum @uni_bot
 
 `add` asks for the password (and the TOTP key, from the site's QR code) at the terminal, without echo; there is no
 other way in. Each credential is its own KeePassXC database, and a bot's browser only gets answers from the ones
-granted to it. KeePassXC runs while the bots work; Consiglieri starts it when needed. See
+granted to it. In Telegram, `/bot` → **My bots** → a bot → **Credentials** lists what a bot has and withdraws any of
+them (granting is only done on the machine). KeePassXC runs while the bots work; Consiglieri starts it when needed. See
 [docs/CREDENTIALS.md](docs/CREDENTIALS.md) for how it works, what it protects and what it does not.
 
 Whichever browser:
