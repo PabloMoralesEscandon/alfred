@@ -728,6 +728,31 @@ class PanelTests(PanelHarness):
 
         self.play(scenario)
 
+    def test_browser_setting_and_no_telegram_credential_grant(self) -> None:
+        from alfred import keepass
+
+        async def scenario() -> None:
+            await self.create(RESEARCH, "research_bot", "Research", "/bot new Research +browser")
+            replies = await self.command("/bot set research_bot browser bot")
+            self.assertIn("browser of @research_bot: bot", replies[0]["text"])
+            self.assertEqual(self.pool.registry.config_for(RESEARCH).browser, "bot")
+            shown = await self.command("/bot show research_bot")
+            self.assertIn("browser: bot", shown[0]["text"])
+            bad = await self.command("/bot set research_bot browser firefox")
+            self.assertIn("orca, chrome, bot", bad[0]["text"])
+            cleared = await self.command("/bot set research_bot browser default")
+            self.assertIn("browser of @research_bot: default", cleared[0]["text"])
+            self.assertNotIn("browser", self.pool.registry.get(RESEARCH).settings)
+
+            # No text command in the control panel grants credentials.
+            with mock.patch.object(keepass.KeePass, "grant", side_effect=AssertionError("no grant from Telegram")), \
+                    mock.patch.object(keepass.KeePass, "add", side_effect=AssertionError("no add from Telegram")):
+                for text in ("/creds grant tum @research_bot", "/bot creds grant tum research_bot",
+                             "/bot grant tum research_bot"):
+                    await self.command(text)
+
+        self.play(scenario)
+
 
 if __name__ == "__main__":
     unittest.main()

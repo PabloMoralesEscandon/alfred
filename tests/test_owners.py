@@ -144,9 +144,13 @@ class TwoUsersTests(PanelHarness):  # type: ignore[misc,valid-type]
             # Even if the session somehow points at it, no action reaches it.
             before = self.pool.registry.get(MINE)
             for action in ("pause", "destroy!", "perm:web", "pick:full", "pickok", "crossgrant", "crossrevoke",
-                           "edittask", "model:2", "effort:3", "shell", "mode"):
+                           "edittask", "model:2", "effort:3", "browser:3", "go:bot_browser", "go:bot_creds",
+                           "credrevoke:0", "credrevoke!", "shell", "mode"):
                 session.bot_id = MINE
-                session.screen = "bot_perms_custom" if action.startswith(("perm", "shell", "mode")) else "bot"
+                session.screen = ("bot_perms_custom" if action.startswith(("perm", "shell", "mode"))
+                                  else "bot_creds_revoke" if action == "credrevoke!" else "bot")
+                if action == "credrevoke!":
+                    session.cred_name = "tum"
                 text, _ = await self.press(SECOND, menus.callback(token, action))
                 self.assertNotIn("@mine_bot", text, action)
             self.assertEqual(self.pool.registry.get(MINE), before)
@@ -155,6 +159,54 @@ class TwoUsersTests(PanelHarness):  # type: ignore[misc,valid-type]
             text, _ = await self.press(SECOND, menus.callback(token, "bot:%d" % THEIRS))
             self.assertIn("@theirs_bot", text)
             self.assertTrue(opened)
+
+        self.play(scenario)
+
+    def test_only_the_bots_owner_can_view_or_withdraw_its_credentials_or_change_its_browser(self) -> None:
+        from alfred import keepass
+
+        async def scenario() -> None:
+            await self.both()
+            tum = keepass.Credential(name="tum", username="ge12abc", urls=["https://moodle.tum.de"],
+                                     totp=True, bots=[MINE])
+            with mock.patch.object(keepass.KeePass, "is_set_up", return_value=True), \
+                    mock.patch.object(keepass.KeePass, "granted_to", return_value=[tum]) as listed, \
+                    mock.patch.object(keepass.KeePass, "revoke", return_value=True) as revoked:
+                await self.command_as(OWNER, "/bot")
+                owner_session = self.pool.main.menus.sessions[OWNER]
+                await self.press(OWNER, menus.callback(owner_session.token, "bot:%d" % MINE))
+                await self.press(OWNER, menus.callback(owner_session.token, "go:bot_creds"))
+                await self.press(OWNER, menus.callback(owner_session.token, "credrevoke:0"))
+                listed.reset_mock()
+
+                # SECOND presses OWNER's own withdraw-confirmation button: rejected as expired.
+                text, _ = await self.press(SECOND, menus.callback(owner_session.token, "credrevoke!"))
+                self.assertIn("expired", text)
+                revoked.assert_not_called()
+
+                # SECOND opens their own menu and tries to point it at MINE.
+                await self.command_as(SECOND, "/bot")
+                second_session = self.pool.main.menus.sessions[SECOND]
+                second_session.bot_id = MINE
+                second_session.creds = [tum]
+                second_session.cred_name = "tum"
+                second_session.screen = "bot_creds_revoke"
+                for action in ("go:bot_creds", "credrevoke:0", "credrevoke!", "browser:3"):
+                    second_session.bot_id = MINE
+                    second_session.cred_name = "tum"
+                    second_session.screen = "bot_creds_revoke" if action == "credrevoke!" else "bot"
+                    text, _ = await self.press(SECOND, menus.callback(second_session.token, action))
+                    self.assertNotIn("ge12abc", text, action)
+                    self.assertNotIn("@mine_bot", text, action)
+                listed.assert_not_called()
+                revoked.assert_not_called()
+                self.assertEqual(bots.read_audit(self.config), [])
+                self.assertNotIn("browser", self.pool.registry.get(MINE).settings)
+
+                # OWNER can still confirm withdrawal of their own bot's credential.
+                text, _ = await self.press(OWNER, menus.callback(owner_session.token, "credrevoke!"))
+                self.assertIn("Withdrew «tum»", text)
+                revoked.assert_called_once_with("tum", MINE)
 
         self.play(scenario)
 
