@@ -25,7 +25,7 @@ For reading a public page, a plain web fetch is faster. Use the browser when you
 
 ## Your own browser
 
-A browser only you use, driven with `alfred browser`. It runs without a window; it starts by itself on the first command. Every command answers JSON.
+A browser only you use, driven with `alfred browser`. It runs without a window; it starts by itself on the first command. Every command answers JSON. Run each one alone, one call per command: chained with `;` or `&&`, or piped into another command, it fails with "Operation not permitted".
 
 ```bash
 alfred browser open https://example.com          # a new tab: prints its "page" id; keep it
