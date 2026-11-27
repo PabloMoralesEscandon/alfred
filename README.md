@@ -473,9 +473,9 @@ migrate, an old install keeps working after pulling this version:
   Restart it right after pulling: the running process still has the old code in memory.
 - Every `CONSIGLIERI_X` setting is also read as `ALFRED_X` when the new name is not set (the new name wins), <!-- rename-compat -->
   and the bots' agents get both names.
-- `~/.alfred` is the home while `~/.consiglieri` does not exist, and the home's `bin/` has the old command <!-- rename-compat -->
-  next to `consiglieri`. The bots' permission rules are written for both names, so the old one is no way
-  around them.
+- `~/.alfred` is the home while `~/.consiglieri` does not exist, and its old launcher stays in `bin/` next to <!-- rename-compat -->
+  `consiglieri` until you migrate (a new home never has it). The bots' permission rules are written for
+  both names, so the old one is no way around them.
 - Run `venv/bin/pip install -e '.[browser]'` once to get `venv/bin/consiglieri`; the old `venv/bin/alfred` <!-- rename-compat -->
   needs it too.
 
@@ -493,9 +493,13 @@ venv/bin/pip uninstall -y alfred            # the old distribution and its conso
 ```
 
 `migrate` moves the three folders and Claude Code's folders for them (so every bot resumes its
-conversations), rewrites the old paths and setting names in the panel's state and the `.env` files, and
-refuses to start while anything still runs or a destination exists. `--from` and `--to` move another
-home, such as a test instance.
+conversations), rewrites the old paths and setting names in the panel's state and the `.env` files,
+removes the old command's launcher, lists any extension or skill a bot wrote that still calls the old
+command, and refuses to start while anything still runs or a destination exists. `--from` and `--to` move
+another home, such as a test instance.
+
+Bots already created keep their Telegram usernames (Telegram can't change them); new bots of a panel whose
+username starts with the old name are offered `consiglieri_...` instead.
 
 ## Security
 

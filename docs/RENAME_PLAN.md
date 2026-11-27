@@ -201,7 +201,7 @@ copia del plist).
   - Paquete de compatibilidad `alfred/` con `__init__.py` (reexporta) y `__main__.py` (llama a
     `consiglieri.cli.main`), para que `python -m alfred run` del plist actual y del lanzador viejo
     sigan funcionando. Se borra en la fase 4, después de reinstalar el servicio.
-  - El lanzador del home escribe `bin/consiglieri` y `bin/alfred` (el mismo script, con `-m consiglieri`).
+  - El lanzador del home escribe `bin/consiglieri` y `bin/alfred` (el mismo script, con `-m consiglieri`). (Hecho de otro modo: `bin/alfred` solo se reescribe mientras exista; ver decisión 11.)
   - `prog="consiglieri"` y mensajes `consiglieri: …`. (Ya no hay `--bot main|alfred`: no hay agente principal.)
   - **Reglas de permisos para los dos nombres**: `ALWAYS_DENIED`, `USAGE_RULES`, `excludedCommands`,
     `Bash(<cmd> *)`, `Bash(<cmd> schedule *)`, `Bash(<cmd> bots *)` generadas desde una lista
@@ -418,11 +418,15 @@ scripts/check_old_name.sh --runtime          # en la máquina ya no deben salir 
 En Telegram: escribir a un bot que tuviera conversación (debe seguirla), y mirar sus recordatorios en el
 menú. Para un bot con navegador y credenciales, que inicie sesión en un sitio concedido.
 
+Si `migrate` lista extensiones o skills de un bot que aún llaman al comando viejo («note: … still calls the
+old command»), cambiar en ellas `alfred` por `consiglieri`: tras migrar, el lanzador viejo ya no existe.
+
 **5. Retirar el paquete viejo del venv** cuando todo funcione: `venv/bin/pip uninstall -y alfred`.
 
-**6. Instancia de pruebas** (decisión abierta 6): migrarla con
-`venv/bin/consiglieri migrate --from ~/.alfred-test --to ~/.consiglieri-test` (con su servicio, si lo tiene,
-parado) y renombrar a mano `~/.alfred-test.env`, que `migrate` no conoce; o borrarla.
+**6. Instancia de pruebas** (decisión 6: se migra, no se borra), con lo suyo parado:
+`CONSIGLIERI_ENV_FILE=~/.alfred-test.env venv/bin/consiglieri migrate --from ~/.alfred-test --to ~/.consiglieri-test`
+(primero con `--dry-run`). Así `migrate` reescribe también ese `.env` (nombres y la ruta del home); después,
+si se quiere, renombrar el fichero a `~/.consiglieri-test.env` y `~/.alfred-test.old-code` a mano.
 
 **Reversión:** ver la fase 4.
 
@@ -437,10 +441,8 @@ quitarla habría que volver a conceder sus credenciales.
 - **Usernames de los bots ya creados en Telegram** (`alfred_rnfl_*_bot`): Telegram no permite cambiar el
   username de un bot; haría falta crear bots nuevos (token y chats nuevos). No aparecen en el repo, así que
   `check_old_name.sh` no los ve. El nombre visible sí se puede cambiar en BotFather (`/setname`) o desde el
-  panel. Ojo: el username que se propone a un bot nuevo empieza por el del panel sin `_bot`
-  (`bots.suggest_username`), así que mientras el panel sea un `alfred_…_bot` los bots nuevos también lo
-  llevarán. Para evitarlo, crear un panel nuevo (p. ej. `consiglieri_panel_bot`, ver §2) o escribir otro
-  username al crear cada bot.
+  panel. Los bots nuevos ya no heredan el nombre viejo del username del panel: se les propone
+  `consiglieri_…` (decisión 12).
 - El repo en GitHub y la carpeta `orca/workspaces/alfred/` (fase 5).
 
 ## Decisiones abiertas
@@ -448,26 +450,29 @@ quitarla habría que volver a conceder sus credenciales.
 1. ~~¿El agente principal sigue llamándose Alfred?~~ **Resuelta:** no hay agente principal. Recrear el
    asistente personal como un bot más queda como decisión abierta en [PANEL_ONLY.md](PANEL_ONLY.md) §6.
 2. ¿Nombre visible del bot del panel en Telegram: «Consiglieri»? ¿Username nuevo o el actual?
-3. ¿Cuánto tiempo vive el alias `alfred` (comando y lectura de `ALFRED_*`)? Propuesta: hasta que
-   el servicio real lleve una semana con la fase 4 sin incidencias.
+3. ~~¿Cuánto tiempo vive el alias?~~ **Resuelta (2026-11-27, a juicio del agente por indicación del
+   usuario):** la compatibilidad se quita cuando el servicio real lleve una semana migrado sin incidencias.
 4. Documentos históricos de investigación (`docs/*_RESEARCH.md`, `docs/PLAN.md`): en la fase 1 se
    actualiza el nombre del proyecto; si se prefiere dejarlos como registro histórico, se revierte
    ese commit y se añaden a `.rename-allow`.
-5. ¿La identidad git de los autoguardados del home pasa a `Consiglieri <consiglieri@localhost>`?
-   Propuesta: sí, en la fase 4.
-6. ¿Instancia de pruebas `~/.alfred-test*`: migrar o borrar?
+5. ~~¿Identidad git de los autoguardados?~~ **Resuelta:** `Consiglieri <consiglieri@localhost>`.
+6. ~~¿Instancia de pruebas: migrar o borrar?~~ **Resuelta:** se migra (paso 6 de la migración en vivo);
+   borrar datos no se decide desde aquí.
 7. Cómo se presenta un bot: la fase 1 usa el plural como nombre común en su manual («one of the
    user's Consiglieri: a Telegram bot created for one job») y «a Consiglieri bot» en su `/help`.
    ¿Se queda así o se prefiere otra fórmula?
 8. ~~Los avisos de permisos nombraban a Alfred~~ **Resuelta:** ahora dicen «your other bots».
 9. Las decisiones sobre varios usuarios (memoria compartida, auditoría, personalidad base) están en
    [PANEL_ONLY.md](PANEL_ONLY.md) §9.
-10. ¿Se deja un enlace `~/.alfred → ~/.consiglieri` tras migrar? Propuesta: no (ver fase 4). Si se quiere,
-    hay que denegar también esa ruta a los bots.
-11. ¿Se mantiene el lanzador `bin/alfred` en el home tras migrar, mientras dure el alias? Hoy sí (lo
-    reescribe cada arranque). Quitarlo antes reduce superficie, pero un bot con una conversación antigua o
-    un script de extensión que lo llame fallaría.
-12. ¿Usernames de bots: se crean bots nuevos sin el nombre viejo o se dejan los `alfred_rnfl_*_bot`?
+10. ~~¿Enlace `~/.alfred → ~/.consiglieri`?~~ **Resuelta:** no. Sería una segunda ruta a todo lo que los bots
+    tienen denegado.
+11. ~~¿Lanzador `bin/alfred` tras migrar?~~ **Resuelta:** no. Solo se reescribe mientras exista (homes sin
+    migrar); `migrate` lo borra y nunca se vuelve a crear, y lista lo que los bots escribieron que aún lo
+    llama. Las reglas siguen cubriendo los dos nombres mientras exista `LEGACY_COMMAND`, como defensa.
+12. ~~¿Usernames de bots?~~ **Resuelta:** los bots existentes conservan su username (cambiarlo exige un bot
+    nuevo: token y chats nuevos, y se pierde su historia). Los bots nuevos de un panel cuyo username empieza
+    por el nombre viejo reciben `consiglieri_…` (`bots.username_prefix`). Queda en manos del usuario cambiar el
+    nombre visible del panel en BotFather (decisión 2).
 
 ## Anexo: `scripts/check_old_name.sh`
 
