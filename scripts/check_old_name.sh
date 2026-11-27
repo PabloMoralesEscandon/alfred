@@ -75,7 +75,10 @@ printf '%s' "$filtered" | grep -oE "\b$OLD (run|init|service|usage|usage-alert|b
 printf '%s' "$filtered" | grep -oE "\b$OLD:[a-z<]" | wc -l | sed 's/^ */   skills:   /'
 echo "== ficheros y carpetas con '$OLD' en el nombre"
 find . \( -path ./.git -o -path ./venv -o -path ./.venv -o -name '*.egg-info' -o -name __pycache__ \) -prune \
-  -o -iname "*$OLD*" -print | sed 's|^\./|   |'
+  -o -iname "*$OLD*" -print | sed 's|^\./||' | while IFS= read -r path; do
+    allowed "$path" && continue  # a file or folder `.rename-allow` lists is there on purpose
+    echo "   $path"
+  done
 
 if [ "$VERBOSE" = 1 ]; then echo "== detalle"; printf '%s' "$filtered"; fi
 
