@@ -398,7 +398,7 @@ def parse_spec(config: Config, admin: BotRecord, data: Any, allow_past: bool = F
 
     if permissions.get("creds") == "on":
         problems.append("creds: a bot admin never gives the credentials permission; the user turns it on and grants "
-                        "each credential on the machine (docs/CREDENTIALS.md)")
+                        "each credential (docs/CREDENTIALS.md)")
     problems += ceiling_problems(config, admin, permissions, cross, settings)
     if problems:
         raise SpecError(problems)

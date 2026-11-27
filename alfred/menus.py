@@ -105,9 +105,11 @@ class Session:
     shared_topic: str = ""  # the shared topic on screen
     item_ids: List[str] = field(default_factory=list)  # the scheduled items as last listed, for their cancel buttons
     alert_ids: List[str] = field(default_factory=list)  # a bot's usage alerts as last listed, for their buttons
-    # A bot's credentials as last read from KeePassXC (metadata only, never secrets), plus one waiting for withdraw.
+    # A bot's credentials as last read from KeePassXC (metadata only, never secrets): those granted to it, those it
+    # could be granted (only for a user who may grant), and the one waiting for confirmation.
     creds_set_up: bool = False
     creds: List[keepass.Credential] = field(default_factory=list)
+    creds_other: List[keepass.Credential] = field(default_factory=list)
     creds_error: str = ""
     cred_name: str = ""
     notice: str = ""  # one line shown above the next screen, then cleared
@@ -165,7 +167,7 @@ CALENDAR_WARNING = (
 
 CREDS_WARNING = (
     "🔑 Credentials: KeePassXC fills the credentials you grant it into its own browser, only on their sites; it "
-    "never sees them. You grant each one on the machine (alfred creds grant <name> <bot>). It needs "
+    "never sees them. You add them on the machine (alfred creds add) and grant each one in Credentials. It needs "
     "ALFRED_BROWSER=bot. With an open shell it is not walled off from them: keep those bots on Basic or Assistant.")
 
 
@@ -281,7 +283,7 @@ class Menus:
             if argument == "new_name":
                 session.name, session.settings, session.soul = "", {}, ""
                 session.preset, session.permissions = presets.RECOMMENDED, presets.apply(presets.RECOMMENDED, {})
-            if argument in ("bot_creds", "bot_creds_revoke"):
+            if argument in ("bot_creds", "bot_creds_revoke", "bot_creds_grant"):
                 return await self._open_creds(session)
             return self.go(session, argument)
         if verb == "skip":  # the task is optional
@@ -409,6 +411,7 @@ class Menus:
         if verb == "bot":
             # A button carries only the bot's id: whose bot it is is checked here, not trusted from the button.
             session.creds_set_up, session.creds, session.creds_error, session.cred_name = False, [], "", ""
+            session.creds_other = []
             if not argument.isdigit() or self.pool.registry.get_owned(int(argument), session.user_id) is None:
                 session.bot_id = 0
                 session.notice = "⚠️ That bot is not one of yours."
@@ -425,6 +428,19 @@ class Menus:
             return self.go(session, "bot_creds_revoke")
         if verb == "credrevoke!":
             return await self._revoke_cred(session)
+        if verb == "credgrant":
+            self._record(session)
+            index = int(argument) if argument.isdigit() else -1
+            if not self.pool.config.may_grant_credentials(session.user_id):
+                session.notice = "⚠️ Only the users in ALFRED_CREDENTIALS_GRANTERS may grant credentials from here."
+                return await self._open_creds(session)
+            if not (0 <= index < len(session.creds_other)):
+                session.notice = "⚠️ That credential is no longer listed."
+                return await self._open_creds(session)
+            session.cred_name = session.creds_other[index].name
+            return self.go(session, "bot_creds_grant")
+        if verb == "credgrant!":
+            return await self._grant_cred(session)
         if verb == "edittask":
             session.awaiting = "bot_task"
             return self.go(session, "bot_task")
@@ -615,24 +631,31 @@ class Menus:
             return self.render(session)
         return self.go(session, "new_effort" if name == "model" else "new_perms")
 
-    # -- credentials (read-only + withdraw; granting is only on the machine) --
+    # -- credentials (list, grant, withdraw; adding one, with its password, is only on the machine) --
 
     @staticmethod
-    def _read_creds(config: Any, bot_id: int) -> Tuple[bool, List[keepass.Credential]]:
-        """Read the bot's credentials from KeePassXC (metadata only, never secrets). Runs off the event loop."""
+    def _read_creds(config: Any, bot_id: int, everything: bool = False
+                    ) -> Tuple[bool, List[keepass.Credential], List[keepass.Credential]]:
+        """The bot's credentials and, with `everything`, the others it could be granted, from KeePassXC (metadata
+        only, never secrets). Runs off the event loop."""
         store = keepass.KeePass(config)
         if not store.is_set_up():
-            return False, []
-        return True, store.granted_to(bot_id)
+            return False, [], []
+        if not everything:
+            return True, store.granted_to(bot_id), []
+        listed = store.list()
+        return (True, [c for c in listed if int(bot_id) in c.bots], [c for c in listed if int(bot_id) not in c.bots])
 
     async def _open_creds(self, session: Session) -> Screen:
         """Load this bot's credentials in a worker thread so keepassxc-cli never blocks the event loop."""
         record = self._record(session)
         session.cred_name = ""
         session.creds_error = ""
+        session.creds_other = []
         try:
-            session.creds_set_up, session.creds = await asyncio.to_thread(
-                self._read_creds, self.pool.config, record.bot_id)
+            session.creds_set_up, session.creds, session.creds_other = await asyncio.to_thread(
+                self._read_creds, self.pool.config, record.bot_id,
+                self.pool.config.may_grant_credentials(session.user_id))
         except keepass.CredentialError as exc:
             session.creds_set_up = True
             session.creds = []
@@ -657,6 +680,32 @@ class Menus:
                               "or it logs out." % (name, record.handle))
         else:
             session.notice = "«%s» was already withdrawn from %s." % (name, record.handle)
+        return await self._open_creds(session)
+
+    async def _grant_cred(self, session: Session) -> Screen:
+        """Grant one credential to the bot after confirmation, then audit and notify its chat."""
+        record = self._record(session)
+        if session.screen != "bot_creds_grant" or not session.cred_name:
+            return await self._open_creds(session)
+        name, session.cred_name = session.cred_name, ""
+        if not self.pool.config.may_grant_credentials(session.user_id):
+            session.notice = "⚠️ Only the users in ALFRED_CREDENTIALS_GRANTERS may grant credentials from here."
+            return await self._open_creds(session)
+        store = keepass.KeePass(self.pool.config)
+        try:
+            changed = await asyncio.to_thread(store.grant, name, record.bot_id)
+            credential = await asyncio.to_thread(store.get, name)
+        except keepass.CredentialError as exc:
+            session.notice = "⚠️ Could not grant %s: %s" % (name, exc)
+            return await self._open_creds(session)
+        if changed:
+            bots.audit(self.pool.config, "credential_granted", record, by=session.user_id, via="panel", credential=name)
+            creds_cli.notify(self.pool.config, record, "🔑 You granted me the credential «%s» (%s). My browser will fill "
+                                                       "it in on those sites by itself; I never see the password."
+                             % (name, ", ".join(credential.urls)))
+            session.notice = "Granted «%s» to %s." % (name, record.handle)
+        else:
+            session.notice = "%s already had «%s»." % (record.handle, name)
         return await self._open_creds(session)
 
     async def _permission(self, session: Session, verb: str, argument: str) -> Screen:
@@ -734,7 +783,7 @@ class Menus:
             return WIZARD[index - 1] if index else "home"
         if screen == "bot_cross":
             return "bot_perms"
-        if screen == "bot_creds_revoke":
+        if screen in ("bot_creds_revoke", "bot_creds_grant"):
             return "bot_creds"
         if screen in ("shared_topic", "shared_add"):
             return "shared"
@@ -1131,10 +1180,16 @@ class Menus:
                 totp = "yes" if cred.totp else "no"
                 lines.append("• %s — user: %s · sites: %s · TOTP: %s" % (cred.name, user, sites, totp))
                 rows.append([("🔒 Withdraw %s" % cred.name, "credrevoke:%d" % index)])
-        lines += [
-            "",
-            "Granting is only done on the machine, never from Telegram:\nalfred creds grant <name> %s" % record.handle,
-        ]
+        if session.creds_set_up and not session.creds_error:
+            if session.creds_other:
+                lines += ["", "Others you can grant it:"]
+                for index, cred in enumerate(session.creds_other[:50]):
+                    lines.append("• %s — sites: %s" % (cred.name, ", ".join(cred.urls) or "none"))
+                    rows.append([("🔓 Grant %s" % cred.name, "credgrant:%d" % index)])
+            elif not self.pool.config.may_grant_credentials(session.user_id):
+                lines += ["", "Only the users in ALFRED_CREDENTIALS_GRANTERS may grant credentials from here."]
+            lines += ["", "New credentials (with their password) are added on the machine:\n"
+                          "alfred creds add <name> --url <site> --username <user>"]
         return Screen("\n".join(lines), rows + [[("⬅️ Back", "back")]])
 
     def _screen_bot_creds_revoke(self, session: Session) -> Screen:
@@ -1147,10 +1202,34 @@ class Menus:
         return Screen(
             "Withdraw credential «%s» from %s?\n\n"
             "Its browser will stop filling it in on the next page load. A session it already opened with it stays "
-            "open until it expires or it logs out. To grant it again later, run on the machine:\n"
-            "alfred creds grant %s %s" % (name, record.handle, name, record.handle),
+            "open until it expires or it logs out. You can grant it again later from Credentials."
+            % (name, record.handle),
             [[("🔒 Yes, withdraw %s" % name, "credrevoke!")], [("⬅️ No, back", "back")]],
         )
+
+    def _screen_bot_creds_grant(self, session: Session) -> Screen:
+        record = self._safe_record(session)
+        if record is None:
+            return self._screen_list(session)
+        found = [cred for cred in session.creds_other if cred.name == session.cred_name]
+        if not found:
+            return self._screen_bot_creds(session)
+        cred = found[0]
+        lines = [
+            "Grant credential «%s» to %s?" % (cred.name, record.handle),
+            "",
+            "User: %s" % (cred.username or "(none)"),
+            "Sites: %s" % (", ".join(cred.urls) or "none"),
+            "TOTP: %s" % ("yes" if cred.totp else "no"),
+            "",
+            "Its browser will fill it in by itself on those sites; the bot never sees the password. It is noted in "
+            "the audit and the bot is told in its chat.",
+        ]
+        if bots.shell_is_open(record) or record.permission("shell") == "full":
+            lines += ["", "⚠️ Its shell is open: it is not walled off from its credentials. Keep it on Basic or "
+                          "Assistant."]
+        lines += [""] + self._creds_status_lines(record)
+        return Screen("\n".join(lines), [[("🔓 Yes, grant %s" % cred.name, "credgrant!")], [("⬅️ No, back", "back")]])
 
     def _screen_bot_task(self, session: Session) -> Screen:
         record = self._safe_record(session)

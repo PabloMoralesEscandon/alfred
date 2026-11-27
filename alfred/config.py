@@ -328,3 +328,13 @@ class Config:
         if user_id is not None and str(user_id) in allowed:
             return True
         return bool(username) and username.lstrip("@").lower() in allowed
+
+    def may_grant_credentials(self, user_id: Optional[int]) -> bool:
+        """Whether this panel user may give the machine's credentials to their bots from Telegram. The store is
+        shared by the whole machine, so with several panel users only those in ALFRED_CREDENTIALS_GRANTERS
+        (numeric Telegram ids) may; with a single one, that user may unless the setting says otherwise."""
+        listed = self.get("ALFRED_CREDENTIALS_GRANTERS").strip()
+        if listed:
+            granters = {entry.strip() for entry in listed.replace(";", ",").split(",") if entry.strip()}
+            return user_id is not None and str(user_id) in granters
+        return len(self.allowed_users()) <= 1

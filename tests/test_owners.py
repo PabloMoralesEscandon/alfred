@@ -210,6 +210,58 @@ class TwoUsersTests(PanelHarness):  # type: ignore[misc,valid-type]
 
         self.play(scenario)
 
+    def test_with_two_users_only_the_listed_granters_may_grant_credentials_and_only_to_their_own_bots(self) -> None:
+        from alfred import keepass
+
+        async def scenario() -> None:
+            await self.both()
+            tum = keepass.Credential(name="tum", username="ge12abc", urls=["https://moodle.tum.de"], totp=False,
+                                     bots=[])
+            with mock.patch.object(keepass.KeePass, "is_set_up", return_value=True), \
+                    mock.patch.object(keepass.KeePass, "granted_to", return_value=[]), \
+                    mock.patch.object(keepass.KeePass, "list", return_value=[tum]), \
+                    mock.patch.object(keepass.KeePass, "get", return_value=tum), \
+                    mock.patch.object(keepass.KeePass, "grant", return_value=True) as granted:
+                # Two panel users and no ALFRED_CREDENTIALS_GRANTERS: nobody gets a grant button, forged or not.
+                await self.command_as(SECOND, "/bot")
+                second = self.pool.main.menus.sessions[SECOND]
+                await self.press(SECOND, menus.callback(second.token, "bot:%d" % THEIRS))
+                text, labels = await self.press(SECOND, menus.callback(second.token, "go:bot_creds"))
+                self.assertFalse(any("Grant" in label for label in labels), labels)
+                second.creds_other = [tum]
+                await self.press(SECOND, menus.callback(second.token, "credgrant:0"))
+                second.screen, second.cred_name = "bot_creds_grant", "tum"
+                await self.press(SECOND, menus.callback(second.token, "credgrant!"))
+                granted.assert_not_called()
+
+                # Only OWNER is listed: SECOND still cannot, OWNER can, and only to OWNER's own bot.
+                self.sandbox.environ["ALFRED_CREDENTIALS_GRANTERS"] = str(OWNER)
+                text, labels = await self.press(SECOND, menus.callback(second.token, "go:bot_creds"))
+                self.assertFalse(any("Grant" in label for label in labels), labels)
+                second.creds_other = [tum]
+                await self.press(SECOND, menus.callback(second.token, "credgrant:0"))
+                granted.assert_not_called()
+
+                await self.command_as(OWNER, "/bot")
+                owner = self.pool.main.menus.sessions[OWNER]
+                owner.bot_id, owner.screen, owner.cred_name, owner.creds_other = THEIRS, "bot_creds_grant", "tum", [tum]
+                text, _ = await self.press(OWNER, menus.callback(owner.token, "credgrant!"))
+                self.assertNotIn("@theirs_bot", text)
+                granted.assert_not_called()
+
+                await self.press(OWNER, menus.callback(owner.token, "bot:%d" % MINE))
+                text, labels = await self.press(OWNER, menus.callback(owner.token, "go:bot_creds"))
+                self.assertIn("🔓 Grant tum", labels)
+                await self.press(OWNER, menus.callback(owner.token, "credgrant:0"))
+                text, _ = await self.press(OWNER, menus.callback(owner.token, "credgrant!"))
+                granted.assert_called_once_with("tum", MINE)
+                self.assertIn("Granted «tum» to @mine_bot", text)
+                entries = bots.read_audit(self.config)
+                self.assertEqual([(e["event"], e["by"], e["via"], e["bot_id"]) for e in entries],
+                                 [("credential_granted", OWNER, "panel", MINE)])
+
+        self.play(scenario)
+
     def test_someone_elses_menu_buttons_do_nothing(self) -> None:
         async def scenario() -> None:
             await self.both()

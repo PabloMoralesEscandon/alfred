@@ -135,8 +135,8 @@ for lack of an allow rule, but not under `bypassPermissions`.
 ## Credentials under every preset
 
 The `creds` permission ([docs/CREDENTIALS.md](CREDENTIALS.md)) lets a bot's own browser (`ALFRED_BROWSER=bot`) load
-KeePassXC's extension with the bot's identity, so it fills in the credentials the user granted that bot on the machine
-(`alfred creds grant`), only on their sites, never showing it the secret. It is off in every preset and template, Full
+KeePassXC's extension with the bot's identity, so it fills in the credentials the user granted that bot (`/bot` →
+Credentials, or `alfred creds grant` on the machine), only on their sites, never showing it the secret. It is off in every preset and template, Full
 access included, and a bot admin can never turn it on. Whatever a bot's permissions, Claude Code denies it the owner's
 subcommands (`alfred creds setup`, `add`, `remove`, `grant`, `revoke`, `start`, `stop`, `alfred browser install`) and
 anything naming KeePassXC. With `shell alfred` (Basic, Assistant) a bot reaches its credentials only through its

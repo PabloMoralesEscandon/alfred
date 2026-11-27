@@ -1,6 +1,6 @@
 """`alfred creds`: the credentials KeePassXC types into the bots' browsers (docs/CREDENTIALS.md).
 
-On the machine, from a terminal (never from a bot's turn): `setup`, `add`, `remove`, `grant`, `revoke`, `start`,
+The owner can also grant and withdraw them from the Telegram panel (alfred/menus.py). On the machine, from a terminal (never from a bot's turn): `setup`, `add`, `remove`, `grant`, `revoke`, `start`,
 `stop`. Anyone: `status`, and `list`, which in a bot's turn shows only what was granted to that bot. No command
 ever prints a password or a TOTP seed.
 """

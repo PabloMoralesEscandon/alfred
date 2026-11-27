@@ -781,8 +781,10 @@ class MenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
 
         self.play(scenario)
 
-    def test_menu_credentials_status_errors_thread_and_no_grant_path(self) -> None:
+    def test_menu_credentials_status_errors_thread_and_confirmed_changes(self) -> None:
         async def scenario() -> None:
+            # Here nobody may grant from Telegram (several panel users and none listed): the grant path is shut.
+            self.sandbox.environ["ALFRED_CREDENTIALS_GRANTERS"] = "none"
             await self.create(RESEARCH, "alfredpanel_research_bot", "Research", "/bot new Research")
             await self.open()
             await self.tap("My bots")
@@ -792,7 +794,6 @@ class MenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
             # Store not set up, neither creds nor own browser enabled.
             await self.tap("Credentials")
             self.assertIn("alfred creds setup", self.text)
-            self.assertIn("alfred creds grant", self.text)
             self.assertIn("Creds permission: off", self.text)
             self.assertIn("Without both the creds permission and its own browser", self.text)
             self.assertEqual(self.labels(), ["⬅️ Back"])
@@ -841,6 +842,8 @@ class MenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
                 self.assertIn("https://moodle.tum.de, https://login.tum.de", self.text)
                 self.assertIn("TOTP: yes", self.text)
                 self.assertIn("🔒 Withdraw tum", self.labels())
+                self.assertFalse(any("Grant" in label for label in self.labels()))
+                self.assertIn("Only the users in ALFRED_CREDENTIALS_GRANTERS", self.text)
 
                 # Forged actions cannot grant or skip confirmation.
                 token = self.pool.main.menus.sessions[OWNER].token
@@ -913,7 +916,10 @@ class MenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
                 self.assertIn("https://moodle.tum.de, https://login.tum.de", self.text)
                 self.assertIn("TOTP: yes", self.text)
                 self.assertIn("🔒 Withdraw tum", self.labels())
-                self.assertNotIn("mail", self.text)
+                granted_part, offered_part = self.text.split("Others you can grant it:")
+                self.assertNotIn("mail", granted_part)
+                self.assertIn("• mail — sites: https://mail.example.org", offered_part)
+                self.assertIn("🔓 Grant mail", self.labels())
                 self.assertNotIn("chef@example.org", self.text)
                 for secret in (secret_pw, other_pw, TOTP_SEED, current_totp):
                     self.assertNotIn(secret, self.text)
@@ -929,7 +935,8 @@ class MenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
                 self.assertIn("https://mail.example.org", self.text)
                 self.assertIn("TOTP: no", self.text)
                 self.assertIn("🔒 Withdraw mail", self.labels())
-                self.assertNotIn("tum", self.text)
+                self.assertNotIn("ge12abc", self.text)
+                self.assertIn("🔓 Grant tum", self.labels())
                 for secret in (secret_pw, other_pw, TOTP_SEED, current_totp):
                     self.assertNotIn(secret, self.text)
 
@@ -952,12 +959,28 @@ class MenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
                 self.assertEqual([c.name for c in store.granted_to(CHEF_ID)], ["mail"])
                 self.assertIn("Withdrew «tum»", self.text)
                 self.assertIn("No credentials are granted", self.text)
-                self.assertEqual(self.labels(), ["⬅️ Back"])
+                self.assertEqual(sorted(self.labels()), sorted(["🔓 Grant mail", "🔓 Grant tum", "⬅️ Back"]))
 
-                # Audit line matches creds_cli (by=OWNER, via="panel") and shows in the Audit screen.
+                # Grant tum back from the panel: asks first, then grants in KeePassXC, audits and notifies.
+                await self.tap("Grant tum")
+                self.assertIn("Grant credential «tum» to @alfredpanel_research_bot?", self.text)
+                self.assertIn("User: ge12abc", self.text)
+                for secret in (secret_pw, other_pw, TOTP_SEED, current_totp):
+                    self.assertNotIn(secret, self.text)
+                await self.tap("No, back")
+                self.assertEqual(store.granted_to(RESEARCH), [])
+                await self.tap("Grant tum")
+                await self.tap("Yes, grant tum")
+                self.assertEqual([c.name for c in store.granted_to(RESEARCH)], ["tum"])
+                self.assertEqual([c.name for c in store.granted_to(CHEF_ID)], ["mail"])
+                self.assertIn("Granted «tum» to @alfredpanel_research_bot", self.text)
+                self.assertIn("🔒 Withdraw tum", self.labels())
+
+                # Audit lines match creds_cli (by=OWNER, via="panel") and show in the Audit screen.
                 entries = bots.read_audit(self.config)
                 self.assertEqual([(e["event"], e["by"], e["via"], e["credential"], e["bot_id"]) for e in entries],
-                                 [("credential_revoked", OWNER, "panel", "tum", RESEARCH)])
+                                 [("credential_revoked", OWNER, "panel", "tum", RESEARCH),
+                                  ("credential_granted", OWNER, "panel", "tum", RESEARCH)])
                 await self.open()
                 await self.tap("Audit")
                 self.assertIn("credential withdrawn from @alfredpanel_research_bot by %d (panel) [credential tum]" % OWNER,
@@ -970,6 +993,8 @@ class MenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
                         break
                     await self.pool.deliver(item)
                 self.assertTrue(any("You withdrew the credential «tum» from me." in t
+                                    for t in self.pool.frontends[RESEARCH].bot.texts))
+                self.assertTrue(any("You granted me the credential «tum»" in t
                                     for t in self.pool.frontends[RESEARCH].bot.texts))
                 self.assertEqual(self.pool.frontends[CHEF_ID].bot.texts, [])
 
