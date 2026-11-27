@@ -24,7 +24,7 @@ Lo que no se puede automatizar del todo, por diseño:
 - **Un bot no puede crear grupos.** Para grupos o foros, el usuario crea el grupo y añade los bots.
 
 Recomendación: usar bots gestionados para los agentes que necesiten identidad propia, cada uno en su
-chat privado con el usuario. El token se guarda en `~/.alfred/state/` con permisos `0600`, nunca en
+chat privado con el usuario. El token se guarda en `~/.consiglieri/state/` con permisos `0600`, nunca en
 git. Para agentes ligeros que no necesitan un bot aparte, los **temas en chats privados** (Bot API
 9.3/9.4) dan varios chats dentro del bot actual sin ningún token nuevo, y caben en el mismo diseño. No
 recomiendo automatizar BotFather ni usar una cuenta de usuario (MTProto). El diseño y los pasos están
@@ -34,18 +34,18 @@ en la [sección 5](#5-recomendación-y-diseño).
 
 Lo que condiciona el diseño (rama `PabloMoralesEscandon/agent-chats`):
 
-- **Un token, un proceso.** `Config.telegram_token` lee `TELEGRAM_BOT_TOKEN` (`alfred/config.py`), y
+- **Un token, un proceso.** `Config.telegram_token` lee `TELEGRAM_BOT_TOKEN` (`consiglieri/config.py`), y
   `telegram_bot.run` construye una sola `Application` y llama a `run_polling()`
-  (`alfred/telegram_bot.py:386`).
+  (`consiglieri/telegram_bot.py:386`).
 - **Todo se indexa por `chat_id`:**
-  - las sesiones (`SessionStore`, `state/sessions.json`, clave `str(chat_id)`, `alfred/agent.py:32`);
+  - las sesiones (`SessionStore`, `state/sessions.json`, clave `str(chat_id)`, `consiglieri/agent.py:32`);
   - las colas y bloqueos del `Agent`;
-  - el planificador (`scheduled_messages.chat_id INTEGER`, `alfred/scheduler.py:86`);
+  - el planificador (`scheduled_messages.chat_id INTEGER`, `consiglieri/scheduler.py:86`);
   - la carpeta del inbox;
-  - la variable `CONSIGLIERI_CHAT_ID` que reciben el agente y `bin/alfred`.
-- **`alfred send` usa siempre el token base** (`alfred/cli.py:133`).
+  - la variable `CONSIGLIERI_CHAT_ID` que reciben el agente y `bin/consiglieri`.
+- **`consiglieri send` usa siempre el token base** (`consiglieri/cli.py:133`).
 - **El home es un repositorio git que se commitea tras cada turno** (`home.autosave`). Su `.gitignore`
-  sembrado ignora `state/` y `.env` (`alfred/templates/gitignore`).
+  sembrado ignora `state/` y `.env` (`consiglieri/templates/gitignore`).
 - **El agente hereda el entorno del proceso** (`Agent._environment` copia `os.environ`). Corre con
   `bypassPermissions` y puede leer cualquier fichero del usuario.
 - **Dependencia:** `python-telegram-bot>=21,<23`. El soporte nativo de bots gestionados llegó en la
@@ -306,7 +306,7 @@ Otros límites operativos:
    como hoy.
 3. **Dónde se guarda el token:**
    - Nunca en el repositorio de código, en `docs/` ni en el git del home.
-   - Fichero `~/.alfred/state/bots/<bot_id>.token`, o un único `state/bots.env`. Directorio en modo
+   - Fichero `~/.consiglieri/state/bots/<bot_id>.token`, o un único `state/bots.env`. Directorio en modo
      `0700` y fichero en `0600`, escritura atómica (temporal y luego `os.replace`). `state/` ya está en
      el `.gitignore` que se siembra en el home.
    - El `.gitignore` del home se copia una sola vez y luego es del usuario o del agente. Como red de
@@ -317,7 +317,7 @@ Otros límites operativos:
 4. **El agente puede ver los tokens.** Claude Code corre con los permisos del usuario. Un modelo
    manipulado (por ejemplo, desde una web) podría leer `state/` o `.env`, y eso ya pasa hoy con el token
    base. Mitigaciones:
-   - no pasar tokens en el entorno del agente: `alfred send` los busca por `CONSIGLIERI_BOT_ID`;
+   - no pasar tokens en el entorno del agente: `consiglieri send` los busca por `CONSIGLIERI_BOT_ID`;
    - que el manual (`CLAUDE.md`) prohíba leer `state/` y `.env`;
    - correr Consiglieri con un usuario propio si importa.
    Ningún diseño elimina el riesgo mientras el agente tenga acceso total.
@@ -340,7 +340,7 @@ Otros límites operativos:
 1. **Mecanismo para bots nuevos:** bots gestionados, con Consiglieri como gestor. Un toque de confirmación
    y un *Start* por agente. El token se obtiene y se rota por la API.
 2. **Chat de cada bot:** su chat privado con el dueño, vinculado al primer `/start`.
-3. **Varios bots en un solo proceso** de `alfred run`: una `Application` de python-telegram-bot por
+3. **Varios bots en un solo proceso** de `consiglieri run`: una `Application` de python-telegram-bot por
    token, todas en el mismo bucle de eventos y con el planificador compartido.
 4. **Diseñar la clave de conversación pensando en temas,** para añadir después agentes ligeros como
    temas del chat privado de Consiglieri sin rehacer nada.
@@ -349,7 +349,7 @@ Otros límites operativos:
 ### 5.2 Modelo de datos
 
 ```text
-~/.alfred/state/
+~/.consiglieri/state/
   agents.json            registro de agentes (sin secretos)
   bots/                  0700
     <bot_id>.token       0600, un token por fichero
@@ -362,7 +362,7 @@ Otros límites operativos:
 ```json
 {
   "8123456789": {
-    "username": "alfred_research_bot",
+    "username": "consiglieri_research_bot",
     "name": "Research",
     "owner_id": 123456789,
     "created_at": "2026-11-12T10:00:00Z",
@@ -373,7 +373,7 @@ Otros límites operativos:
 }
 ```
 
-**Clave de conversación.** Se introduce un tipo pequeño en `alfred/agent.py`:
+**Clave de conversación.** Se introduce un tipo pequeño en `consiglieri/agent.py`:
 
 ```python
 class Conversation(NamedTuple):
@@ -392,28 +392,28 @@ class Conversation(NamedTuple):
 `Agent`, `SessionStore`, el inbox y `Listener` pasan de `chat_id: int` a `Conversation`. La clave se usa
 en los diccionarios y en `sessions.json`. El planificador añade dos columnas, `bot_id INTEGER NOT NULL
 DEFAULT 0` y `thread_id INTEGER`, con una migración `ALTER TABLE` como la que ya hace con el formato
-antiguo. El entorno del agente añade `CONSIGLIERI_BOT_ID` y `CONSIGLIERI_THREAD_ID`, y `bin/alfred send|event|schedule`
+antiguo. El entorno del agente añade `CONSIGLIERI_BOT_ID` y `CONSIGLIERI_THREAD_ID`, y `bin/consiglieri send|event|schedule`
 los respeta.
 
 ### 5.3 Componentes
 
 | Módulo | Cambio |
 | --- | --- |
-| `alfred/config.py` | `bots_dir`, `agents_path`. `TELEGRAM_BOT_TOKEN` sigue siendo el bot base (gestor). Sin ajustes nuevos obligatorios. |
-| `alfred/agent_bots.py` (nuevo) | `TokenStore`: leer, escribir con `0600` y borrar. `AgentRegistry`: `agents.json` y peticiones pendientes con caducidad. Sin dependencia de Telegram, fácil de probar. |
-| `alfred/telegram_bot.py` | `TelegramBot` recibe `bot_id`, y sus handlers construyen `Conversation(bot_id, chat_id, message_thread_id)`. Un `BotPool` arranca una `Application` por token (`initialize`, `start` y `updater.start_polling(allowed_updates=[...])`) en el mismo bucle, y sustituye a `run_polling()`. El bot base añade un handler para `Update.managed_bot` y el comando `/agent`. |
-| `alfred/agent.py` | `Conversation` como clave. `_environment` añade `CONSIGLIERI_BOT_ID`/`CONSIGLIERI_THREAD_ID` y quita del entorno cualquier `TELEGRAM_BOT_TOKEN`. Las instrucciones propias del agente (`agents/<nombre>/AGENT.md` en el home) van en la línea `<context .../>` o en el primer mensaje de la sesión, igual que el índice de skills con Codex. |
-| `alfred/cli.py` | `alfred send` elige el token por `CONSIGLIERI_BOT_ID` (`TokenStore`, o el base si es 0) y pasa `message_thread_id`. Comandos nuevos: `alfred agent request <nombre>` (para que el modelo pueda proponer un agente) y `alfred agent list`. |
-| `alfred/home.py` | `bootstrap` comprueba que `state/` está en el `.gitignore` del home. `autosave` rechaza commits con algo que parezca un token. |
-| `alfred/plugin/skills/` | Una skill base `agents` que explica al modelo cuándo y cómo proponer un agente nuevo y que nunca lea `state/`. |
+| `consiglieri/config.py` | `bots_dir`, `agents_path`. `TELEGRAM_BOT_TOKEN` sigue siendo el bot base (gestor). Sin ajustes nuevos obligatorios. |
+| `consiglieri/agent_bots.py` (nuevo) | `TokenStore`: leer, escribir con `0600` y borrar. `AgentRegistry`: `agents.json` y peticiones pendientes con caducidad. Sin dependencia de Telegram, fácil de probar. |
+| `consiglieri/telegram_bot.py` | `TelegramBot` recibe `bot_id`, y sus handlers construyen `Conversation(bot_id, chat_id, message_thread_id)`. Un `BotPool` arranca una `Application` por token (`initialize`, `start` y `updater.start_polling(allowed_updates=[...])`) en el mismo bucle, y sustituye a `run_polling()`. El bot base añade un handler para `Update.managed_bot` y el comando `/agent`. |
+| `consiglieri/agent.py` | `Conversation` como clave. `_environment` añade `CONSIGLIERI_BOT_ID`/`CONSIGLIERI_THREAD_ID` y quita del entorno cualquier `TELEGRAM_BOT_TOKEN`. Las instrucciones propias del agente (`agents/<nombre>/AGENT.md` en el home) van en la línea `<context .../>` o en el primer mensaje de la sesión, igual que el índice de skills con Codex. |
+| `consiglieri/cli.py` | `consiglieri send` elige el token por `CONSIGLIERI_BOT_ID` (`TokenStore`, o el base si es 0) y pasa `message_thread_id`. Comandos nuevos: `consiglieri agent request <nombre>` (para que el modelo pueda proponer un agente) y `consiglieri agent list`. |
+| `consiglieri/home.py` | `bootstrap` comprueba que `state/` está en el `.gitignore` del home. `autosave` rechaza commits con algo que parezca un token. |
+| `consiglieri/plugin/skills/` | Una skill base `agents` que explica al modelo cuándo y cómo proponer un agente nuevo y que nunca lea `state/`. |
 | `pyproject.toml` | `python-telegram-bot>=22.8,<23`. |
 
 ### 5.4 Flujo de creación
 
 ```text
 usuario ──/agent new Research──► Consiglieri (bot base)
-Consiglieri: guarda la petición pendiente (request_id, "alfred_research_bot", caduca en 10 min)
-Consiglieri ──mensaje con botón request_managed_bot (o enlace t.me/newbot/<Consiglieri>/alfred_research_bot?name=Research)──► usuario
+Consiglieri: guarda la petición pendiente (request_id, "consiglieri_research_bot", caduca en 10 min)
+Consiglieri ──mensaje con botón request_managed_bot (o enlace t.me/newbot/<Consiglieri>/consiglieri_research_bot?name=Research)──► usuario
 usuario: toca, revisa nombre y username, confirma            (único paso manual 1)
 Telegram ──update managed_bot {user, bot}──► Consiglieri
 Consiglieri: ¿user permitido? ¿hay una petición pendiente que encaje? Si no, se ignora y se registra.
@@ -421,7 +421,7 @@ Consiglieri ──getManagedBotToken(bot.id)──► token ─► TokenStore (0
 Consiglieri ──setManagedBotAccessSettings(bot.id, is_access_restricted=True)
 Consiglieri, con el token nuevo ──setMyCommands / setMyDescription / setMyShortDescription
 Consiglieri: AgentRegistry.add(...); BotPool.start(bot_id)
-Consiglieri ──"Listo. Abre t.me/alfred_research_bot?start=hola"──► usuario
+Consiglieri ──"Listo. Abre t.me/consiglieri_research_bot?start=hola"──► usuario
 usuario: abre y pulsa Start                                    (único paso manual 2)
 bot nuevo ──/start──► registra chat_id; el agente saluda en su propio chat
 ```
@@ -441,7 +441,7 @@ Preguntas de diseño que dejo abiertas, con lo que propongo por defecto:
 - **¿Memoria y skills compartidas o por agente?** Por defecto, compartidas: un solo home, como hoy
   entre backends. Cada agente tiene su `AGENT.md` con su papel. Separar memorias es la pregunta 3 de
   `docs/PLAN.md` y puede decidirse después.
-- **¿Puede el modelo crear agentes por su cuenta?** Solo proponerlos: `alfred agent request` envía el
+- **¿Puede el modelo crear agentes por su cuenta?** Solo proponerlos: `consiglieri agent request` envía el
   botón y la persona decide. Encaja con la regla de confirmar antes de cualquier acción hacia fuera.
 
 ### 5.5 Pasos de implementación
@@ -453,7 +453,7 @@ Cada paso se puede probar por separado. El orden reduce riesgos: primero lo que 
    muestra en `/status`. Si falta, `/agent new` explica cómo activarlo en lugar de fallar.
 2. **Dependencia.** Subir a `python-telegram-bot>=22.8,<23` y pasar la suite.
 3. **Clave de conversación.** Introducir `Conversation` y migrar `SessionStore`, el planificador
-   (columnas nuevas con valor por defecto), el inbox, el entorno y `bin/alfred`. Sin cambio visible: el
+   (columnas nuevas con valor por defecto), el inbox, el entorno y `bin/consiglieri`. Sin cambio visible: el
    bot base sigue usando la clave antigua. Añadir tests de migración.
 4. **Secretos.** `TokenStore` con permisos y escritura atómica, la comprobación del `.gitignore` en
    `bootstrap` y el bloqueo de tokens en `autosave`. Tests: los permisos son `0600` y un commit con un
@@ -495,7 +495,7 @@ identidad de Consiglieri.
 ## 6. Implementación
 
 Implementado en la rama `PabloMoralesEscandon/agent-chats` en commits pequeños. No se creó ningún bot
-real, no se usó ninguna credencial y no se tocó `~/.alfred` ni el servicio en marcha. Todo lo de abajo
+real, no se usó ninguna credencial y no se tocó `~/.consiglieri` ni el servicio en marcha. Todo lo de abajo
 está probado con un Telegram y un Claude Code simulados (sección 6.6). Lo que falta probar con Telegram
 de verdad está en la sección 6.7.
 
@@ -504,8 +504,8 @@ de verdad está en la sección 6.7.
 | Diseño (sección 5) | Implementado | Por qué |
 | --- | --- | --- |
 | El bot actual sigue siendo Consiglieri y además gestiona bots | El bot base es un **panel de control sin agente** (`ControlPanel`): crea, lista, configura y destruye bots, y es el gestor de sus cuentas de Telegram. Los agentes viven solo en los bots creados | Petición del usuario |
-| Memoria y skills compartidas por defecto | **Todo es de cada bot**: memoria, inbox, outbox, skills, extensiones, sesiones y tareas programadas. Lo común a todos es solo la base: el comando `alfred`, el plugin `alfred/plugin` y sus skills `alfred:*` | Petición del usuario |
-| Directorio del agente en `~/.alfred/agents/<nombre>/` | **`~/.alfred-bots/<bot_id>/`**, al lado del home y no dentro (`CONSIGLIERI_BOTS_HOME`) | Claude Code carga todos los `CLAUDE.md` desde el cwd hasta la raíz ([memory](https://code.claude.com/docs/en/memory)). Dentro de `~/.alfred`, cada bot leería también el manual de Consiglieri y su índice de memoria |
+| Memoria y skills compartidas por defecto | **Todo es de cada bot**: memoria, inbox, outbox, skills, extensiones, sesiones y tareas programadas. Lo común a todos es solo la base: el comando `consiglieri`, el plugin `consiglieri/plugin` y sus skills `consiglieri:*` | Petición del usuario |
+| Directorio del agente en `~/.consiglieri/agents/<nombre>/` | **`~/.consiglieri-bots/<bot_id>/`**, al lado del home y no dentro (`CONSIGLIERI_BOTS_HOME`) | Claude Code carga todos los `CLAUDE.md` desde el cwd hasta la raíz ([memory](https://code.claude.com/docs/en/memory)). Dentro de `~/.consiglieri`, cada bot leería también el manual de Consiglieri y su índice de memoria |
 | Una clave `bot/chat/tema` en un único `sessions.json` | Un **`Agent` por bot**, con su propio `state/bots/<id>/sessions.json`, y dentro una clave `Chat` (chat + tema) | Encaja mejor con el código: cada bot tiene su configuración, su backend y sus procesos. `Chat` es un `int` que lleva el tema, así que el código y los 125 tests que pasan `chat_id` enteros siguen funcionando |
 | `--add-dir` para el directorio de trabajo | Igual, pero el **cwd es el directorio propio del bot** y el de trabajo va con `--add-dir` y `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1` | Así el manual y la memoria del bot se cargan siempre de forma nativa. El `CLAUDE.md` del proyecto se carga también, gracias a esa variable |
 | Subir a python-telegram-bot 22.8 | **Sin cambio de versión**: las llamadas de gestor van por `Bot.do_api_request` y el update `managed_bot` se lee de `api_kwargs` | La 22.8 exige Python 3.10 y el servicio corre en Python 3.9.6. La 22.5 (Bot API 9.2) sirve igual. Si se sube de versión, el código lee también los atributos nativos |
@@ -519,7 +519,7 @@ de verdad está en la sección 6.7.
 Telegram ─► ControlPanel (TELEGRAM_BOT_TOKEN)  /bots /bot …   sin agente
    │          └─ managed_bot ─► BotPool.on_managed_bot ─► getManagedBotToken ─► state/bots/<id>/token
    │                                                    └─► BotPool.launch(record): conecta sin reiniciar
-   ├─► TelegramBot @research_bot ─► Agent(config del bot) ─► claude -p … cwd=~/.alfred-bots/<id>
+   ├─► TelegramBot @research_bot ─► Agent(config del bot) ─► claude -p … cwd=~/.consiglieri-bots/<id>
    │                                                            --settings state/bots/<id>/claude-settings.json
    │                                                            --setting-sources project,local --add-dir <workdir>
    └─► TelegramBot @chef_bot     ─► Agent(config del bot) ─► claude …  (otro proceso, otra sesión)
@@ -527,22 +527,22 @@ Telegram ─► ControlPanel (TELEGRAM_BOT_TOKEN)  /bots /bot …   sin agente
    scheduler (uno) ─┘ cada elemento lleva bot_id, chat_id y thread_id, y solo se entrega a ese bot
 ```
 
-- **`alfred/bots.py`**:
+- **`consiglieri/bots.py`**:
   - `BotRegistry`: los ficheros de cada bot, su token, las peticiones pendientes y `config_for(bot_id)`, que da a cada bot su propio `Config`;
   - la validación de ajustes y permisos;
   - `claude_settings()`, que traduce los permisos a ajustes de Claude Code;
   - `prepare_workspace()`, que reescribe el manual y los permisos antes de cada mensaje;
   - las tres llamadas de gestor a la Bot API.
-- **`alfred/config.py`**: `Config` acepta `bot_id`, `workspace_dir` y unos `overrides` que se leen en cada consulta. Un cambio desde el panel se aplica en el siguiente mensaje sin reiniciar, igual que ya pasaba con `.env`. La memoria, el inbox, las skills, las extensiones y las sesiones salen del directorio del bot.
-- **`alfred/telegram_bot.py`**: `ControlPanel`; `TelegramBot`, la interfaz con agente de cada bot creado; y `BotPool`, que corre todas las `Application` en un solo bucle y añade o quita bots en caliente.
-- **`alfred/cli.py`**: dentro del turno de un bot (`CONSIGLIERI_BOT_ID`), `alfred` actúa como ese bot: su token, su chat, su tema, su configuración y sus permisos. Añade `alfred bots list|set|new` y `alfred chat --bot`.
-- **`alfred/scheduler.py`**: columnas `bot_id` y `thread_id` con migración; listado y cancelación por bot; `Postpone` para los bots en pausa.
-- **`alfred/templates/BOT.md`**: el manual de cada bot, con su tarea, su directorio de trabajo y un resumen de lo que puede hacer.
+- **`consiglieri/config.py`**: `Config` acepta `bot_id`, `workspace_dir` y unos `overrides` que se leen en cada consulta. Un cambio desde el panel se aplica en el siguiente mensaje sin reiniciar, igual que ya pasaba con `.env`. La memoria, el inbox, las skills, las extensiones y las sesiones salen del directorio del bot.
+- **`consiglieri/telegram_bot.py`**: `ControlPanel`; `TelegramBot`, la interfaz con agente de cada bot creado; y `BotPool`, que corre todas las `Application` en un solo bucle y añade o quita bots en caliente.
+- **`consiglieri/cli.py`**: dentro del turno de un bot (`CONSIGLIERI_BOT_ID`), `consiglieri` actúa como ese bot: su token, su chat, su tema, su configuración y sus permisos. Añade `consiglieri bots list|set|new` y `consiglieri chat --bot`.
+- **`consiglieri/scheduler.py`**: columnas `bot_id` y `thread_id` con migración; listado y cancelación por bot; `Postpone` para los bots en pausa.
+- **`consiglieri/templates/BOT.md`**: el manual de cada bot, con su tarea, su directorio de trabajo y un resumen de lo que puede hacer.
 
 ### 6.3 Menús y comandos
 
 **El menú (`/bot` sin argumentos).** Es un teclado en línea que edita siempre el mismo mensaje
-(`alfred/menus.py`, sin dependencias de Telegram):
+(`consiglieri/menus.py`, sin dependencias de Telegram):
 
 - **Crear bot** es un asistente de 6 pasos, cada uno con *Atrás* y *Cancelar*:
   1. nombre, como texto;
@@ -617,7 +617,7 @@ también en `bypassPermissions` ([permission modes](https://code.claude.com/docs
 Permisos por defecto de un bot nuevo:
 
 - modo `dontAsk`: todo lo que pediría confirmación se deniega;
-- solo el comando `alfred` en la shell;
+- solo el comando `consiglieri` en la shell;
 - recordatorios activados;
 - nada fuera de su directorio: sin web, sin navegador, sin MCP;
 - no puede escribir a terceros ni gestionar bots.
@@ -628,28 +628,28 @@ Siempre:
 - `denyInsteadOfPrompting`;
 - deny para leer el home de Consiglieri (`.env`, tokens) y el `.env` del código;
 - deny para editar su propio `CLAUDE.md`, `AGENTS.md` y `.claude/settings*.json`;
-- deny para `alfred run|service|init|chat`.
+- deny para `consiglieri run|service|init|chat`.
 
 | Permiso | Mecanismo | ¿Se hace cumplir? |
 | --- | --- | --- |
 | `mode` | `--permission-mode` y `defaultMode` | **Sí, Claude Code.** |
-| `shell` = `alfred` | allow `Bash(alfred *)`; en `dontAsk` cualquier otro comando se deniega | **Sí, Claude Code.** Siguen permitidos los comandos de solo lectura que Claude Code considera seguros (`ls`, `cat`…), dentro de las reglas de lectura. |
+| `shell` = `consiglieri` | allow `Bash(consiglieri *)`; en `dontAsk` cualquier otro comando se deniega | **Sí, Claude Code.** Siguen permitidos los comandos de solo lectura que Claude Code considera seguros (`ls`, `cat`…), dentro de las reglas de lectura. |
 | `shell` = `full` | allow `Bash` | Se permite cualquier comando. Las reglas de Bash y de Read/Edit miran el texto del comando, así que un script que abre ficheros por su cuenta se las salta ([límites de las reglas Bash](https://code.claude.com/docs/en/permissions#what-a-bash-rule-doesnt-match)). Por eso existe `sandbox`. |
-| `sandbox` (con shell abierta: `shell full`, o los modos `bypassPermissions` y `auto`, que ejecutan Bash sin regla allow) | `sandbox.enabled`, `allowUnsandboxedCommands: false`, `autoAllowBashIfSandboxed: false` (el sandbox nunca amplía lo que puede ejecutarse), `failIfUnavailable: true`, `denyRead` y `denyWrite` del home de Consiglieri, del `.env`, de los demás bots y de sus carpetas de Claude Code; escritura solo en sus directorios (lo que el sandbox permite por defecto) | **Sí, el sistema operativo** (Seatbelt en macOS) para la shell y sus procesos hijos ([sandboxing](https://code.claude.com/docs/en/sandboxing)). Algunos subcomandos de `alfred` (`send`, `schedule`, `event`, `skills` y `bots`, este solo con el permiso `bots`) corren fuera del sandbox porque necesitan el estado y Telegram; comprueban ellos mismos los permisos. Si el sandbox no puede arrancar, Claude Code no arranca. |
+| `sandbox` (con shell abierta: `shell full`, o los modos `bypassPermissions` y `auto`, que ejecutan Bash sin regla allow) | `sandbox.enabled`, `allowUnsandboxedCommands: false`, `autoAllowBashIfSandboxed: false` (el sandbox nunca amplía lo que puede ejecutarse), `failIfUnavailable: true`, `denyRead` y `denyWrite` del home de Consiglieri, del `.env`, de los demás bots y de sus carpetas de Claude Code; escritura solo en sus directorios (lo que el sandbox permite por defecto) | **Sí, el sistema operativo** (Seatbelt en macOS) para la shell y sus procesos hijos ([sandboxing](https://code.claude.com/docs/en/sandboxing)). Algunos subcomandos de `consiglieri` (`send`, `schedule`, `event`, `skills` y `bots`, este solo con el permiso `bots`) corren fuera del sandbox porque necesitan el estado y Telegram; comprueban ellos mismos los permisos. Si el sandbox no puede arrancar, Claude Code no arranca. |
 | `edit`, `folders`, `workdir` | `additionalDirectories` y `--add-dir`; allow `Edit(//dir/**)` solo con `edit on`; los dos `block…OutsideWorkingDirectories` | **Sí, para las herramientas de ficheros de Claude Code.** Para la shell, solo con `sandbox`. |
 | `web` | allow o deny `WebFetch` y `WebSearch`; `WebFetch(domain:*)` abre también la red del sandbox | **Sí, Claude Code.** |
 | `browser` | allow o deny `Bash(orca *)` y `mcp__claude-in-chrome__*`; sin `--chrome` | **Sí, en la forma habitual de invocarlo.** Con `shell full`, la deny de `Bash(orca *)` es por texto y se puede rodear (por ejemplo con `/ruta/orca`). |
 | `mcp` | `off`: deny `mcp__*`, que quita todas las herramientas MCP; `on`: no las quita | **Sí, Claude Code.** Con `on`, en modo `dontAsk` cada servidor necesita su regla `allow` (`mcp__<servidor>__*`): Claude Code ignora un `mcp__*` en allow ([tool name wildcards](https://code.claude.com/docs/en/permissions#tool-name-wildcards)). Con `browser on` no se pone el deny global, porque Chrome es un servidor MCP. |
-| `calendar` | allow `mcp__claude_ai_Google_Calendar__*` con el permiso; deny sin él, también con `mcp on`. Con `calendar on` y `mcp off` no se pone el deny global `mcp__*` (como con `browser`) | **Sí, Claude Code.** Que solo cree cuando el usuario lo pidió es instrucción (skill `alfred:calendar`). Con `calendar on`, `mcp off` y modo `bypassPermissions`, otros servidores MCP dejan de estar denegados (el mismo hueco que con `browser`). |
-| `schedule` | deny `Bash(alfred schedule *)`, y `alfred schedule` se niega | **Sí: Claude Code y el comando.** |
-| `contact` | `alfred send`, `schedule` y `event` se niegan con un chat que no sea del dueño | **Sí, el comando `alfred`.** No cubre otros canales, como el correo o la web con `web`, `browser` o `mcp` activos. |
-| `bots` | deny `Bash(alfred bots *)`, y `alfred bots` se niega. Con el permiso: listar, cambiar ajustes de *otros* bots (nunca permisos, nunca `workdir`, nunca los suyos) y pedir bots nuevos, que el dueño confirma en Telegram y que nacen con permisos mínimos. Destruir, solo desde el panel | **Sí: Claude Code y el comando.** |
+| `calendar` | allow `mcp__claude_ai_Google_Calendar__*` con el permiso; deny sin él, también con `mcp on`. Con `calendar on` y `mcp off` no se pone el deny global `mcp__*` (como con `browser`) | **Sí, Claude Code.** Que solo cree cuando el usuario lo pidió es instrucción (skill `consiglieri:calendar`). Con `calendar on`, `mcp off` y modo `bypassPermissions`, otros servidores MCP dejan de estar denegados (el mismo hueco que con `browser`). |
+| `schedule` | deny `Bash(consiglieri schedule *)`, y `consiglieri schedule` se niega | **Sí: Claude Code y el comando.** |
+| `contact` | `consiglieri send`, `schedule` y `event` se niegan con un chat que no sea del dueño | **Sí, el comando `consiglieri`.** No cubre otros canales, como el correo o la web con `web`, `browser` o `mcp` activos. |
+| `bots` | deny `Bash(consiglieri bots *)`, y `consiglieri bots` se niega. Con el permiso: listar, cambiar ajustes de *otros* bots (nunca permisos, nunca `workdir`, nunca los suyos) y pedir bots nuevos, que el dueño confirma en Telegram y que nacen con permisos mínimos. Destruir, solo desde el panel | **Sí: Claude Code y el comando.** |
 | `allow`, `deny` | Reglas de Claude Code tal cual | **Sí, Claude Code.** |
 | Codex como backend | `--sandbox read-only`, `workspace-write` o `danger-full-access` según `mode`, `shell` y `edit` | Solo eso: Codex no tiene reglas por herramienta. |
 
 Lo que se hace cumplir **fuera** de Claude Code:
 
-- `alfred send --file` solo envía ficheros de los directorios del bot;
+- `consiglieri send --file` solo envía ficheros de los directorios del bot;
 - un bot nunca actúa como otro: ni publica, ni programa, ni despierta en su nombre;
 - los tokens no pasan al entorno del agente;
 - un bot creado por alguien fuera de la lista de permitidos se ignora sin pedir su token;
@@ -668,7 +668,7 @@ Lo que es **solo instrucción** en el manual del bot (`BOT.md`):
 Rama `PabloMoralesEscandon/agent-permissions`. **Requisito:** en todos los niveles (Mínimo, Estándar,
 Amplio, el acceso completo y cualquier combinación), un bot no lee la memoria de otros agentes ni usa sus
 herramientas. "Otros agentes" son los demás bots y el agente principal de Consiglieri (su home). Cada bot sigue
-usando con normalidad su memoria, sus herramientas y la base de Consiglieri (`alfred`, `alfred/plugin`). Por
+usando con normalidad su memoria, sus herramientas y la base de Consiglieri (`consiglieri`, `consiglieri/plugin`). Por
 encima del acceso completo hay un nivel, **acceso entre agentes** (*cross-agent access*), que levanta esa
 lista negra.
 
@@ -686,9 +686,9 @@ Para cada bot se niega su directorio entero. Para el home de Consiglieri se nieg
 | Mecanismo | Qué cubre | Quién lo hace cumplir |
 | --- | --- | --- |
 | deny `Read(//<dir>/**)` y `Edit(//<dir>/**)` para el directorio de cada otro bot, el home de Consiglieri y la carpeta de Claude Code de cada uno | Read, Edit y Write. Las reglas `Read` también se aplican a Grep y Glob, a los comandos de fichero que Claude Code reconoce en Bash (`cat`, `head`, `tail`, `sed`, `tee`) y a las redirecciones `<` y `>` | Claude Code, en todos los modos, también `bypassPermissions`. Las deny ganan a las allow, así que las reglas extra `allow` del bot no las abren |
-| `blockReadsOutsideWorkingDirectories` y `blockWritesOutsideWorkingDirectories`, ya presentes. `folders` y `workdir` siguen rechazando cualquier ruta dentro del home o de `~/.alfred-bots` | Las herramientas de ficheros y los comandos de solo lectura de Bash fuera de los directorios de trabajo | Claude Code |
+| `blockReadsOutsideWorkingDirectories` y `blockWritesOutsideWorkingDirectories`, ya presentes. `folders` y `workdir` siguen rechazando cualquier ruta dentro del home o de `~/.consiglieri-bots` | Las herramientas de ficheros y los comandos de solo lectura de Bash fuera de los directorios de trabajo | Claude Code |
 | deny `Bash(*<ruta>/*)`, `Bash(*<ruta>)` y `Bash(*<ruta> *)` para la memoria y las herramientas de cada agente, en forma absoluta, con `~/` y relativa (`../<id>/memory`) | Que un comando las nombre, por ejemplo para ejecutar `…/extensions/x/bin/y` de otro bot | Claude Code, pero solo por el texto del comando |
-| sandbox con `denyRead` y `denyWrite` de todo lo anterior y `denyRead` de todo `~/.alfred-bots` salvo el directorio propio (`allowRead`), siempre que la shell esté abierta y `sandbox` esté activo (el valor por defecto) | Cualquier proceso que lance la shell: scripts, intérpretes, binarios | **El sistema operativo** (Seatbelt en macOS) |
+| sandbox con `denyRead` y `denyWrite` de todo lo anterior y `denyRead` de todo `~/.consiglieri-bots` salvo el directorio propio (`allowRead`), siempre que la shell esté abierta y `sandbox` esté activo (el valor por defecto) | Cualquier proceso que lance la shell: scripts, intérpretes, binarios | **El sistema operativo** (Seatbelt en macOS) |
 | `disableAllHooks: true` en los ajustes de cada bot. Además, Consiglieri no carga las extensiones de un bot que tengan hooks, monitores o servidores LSP, ni las que tengan servidores MCP sin el permiso `mcp` (`extensions.held_back`) | Un hook o un servidor que el propio bot haya escrito correría como el usuario, fuera de las reglas y del sandbox. Sin esto, cualquier bot podía saltarse la lista negra (y todos sus permisos) escribiéndose una extensión con un hook | Claude Code y Consiglieri, que decide qué `--plugin-dir` pasa |
 
 No hay reglas `Grep(ruta)` ni `Glob(ruta)`: Claude Code las acepta pero no las aplica
@@ -697,10 +697,10 @@ Su documentación dice que hay que usar `Read(ruta)`, y eso es lo que se hace.
 
 **Por qué no se puede quitar con los interruptores:** el nivel no es un permiso. Es un campo aparte del
 registro, `cross_agent`, fuera de `permissions`. Ningún preajuste, interruptor, regla extra, valor de
-`/bot perm`, opción de `/bot new` ni comando `alfred` llega a él:
+`/bot perm`, opción de `/bot new` ni comando `consiglieri` llega a él:
 
 - `clean_permission` y `parse_options` rechazan `cross`, `cross-agent`, `+cross` y `cross=on`;
-- `alfred bots set` solo cambia ajustes;
+- `consiglieri bots set` solo cambia ajustes;
 - las peticiones de bots nuevos (`Pending`) no tienen ese campo;
 - en `bot.json` solo cuenta un `true` JSON en su propio campo: ni un texto `"true"` ni un
   `cross_agent` dentro de `permissions`. Quien pueda escribir ese fichero sí puede concederlo; ningún
@@ -723,7 +723,7 @@ registro, `cross_agent`, fuera de `permissions`. Ningún preajuste, interruptor,
   - lectura de la memoria, `extensions/` y `.claude/skills/` de cada otro agente, y de la auto-memoria de
     Claude Code de cada uno. Se añaden como `additionalDirectories` y, en el sandbox, como `allowRead`
     (la ruta más estrecha gana);
-  - ejecutar sus ejecutables, con allow `Bash(<dir>/extensions/*/bin/*)`, también con shell `alfred`;
+  - ejecutar sus ejecutables, con allow `Bash(<dir>/extensions/*/bin/*)`, también con shell `consiglieri`;
   - el manual del bot pasa a listar esas rutas.
 - **Qué sigue cerrado:**
   - escribir nada suyo (deny `Edit` y `denyWrite`);
@@ -735,7 +735,7 @@ registro, `cross_agent`, fuera de `permissions`. Ningún preajuste, interruptor,
 
 **Qué queda garantizado:**
 
-- Con shell `alfred` en `dontAsk` o `acceptEdits`, que son los valores por defecto y los de Mínimo,
+- Con shell `consiglieri` en `dontAsk` o `acceptEdits`, que son los valores por defecto y los de Mínimo,
   Estándar y Amplio sin shell, Claude Code impide leer y ejecutar lo de los demás. Las herramientas de
   ficheros y los comandos que reconoce quedan cubiertos por las reglas deny y por el confinamiento a los
   directorios de trabajo. Cualquier otro comando se deniega por no tener regla allow.
@@ -754,9 +754,9 @@ registro, `cross_agent`, fuera de `permissions`. Ningún preajuste, interruptor,
   - quién avisa: el menú (pantalla de permisos y resumen) y el manual del bot.
 - **Codex como backend:** su sandbox `read-only` lee todo el disco y no tiene reglas por ruta. La lista
   negra no se hace cumplir; solo el manual la pide. El menú lo avisa.
-- **Comandos `alfred` fuera del sandbox:** `send`, `schedule`, `event`, `skills` y, con el permiso
+- **Comandos `consiglieri` fuera del sandbox:** `send`, `schedule`, `event`, `skills` y, con el permiso
   `bots`, `bots`. Comprueban ellos mismos qué bot los llama, por `CONSIGLIERI_BOT_ID` (ver abajo). Ninguno
-  lee memoria. `alfred skills` lista nombres y rutas de skills del bot que diga esa variable.
+  lee memoria. `consiglieri skills` lista nombres y rutas de skills del bot que diga esa variable.
 - **Un bot con shell completa sin sandbox:** puede editar su propio `bot.json` (y con ello darse el
   acceso entre agentes) o el registro de auditoría. Solo un usuario del sistema propio o una VM lo
   impide.
@@ -764,22 +764,22 @@ registro, `cross_agent`, fuera de `permissions`. Ningún preajuste, interruptor,
   instrucciones. La advertencia y el manual lo dicen, pero es una instrucción, no un mecanismo.
 - **Un bot creado mientras otro está a mitad de turno:** entra en las reglas deny del otro en su siguiente
   mensaje, porque los ajustes se regeneran antes de cada uno. Mientras tanto lo cubren el confinamiento
-  de las herramientas de ficheros y, con sandbox, el `denyRead` de todo `~/.alfred-bots` (con `allowRead`
+  de las herramientas de ficheros y, con sandbox, el `denyRead` de todo `~/.consiglieri-bots` (con `allowRead`
   solo del directorio propio). Lo único que se retrasa son las reglas de texto de Bash, que ya eran solo
   una capa extra.
 
 Efecto secundario: al crear o destruir un bot cambian los ajustes de todos los demás, y cada uno reabre
 su proceso, con la misma sesión, en su siguiente mensaje.
 
-Visto de paso, sin tocar: con el sandbox, `alfred ext` corre dentro de él y no puede leer
+Visto de paso, sin tocar: con el sandbox, `consiglieri ext` corre dentro de él y no puede leer
 `state/bots/<id>/bot.json` (está en el home). El comando no sabe entonces qué bot es y falla al escribir.
 El bot puede crear sus extensiones con las herramientas de ficheros. Pasaba ya antes de estos cambios con
 `shell full`.
 
-Límite que conviene tener claro: el comando `alfred` sabe qué bot lo llama por la variable
-`CONSIGLIERI_BOT_ID`. Con `shell` = `alfred`, Claude Code no deja anteponer variables a un comando permitido
-(una regla allow no casa con `VAR=x alfred …`), así que no se puede suplantar. Con `shell full`, el bot
-puede cambiar esa variable y hacerse pasar por otro bot ante `alfred`. Y con `shell full` sin sandbox,
+Límite que conviene tener claro: el comando `consiglieri` sabe qué bot lo llama por la variable
+`CONSIGLIERI_BOT_ID`. Con `shell` = `consiglieri`, Claude Code no deja anteponer variables a un comando permitido
+(una regla allow no casa con `VAR=x consiglieri …`), así que no se puede suplantar. Con `shell full`, el bot
+puede cambiar esa variable y hacerse pasar por otro bot ante `consiglieri`. Y con `shell full` sin sandbox,
 o con `bypassPermissions` y Bash libre, el bot puede hacer lo mismo que tu usuario. Para un aislamiento
 real en esos casos, Consiglieri debería correr con un usuario propio o en una VM.
 
@@ -789,9 +789,9 @@ Además de su memoria propia, cada agente lee una memoria general compartida: he
 (quién es el usuario, sus preferencias, datos comunes). Es contexto, nunca instrucciones, y nunca guarda
 contraseñas, tokens ni claves.
 
-- **Dónde vive**: `~/.alfred-shared/memory/` (se cambia con `CONSIGLIERI_SHARED_HOME`). Contiene `MEMORY.md`
+- **Dónde vive**: `~/.consiglieri-shared/memory/` (se cambia con `CONSIGLIERI_SHARED_HOME`). Contiene `MEMORY.md`
   como índice y un archivo por tema en `<carpeta>/<nombre>.md`, igual que la memoria de un agente. Está
-  junto a `~/.alfred` y `~/.alfred-bots`, fuera de los dos, porque la lista negra deniega ambos a todos
+  junto a `~/.consiglieri` y `~/.consiglieri-bots`, fuera de los dos, porque la lista negra deniega ambos a todos
   los bots y en Claude Code una regla deny gana a cualquier allow. Tampoco está dentro de ningún
   repositorio git: no se versiona ni se publica. La carpeta es `0700` y los archivos `0600`. Si
   `CONSIGLIERI_SHARED_HOME` apunta dentro de una zona denegada, el registro lo avisa
@@ -820,13 +820,13 @@ contraseñas, tokens ni claves.
   también está en las reglas deny `Edit`, como su `CLAUDE.md`.
 - **Quién escribe**: el usuario, desde el panel, con `/shared list|show|add|remove` o con el botón
   «🧠 Shared memory» de `/bot`. El panel escribe los archivos él mismo, sin agente, y rechaza lo que
-  parezca un secreto (los mismos patrones que `alfred ext check`) y los nombres de tema que se salgan de
+  parezca un secreto (los mismos patrones que `consiglieri ext check`) y los nombres de tema que se salgan de
   la carpeta. También escribe el agente principal de Consiglieri, al que su manual pide hechos generales,
   nada leído en webs o mensajes, y nunca secretos.
 
 Rodeos que siguen siendo posibles:
 
-- **Un bot con shell abierta y sin sandbox** (Full access, o `bypassPermissions` con `shell alfred`)
+- **Un bot con shell abierta y sin sandbox** (Full access, o `bypassPermissions` con `shell consiglieri`)
   puede escribir en la carpeta con comandos (`echo >> …`). La regla deny `Edit` solo frena las
   herramientas de archivos y los comandos que Claude Code reconoce como edición. No hay reglas de shell
   sobre esta ruta porque también bloquearían su lectura. Lo que se escriba así lo leerán los demás
@@ -849,10 +849,10 @@ Rodeos que siguen siendo posibles:
   (transferencia en BotFather), el panel lo desconecta, borra su token y avisa al dueño anterior.
 - **Al destruir un bot** se borran su directorio (memoria, ficheros, extensiones), su estado (ajustes,
   sesiones, token, permisos) y sus tareas programadas. Las de los demás bots no se tocan.
-- **El home `~/.alfred`** se conserva: el agente antiguo sigue accesible con `alfred chat`. Los
+- **El home `~/.consiglieri`** se conserva: el agente antiguo sigue accesible con `consiglieri chat`. Los
   recordatorios del chat del panel se siguen entregando; sus tareas se anuncian en vez de ejecutarse.
 - **Los temas** funcionan en el chat de cada bot (`message_thread_id`), cada uno con su sesión, y
-  `alfred send` y `schedule` responden en el mismo tema. Crear temas desde el panel no está hecho (5.6).
+  `consiglieri send` y `schedule` responden en el mismo tema. Crear temas desde el panel no está hecho (5.6).
 
 ### 6.6 Qué se probó
 
@@ -912,7 +912,7 @@ límite de 0,4 s del test. Se subió a 1,5 s en un commit aparte.
 
 - **Lista negra y acceso entre agentes (12):**
   - la lista negra está en cada nivel: Mínimo, Estándar, Amplio, acceso completo con y sin sandbox,
-    `auto`, `bypassPermissions` con shell `alfred`, reglas extra `allow` que nombran a otro bot, y cada
+    `auto`, `bypassPermissions` con shell `consiglieri`, reglas extra `allow` que nombran a otro bot, y cada
     combinación de modo, shell e interruptores (`test_bots.py`);
   - las shells abiertas llevan sandbox salvo con `sandbox off`;
   - ningún interruptor, valor, opción, preajuste ni edición a mano de `permissions` la quita;
@@ -921,7 +921,7 @@ límite de 0,4 s del test. Se subió a 1,5 s en un commit aparte.
   - el manual y los resúmenes lo dicen;
   - el registro es privado y solo añade;
   - las extensiones de un bot con hooks o MCP (sin `mcp`) no se cargan;
-  - un bot no se lo concede a sí mismo ni a otro con `alfred bots set` o `alfred bots new`, ni el
+  - un bot no se lo concede a sí mismo ni a otro con `consiglieri bots set` o `consiglieri bots new`, ni el
     operador desde el CLI (`test_cli_bots.py`);
   - panel por texto (`test_panel.py`): `/bot new +cross` rechazado; confirmación que un desconocido no
     puede pulsar y que caduca; un botón de *destroy* no concede y uno de concesión no destruye; las
@@ -938,60 +938,60 @@ límite de 0,4 s del test. Se subió a 1,5 s en un commit aparte.
      contexto) y abre un archivo de tema cuando hace falta.
   2. Sin el permiso `shared`, el mismo bot no puede editar ni crear un archivo allí.
   3. Con Power, el sandbox de macOS deja leer la carpeta (`cat`) y no escribirla.
-  4. Tras el siguiente arranque, el agente principal ve `~/.alfred/SHARED_MEMORY.md` y escribe un tema
+  4. Tras el siguiente arranque, el agente principal ve `~/.consiglieri/SHARED_MEMORY.md` y escribe un tema
      nuevo cuando se le pide.
 
 Nada de lo que sigue se ha probado con Telegram ni con Claude Code reales. Los pasos asumen un bot de
-pruebas y un home aparte, para no tocar `~/.alfred` ni el servicio en marcha:
+pruebas y un home aparte, para no tocar `~/.consiglieri` ni el servicio en marcha:
 
 1. En @BotFather, crea un bot de pruebas para el panel (`/newbot`). Abre el Mini App (botón *Open*),
    elige ese bot y activa **Bot Management Mode**.
-2. Crea `~/.alfred-test.env` con `TELEGRAM_BOT_TOKEN=<token del bot de pruebas>` y
+2. Crea `~/.consiglieri-test.env` con `TELEGRAM_BOT_TOKEN=<token del bot de pruebas>` y
    `CONSIGLIERI_ALLOWED_USERS=<tu id de Telegram>`.
-3. Arranca desde este worktree con su propio código. Un `venv/bin/alfred` instalado en modo editable desde
+3. Arranca desde este worktree con su propio código. Un `venv/bin/consiglieri` instalado en modo editable desde
    otra copia (por ejemplo el worktree `refactor`) ejecuta el código de esa copia. Para saber a cuál
-   apunta: `venv/bin/python -c "import alfred; print(alfred.__file__)"`. Hay dos formas:
+   apunta: `venv/bin/python -c "import consiglieri; print(consiglieri.__file__)"`. Hay dos formas:
    - sin instalar nada, con el código de esta carpeta delante:
-     `CONSIGLIERI_HOME=~/.alfred-test CONSIGLIERI_ENV_FILE=~/.alfred-test.env PYTHONPATH=$PWD venv/bin/python -m alfred run`
-   - o reinstalando aquí en modo editable y usando `venv/bin/alfred`:
+     `CONSIGLIERI_HOME=~/.consiglieri-test CONSIGLIERI_ENV_FILE=~/.consiglieri-test.env PYTHONPATH=$PWD venv/bin/python -m consiglieri run`
+   - o reinstalando aquí en modo editable y usando `venv/bin/consiglieri`:
      `venv/bin/pip install --upgrade pip setuptools && venv/bin/pip install -e .`, y después
-     `CONSIGLIERI_HOME=~/.alfred-test CONSIGLIERI_ENV_FILE=~/.alfred-test.env venv/bin/alfred run`.
+     `CONSIGLIERI_HOME=~/.consiglieri-test CONSIGLIERI_ENV_FILE=~/.consiglieri-test.env venv/bin/consiglieri run`.
      Hace falta actualizar pip antes: el pip 21.2 que trae el venv de Python 3.9 rechaza la instalación
      editable con `pyproject.toml` ("editable mode currently requires a setuptools-based build").
 
-   Comprobado el 12 de noviembre de 2026: tras reinstalar, `venv/bin/alfred bots list` ejecutado desde
-   `/` sin `PYTHONPATH` carga `refactor-2/alfred/telegram_bot.py`, con `ControlPanel`. Los bots irán a
-   `~/.alfred-test-bots`.
+   Comprobado el 12 de noviembre de 2026: tras reinstalar, `venv/bin/consiglieri bots list` ejecutado desde
+   `/` sin `PYTHONPATH` carga `refactor-2/consiglieri/telegram_bot.py`, con `ControlPanel`. Los bots irán a
+   `~/.consiglieri-test-bots`.
 4. En el chat del panel, `/status`. Debe decir "bot management on". Si dice "unknown", el `getMe` real
    no trae `can_manage_bots` como se espera.
 5. `/bot new Prueba Responde siempre en español y en una frase.` El panel envía dos mensajes. El primero
    trae un teclado con "Create @prueba_bot" (`KeyboardButtonRequestManagedBot`) y "Cancel". Pulsa
    "Create", confirma en la ventana que abre Telegram y espera el mensaje "@… is ready", que también
    quita el teclado. El segundo mensaje trae el enlace `t.me/newbot/…` como alternativa. Comprueba que el update `managed_bot` llegó y que el token se guardó:
-   `ls -l ~/.alfred-test/state/bots/*/` debe mostrar `token` con `-rw-------`.
+   `ls -l ~/.consiglieri-test/state/bots/*/` debe mostrar `token` con `-rw-------`.
    Prueba también el menú: `/bot`, *Crear bot*, recorre los pasos con *Atrás*, y comprueba en el
    resumen que el username extiende el del panel. Después, en *Mis bots*, cambia el modelo y un permiso.
 6. Abre el bot nuevo, pulsa *Start* y escríbele. Debe contestar él, no el panel. En su `/status` debe
-   aparecer su directorio en `~/.alfred-test-bots/<id>`.
+   aparecer su directorio en `~/.consiglieri-test-bots/<id>`.
 7. Permisos con un Claude Code real. Revisa el log por avisos de Claude Code sobre los ajustes; `claude
    doctor` desde el directorio del bot lista las entradas rechazadas. Después prueba:
    - pídele que busque algo en la web: debe decir que no puede;
    - `/bot perm Prueba web on` y repite: debe poder;
-   - pídele `ls ~` (debe negarse: shell `alfred`) y que lea `~/.alfred-test/.env` (debe negarse).
+   - pídele `ls ~` (debe negarse: shell `consiglieri`) y que lea `~/.consiglieri-test/.env` (debe negarse).
 8. Pídele "recuérdame en 2 minutos X". El recordatorio debe llegar en el chat de ese bot, no en el panel.
 9. Crea un segundo bot y confirma que no ve la memoria ni los recordatorios del primero.
 10. Con `/bot perm Prueba shell full`, comprueba que el sandbox arranca en macOS: un comando `touch ~/x`
-    debe fallar con "Operation not permitted" y `alfred send` debe seguir funcionando.
+    debe fallar con "Operation not permitted" y `consiglieri send` debe seguir funcionando.
 11. En BotFather, regenera el token del bot gestionado. El panel debe decir que se reconectó. Esto
     comprueba el formato real del update en un cambio de token.
 12. `/bot pause Prueba`, escribe al bot (no debe contestar) y `/bot resume Prueba`.
-13. `/bot destroy Prueba` y confirma. Comprueba que `~/.alfred-test/state/bots/<id>` y
-    `~/.alfred-test-bots/<id>` ya no existen. Luego borra el bot en BotFather con `/deletebot`.
+13. `/bot destroy Prueba` y confirma. Comprueba que `~/.consiglieri-test/state/bots/<id>` y
+    `~/.consiglieri-test-bots/<id>` ya no existen. Luego borra el bot en BotFather con `/deletebot`.
 14. Opcional, temas: activa los temas en chats privados para un bot (BotFather) y escribe dentro de un
     tema. La respuesta debe llegar en el mismo tema.
 
 15. Lista negra con un Claude Code real, con dos bots de pruebas A y B. Guarda algo en la memoria de B y en
-    la de Consiglieri (`~/.alfred-test/memory/`), y crea en B una extensión con un `bin/` que imprima algo.
+    la de Consiglieri (`~/.consiglieri-test/memory/`), y crea en B una extensión con un `bin/` que imprima algo.
     - Con A en Mínimo, pídele que lea la memoria de B, que la busque con Grep, que haga `cat` de su
       ruta, `ls ../<id de B>` y que ejecute el script de B por su ruta. Todo debe fallar. `claude doctor`
       desde el directorio de A no debe listar reglas rechazadas.
@@ -1000,15 +1000,15 @@ pruebas y un home aparte, para no tocar `~/.alfred` ni el servicio en marcha:
     - Con `shell full` y `sandbox off`, el mismo comando funciona. Es el rodeo documentado, y el menú
       debe mostrar el aviso.
     - Pide a A que se escriba una extensión con un hook `SessionStart` que lea la memoria de B. En el
-      siguiente mensaje el hook no debe correr, y `alfred ext check` debe listarlo en
+      siguiente mensaje el hook no debe correr, y `consiglieri ext check` debe listarlo en
       `not_loaded_for_this_bot`.
 16. `/bot perm A cross on`: lee la advertencia, confirma y repite el paso 15 con A en Mínimo. Ahora A
     debe poder leer la memoria de B y de Consiglieri y ejecutar el script de B. No debe poder editarlos, ni
-    leer `~/.alfred-test/.env`, `state/` o el `inbox/` de B. Comprueba `/bots`, `/bot audit` y
-    `~/.alfred-test/state/audit.log`. Luego `/bot perm A cross off`, y en el siguiente mensaje todo debe
+    leer `~/.consiglieri-test/.env`, `state/` o el `inbox/` de B. Comprueba `/bots`, `/bot audit` y
+    `~/.consiglieri-test/state/audit.log`. Luego `/bot perm A cross off`, y en el siguiente mensaje todo debe
     volver a fallar. Prueba lo mismo desde *Mis bots → Permisos*.
 17. Con A en Amplio, comprueba que su shell sigue leyendo su propio directorio (`allowRead` dentro del
-    `denyRead` de `~/.alfred-bots`). Con `cross on`, comprueba que el sandbox deja leer la memoria de B (`allowRead` dentro de
+    `denyRead` de `~/.consiglieri-bots`). Con `cross on`, comprueba que el sandbox deja leer la memoria de B (`allowRead` dentro de
     un `denyRead`, la regla más estrecha gana) y no deja escribirla (`denyWrite` sobre un directorio que
     también es `additionalDirectories`).
 
@@ -1029,7 +1029,7 @@ Puntos que la documentación no aclara y que esos pasos resuelven:
   `--setting-sources` y `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD` como dice su documentación
   (pasos 6, 7 y 10).
 
-Para pasar después al servicio real: `venv/bin/alfred service install` desde este worktree, una vez
+Para pasar después al servicio real: `venv/bin/consiglieri service install` desde este worktree, una vez
 desinstalado el actual (que apunta al worktree `refactor`). Hay que activar antes Bot Management Mode en
 el bot de verdad. Al hacerlo, ese bot pasa a ser el panel y deja de contestar como Consiglieri (sección 6.5).
 

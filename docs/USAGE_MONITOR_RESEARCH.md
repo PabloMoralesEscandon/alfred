@@ -4,7 +4,7 @@ Estado: monitor implementado en parte y **desactivado por defecto** (`CONSIGLIER
 permiso `usage` por bot (sección 11), avisos para agentes con condiciones sobre el uso (sección 12), una
 estimación de cuánto del semanal consume una ventana de 5 h (sección 10), una previsión de cuota semanal
 que no se podrá gastar con su aviso `usage-alert waste` (sección 13) y preguntas bajo demanda que
-devuelven un veredicto, como `alfred usage running_low` (sección 14). Los avisos al usuario (R1-R6) siguen
+devuelven un veredicto, como `consiglieri usage running_low` (sección 14). Los avisos al usuario (R1-R6) siguen
 sin lógica. Estado detallado y pendientes: [sección 9](#9-estado-de-la-implementación).
 Fecha: 2026-11-12. Claude Code probado: v2.1.322.
 
@@ -16,14 +16,14 @@ proponerle tareas pendientes que la aprovechen. Todo ello sin que el propio moni
 
 - **La fuente correcta ya está a mano y no cuesta nada.** Pasar `/usage` a `claude -p` lo resuelve
   Claude Code en local, sin llamar al modelo: 0 tokens, `total_cost_usd: 0` y alrededor de 1 s.
-  `alfred/usage.py` ya lo usa, pero lee el texto con una expresión regular. Si se pide con
+  `consiglieri/usage.py` ya lo usa, pero lee el texto con una expresión regular. Si se pide con
   `--output-format stream-json --verbose`, la misma respuesta trae un objeto **`usage_report`
   estructurado y documentado**: cada medidor con `kind`, `percent`, `resets_at` en ISO 8601 UTC,
   `severity` y `scope`. Es mucho más fiable que analizar el texto.
 - **Fuente pasiva y gratuita:** cada turno normal de Consiglieri ya emite un evento `rate_limit_event`
-  con la utilización y el reinicio de las ventanas de 5 h y 7 días. Hoy `alfred/backends/live.py` lo
+  con la utilización y el reinicio de las ventanas de 5 h y 7 días. Hoy `consiglieri/backends/live.py` lo
   descarta. Capturarlo da datos frescos sin ninguna consulta extra mientras Consiglieri trabaja.
-- **El monitor no debe ser una tarea programada del agente.** Una entrada `alfred schedule --task`
+- **El monitor no debe ser una tarea programada del agente.** Una entrada `consiglieri schedule --task`
   despierta al modelo y gasta cuota en cada comprobación. Tiene que ser un bucle en Python dentro del
   proceso del bot, junto al planificador, que solo mande mensajes fijos por Telegram. El agente solo
   se despierta cuando el usuario acepta aprovechar la cuota sobrante.
@@ -34,7 +34,7 @@ proponerle tareas pendientes que la aprovechen. Todo ello sin que el propio moni
   capturar `rate_limit_event`, y añadir un `UsageMonitor` con reglas deterministas para umbrales,
   proyección, cuota sobrante y reinicios. Por defecto solo avisa y propone, nunca ejecuta solo.
 
-## 1. Cómo funciona hoy `alfred/usage.py`
+## 1. Cómo funciona hoy `consiglieri/usage.py`
 
 `fetch()` lanza:
 
@@ -160,8 +160,8 @@ prueba de esta investigación que gastó cuota.
   `/usage`.
 - Solo llega cuando hay tráfico al modelo. Sirve para reaccionar al instante mientras Consiglieri
   trabaja (`allowed_warning`, `rejected`), no para saber qué pasa cuando está parado.
-- Hoy `LiveSession._handle()` en `alfred/backends/live.py` y `_run_once()` en
-  `alfred/backends/claude.py` ignoran cualquier `type` que no reconocen, así que el evento llega y
+- Hoy `LiveSession._handle()` en `consiglieri/backends/live.py` y `_run_once()` en
+  `consiglieri/backends/claude.py` ignoran cualquier `type` que no reconocen, así que el evento llega y
   se descarta.
 
 ### 2.3 Campos `rate_limits` de la status line (oficial, solo interactivo)
@@ -271,7 +271,7 @@ usar solo es aprovechable si el semanal también tiene margen. Por eso la regla 
 
 ## 4. Encaje con el planificador de Consiglieri
 
-### Por qué no `alfred schedule`
+### Por qué no `consiglieri schedule`
 
 `SchedulerStore` tiene tres tipos de entrada:
 
@@ -293,7 +293,7 @@ y se cancela en `BotPool.stop`, una vez por proceso y no una por bot (ver la sec
 iteración captura sus excepciones, igual que `deliver_one`.
 
 ```
-             ┌──────────── proceso del bot (alfred run) ─────────────┐
+             ┌──────────── proceso del bot (consiglieri run) ─────────────┐
  Telegram ◄──┤ TelegramBot._send ◄── UsageMonitor.evaluate() ◄─ snapshot
              │                               ▲                       │
              │     claude -p "/usage" (0 tokens, cada N min) ────────┤
@@ -350,8 +350,8 @@ se adelanta si cae dentro del silencio.
 Hoy Consiglieri no tiene una lista de pendientes (memoria y skills sí, backlog no). Propuesta:
 
 - Una tabla `backlog` en el mismo `scheduler.sqlite3` (`id, chat_id, text, size: s|m|l, model,
-  created_at, done_at`) y una orden para el agente `alfred backlog add|list|done`, siguiendo el
-  patrón de `alfred schedule`, con una skill base que explique cuándo usarla ("cuando sobre cuota,
+  created_at, done_at`) y una orden para el agente `consiglieri backlog add|list|done`, siguiendo el
+  patrón de `consiglieri schedule`, con una skill base que explique cuándo usarla ("cuando sobre cuota,
   haz X"; "apúntalo para cuando haya margen").
 - El monitor elige los elementos cuyo tamaño cabe en el margen (s ≤ 10 %, m ≤ 25 %, l ≤ 50 %;
   heurística ajustable) sin llamar al modelo, y los lista en el aviso.
@@ -382,13 +382,13 @@ recordatorios fijos (`KIND_MESSAGE`) no se aplazan nunca.
 | **Avisos excesivos** | Deduplicación persistente, horas de silencio, máximo de propuestas, todo configurable y con un interruptor general. |
 | **Términos de servicio** | Consiglieri usa el binario oficial de Claude Code con el login del propio usuario, y la página legal no lo impide ("Nor does it prevent an end user from signing in to the unmodified Claude Code binary with their own Claude subscription"). Pero: (a) los términos de consumidor prohíben el acceso "through automated or non-human means, whether through a bot, script, or otherwise" salvo con API key o permiso explícito ([Consumer Terms](https://www.anthropic.com/legal/consumer-terms)), y (b) "Advertised usage limits for Pro, Max, and Ultra plans assume ordinary, individual usage" ([legal-and-compliance](https://code.claude.com/docs/en/legal-and-compliance)). Consultar `/usage` es leer el estado de la propia cuenta, sin inferencia. **Llenar la cuota de forma automática y continua** se acerca a lo que esos textos quieren evitar. Por eso el diseño **propone** y el usuario decide. No se usa el endpoint no documentado ni se toca el token. Esto no es asesoramiento legal: si se activa `AUTORUN`, conviene revisar los términos vigentes. |
 | **Datos de otros dispositivos** | No es un problema: `usage_report` viene del servidor e incluye el uso de claude.ai y de otros equipos. Pero R2 puede dispararse por uso que no es de Consiglieri, y el mensaje no debe culpar a Consiglieri. |
-| **Zonas horarias** | `resets_at` es UTC. Mostrarlo en la hora local del equipo, la misma que usa `alfred schedule`. |
+| **Zonas horarias** | `resets_at` es UTC. Mostrarlo en la hora local del equipo, la misma que usa `consiglieri schedule`. |
 
 ## 7. Diseño propuesto
 
 ### Módulos
 
-**`alfred/usage.py`** (ampliar, sin romper `/usage`):
+**`consiglieri/usage.py`** (ampliar, sin romper `/usage`):
 
 ```python
 @dataclass
@@ -423,7 +423,7 @@ def summarize(snapshot) -> str                    # lo que hoy hace summarize(re
 - `fetch()` queda como `summarize(await probe(...))`, y el comando `/usage` sigue igual. Puede añadir
   "hace 3 min" si usa una instantánea guardada.
 
-**`alfred/usage_monitor.py`** (nuevo):
+**`consiglieri/usage_monitor.py`** (nuevo):
 
 ```python
 class UsageStore:            # state/usage.json: última instantánea, historial corto, claves de avisos enviados
@@ -438,21 +438,21 @@ async def run_usage_monitor(config, store, send, *, probe=usage.probe, clock=utc
 `evaluate` contiene las reglas R1 a R6 y es la parte que se prueba a fondo con horas fijas. El
 bucle solo consulta, guarda, evalúa, envía y duerme.
 
-**`alfred/backends/live.py` y `claude.py`:** en `_handle` / `on_event`, si
+**`consiglieri/backends/live.py` y `claude.py`:** en `_handle` / `on_event`, si
 `kind == "rate_limit_event"`, llamar a un nuevo `Listener.rate_limit(info)` (no hace nada por
 defecto). `TelegramBot` lo implementa guardando `from_rate_limit_event(...)` en `UsageStore`, y si
 `status != "allowed"` despierta al monitor (`asyncio.Event`) para que evalúe ya.
 
-**`alfred/telegram_bot.py`:** arranca y para el monitor en `BotPool.start` / `BotPool.stop` (antes, `_post_init` / `_post_shutdown`), añade
+**`consiglieri/telegram_bot.py`:** arranca y para el monitor en `BotPool.start` / `BotPool.stop` (antes, `_post_init` / `_post_shutdown`), añade
 el comando `/spare N` y consulta el tope en `_deliver` (sección 5).
 
-**`alfred/scheduler.py`:** `defer(item_id, due)`. Opcionalmente, la tabla `backlog`.
+**`consiglieri/scheduler.py`:** `defer(item_id, due)`. Opcionalmente, la tabla `backlog`.
 
-**`alfred/cli.py`:** `alfred backlog add|list|done` (JSON, como `schedule`) y
-`alfred usage --json` con la instantánea, útil para depurar y para que el agente la consulte gratis
+**`consiglieri/cli.py`:** `consiglieri backlog add|list|done` (JSON, como `schedule`) y
+`consiglieri usage --json` con la instantánea, útil para depurar y para que el agente la consulte gratis
 desde una skill.
 
-**`alfred/config.py` y `.env.example`:**
+**`consiglieri/config.py` y `.env.example`:**
 
 ```env
 # Avisos de uso del plan de Claude. Default: 0 (desactivado) en la primera versión
@@ -486,7 +486,7 @@ Cada paso se puede integrar por separado y deja las pruebas en verde.
 2. **Captura pasiva.** `Listener.rate_limit`, el manejo de `rate_limit_event` en `live.py` y
    `claude.py`, y `from_rate_limit_event`. Tests con un evento como el de la sección 2.2, con y sin
    `unifiedWindows`.
-3. **`UsageStore` y `alfred usage --json`.** Persistencia en `state/usage.json` (escritura atómica)
+3. **`UsageStore` y `consiglieri usage --json`.** Persistencia en `state/usage.json` (escritura atómica)
    con historial de las últimas 24 h, para que la proyección sobreviva a reinicios.
 4. **`evaluate()` con R1, R3 y R4**, la deduplicación y las horas de silencio. Tests de tabla con
    relojes fijos.
@@ -496,11 +496,11 @@ Cada paso se puede integrar por separado y deja las pruebas en verde.
 6. **R2 (proyección)**, R5 y R6 (cuota sobrante) con un mensaje simple, todavía sin backlog.
 7. **Tope en `_deliver`** con `SchedulerStore.defer`, reanudando en R4. Cierra el "Spend cap" de
    `docs/PLAN.md`.
-8. **Backlog**: tabla, `alfred backlog`, skill base `alfred:backlog`, `/spare N` y la selección por
+8. **Backlog**: tabla, `consiglieri backlog`, skill base `consiglieri:backlog`, `/spare N` y la selección por
    tamaño en R5 y R6.
 9. **Documentación**: tabla de comandos del README (`/spare`), `.env.example`, `docs/PLAN.md` (marcar
    el tope de gasto y añadir el monitor) y una nota en `/help`.
-10. **Prueba real**: dejar `alfred run` un día con `CONSIGLIERI_USAGE_POLL=5m`, comprobar que
+10. **Prueba real**: dejar `consiglieri run` un día con `CONSIGLIERI_USAGE_POLL=5m`, comprobar que
     `total_cost_usd` de cada consulta es 0, que no aparece `rate limited until`, y contrastar los
     avisos con `/usage` en una sesión interactiva.
 
@@ -523,19 +523,19 @@ Cada paso se puede integrar por separado y deja las pruebas en verde.
 | Pieza | Qué hace hoy |
 | --- | --- |
 | `Window`, `Reading` (`usage_monitor.py`) | Modelo de una lectura: tipo de medidor (`session`, `weekly_all`, `weekly_scoped` u otro), etiqueta, porcentaje, `resets_at` (UTC), `reset_text`, `severity` y `scope`. `Reading.from_usage_report()` lee el `usage_report` estructurado (sección 2.1) y `Reading.from_report()`, el texto, como respaldo y sin hora de reinicio exacta. |
-| `ClaudeUsageSource` | Pide `/usage` con `stream-json --verbose --no-session-persistence --setting-sources project --strict-mcp-config` desde `state/usage-probe/`, con `run_json_lines`, `INHERITED_SESSION_VARS` y `USAGE_TIMEOUT` de `usage.py`. Toma `usage_report` y, si no llega, analiza el texto. Un "rate limited" sin datos es una lectura fallida. Si alguna vez `total_cost_usd` no es 0, lo registra como aviso. `/usage` y `alfred usage` siguen usando `usage.fetch()` sin cambios. |
+| `ClaudeUsageSource` | Pide `/usage` con `stream-json --verbose --no-session-persistence --setting-sources project --strict-mcp-config` desde `state/usage-probe/`, con `run_json_lines`, `INHERITED_SESSION_VARS` y `USAGE_TIMEOUT` de `usage.py`. Toma `usage_report` y, si no llega, analiza el texto. Un "rate limited" sin datos es una lectura fallida. Si alguna vez `total_cost_usd` no es 0, lo registra como aviso. `/usage` y `consiglieri usage` siguen usando `usage.fetch()` sin cambios. |
 | `Rule` y las seis reglas | Declaradas, sin lógica (`evaluate()` devuelve `[]`). `SpareWeeklyRule.estimate()` ya calcula, con `window_share_percent`, cuántas ventanas de 5 h haría falta para gastar el semanal sobrante y cuántas caben antes del reinicio. La regla aún no actúa. |
 | `UsageHistory` | `state/usage.json`: cada lectura del monitor, con poda a 24 h y escritura atómica. |
 | `MonitorSettings` | Interruptor y ajustes. Tienen efecto `CONSIGLIERI_USAGE_MONITOR`, `CONSIGLIERI_USAGE_POLL` (15 min), `CONSIGLIERI_USAGE_WAKE_INTERVAL` (1 h), los de la previsión (`CONSIGLIERI_USAGE_WINDOW_SHARE`, `_CALIBRATE`, `_ACTIVE_HOURS`, `_PARTIAL_WINDOWS`, `_SURPLUS_STEP`, sección 13) y los de las preguntas (`_MAX_AGE`, `_RETRY`, `_LOW_THRESHOLD`, sección 14). Los demás siguen reservados. |
 | `usage_forecast.py` | Cálculo puro de la previsión semanal: horario activo, ventanas útiles, máximo consumible, excedente, calibración de la proporción y proyección por ritmo (sección 13). |
 | `Evaluation`, `read_on_demand()` (`usage_monitor.py`) | Lo que ve una condición en una lectura (valores, previsión, proyección, proporción en uso) y la lectura cacheada de las preguntas (sección 14). |
-| `alfred usage check\|running_low\|forecast` (`cli.py`) | Preguntas con veredicto de una línea (sección 14). |
-| `alfred usage-alert waste` y `add '<condición>' --hours` | Aviso de cuota semanal que se perderá (sección 13). |
-| Skill base `alfred:usage` (`alfred/plugin/skills/usage/SKILL.md`) | Cómo usan los agentes las preguntas y los avisos: veredicto, reglas del usuario, fallos (sección 14). |
+| `consiglieri usage check\|running_low\|forecast` (`cli.py`) | Preguntas con veredicto de una línea (sección 14). |
+| `consiglieri usage-alert waste` y `add '<condición>' --hours` | Aviso de cuota semanal que se perderá (sección 13). |
+| Skill base `consiglieri:usage` (`consiglieri/plugin/skills/usage/SKILL.md`) | Cómo usan los agentes las preguntas y los avisos: veredicto, reglas del usuario, fallos (sección 14). |
 | `UsageMonitor`, `start()` | `BotPool.start` lo arranca una vez por proceso y `BotPool.stop` lo para. Su bucle revisa los avisos de los agentes cada `poll_seconds` con una sola lectura (sección 12). |
 | `usage_alerts.py` | Condiciones, almacén por bot, decisión de qué se dispara y texto del evento (sección 12). |
 | Permiso `usage` (`bots.py`, `menus.py`, `telegram_bot.py`, `cli.py`) | Sección 11. |
-| `alfred usage-alert add\|list\|remove` (`cli.py`) | Sección 12. |
+| `consiglieri usage-alert add\|list\|remove` (`cli.py`) | Sección 12. |
 
 Garantías comprobadas por los tests (`tests/test_usage_monitor.py`, `test_usage_permission.py`,
 `test_usage_alerts.py`; Telegram y Claude Code simulados):
@@ -550,7 +550,7 @@ Garantías comprobadas por los tests (`tests/test_usage_monitor.py`, `test_usage
 
 ### Bots creados (tras el merge de `refactor` / agent-chats)
 
-Desde ese merge, un proceso (`alfred run` → `BotPool`) sirve el panel de control y todos los bots que
+Desde ese merge, un proceso (`consiglieri run` → `BotPool`) sirve el panel de control y todos los bots que
 Consiglieri ha creado. Cada bot tiene su `TelegramBot`, su `Agent` y su `Config` (`config_for(bot_id)`),
 pero todos usan **la misma cuenta de Claude**: el mismo `claude` con el mismo login. Los límites del
 plan son de esa cuenta, así que:
@@ -585,10 +585,10 @@ consumo a un bot, y las propuestas de cuota sobrante deben decir a qué bot va c
    avise al usuario con él. `SpareWeeklyRule.estimate()` es la cuenta aproximada anterior.
 5. **Tope de gasto** en `BotPool.deliver`, con `cap_percent` y `Postpone`.
 6. **Backlog** y `/spare N`.
-7. ~~Skill base para agentes~~: hecha, `alfred:usage` (sección 14).
+7. ~~Skill base para agentes~~: hecha, `consiglieri:usage` (sección 14).
 8. **Más valores en las condiciones**: el semanal por modelo (`fable.used`, también en `running_low
    --limit any`) y si la ventana de 5 h está en marcha (`session.active`).
-9. ~~Puerta en el planificador~~: hecha, `alfred schedule add --skip-if-low` y compañía (sección 14).
+9. ~~Puerta en el planificador~~: hecha, `consiglieri schedule add --skip-if-low` y compañía (sección 14).
 10. **Calibración con más historia**: el historial guarda 24 h, así que la proporción solo se mide con
     usos intensos de un día. Un acumulado persistente (puntos de ventana y de semanal por semana) la
     haría estable sin agrandar `usage.json`.
@@ -686,7 +686,7 @@ subida del semanal dividida por la de la ventana en un mismo tramo da la proporc
 > `schedule` (recordatorios), y por tanto en todos los presets. A cambio, cada agente **solo puede usar la
 > herramienta con permiso expreso del usuario** (que se lo pida, que le dé una regla sobre el uso, o que diga
 > que sí cuando el agente pregunta). La regla está en el manual del bot (`bots.USAGE_CONSENT_RULE` en
-> `permission_summary()` y una línea en `templates/BOT.md`), en la skill `alfred:usage` y en
+> `permission_summary()` y una línea en `templates/BOT.md`), en la skill `consiglieri:usage` y en
 > `docs/SECURITY_PRESETS.md`. Es una instrucción, no un candado: el candado sigue siendo el interruptor,
 > que con `usage off` deniega las órdenes igual que antes. Lo que sigue describe el diseño original
 > (`off` por defecto); los mecanismos de aplicación no han cambiado.
@@ -694,10 +694,10 @@ subida del semanal dividida por la de la ventana en un mismo tramo da la proporc
 ### Qué es
 
 Un permiso más de cada bot, `usage`, **desactivado por defecto y en todos los presets de seguridad**
-(`alfred/presets.py`, ver [SECURITY_PRESETS.md](SECURITY_PRESETS.md)). Ninguno de Basic, Assistant,
+(`consiglieri/presets.py`, ver [SECURITY_PRESETS.md](SECURITY_PRESETS.md)). Ninguno de Basic, Assistant,
 Power ni Full access lo incluye, así que en todos vale `off`, y elegir un preset lo vuelve a apagar. Un
 bot con `usage on` aparece como `🎛 Custom (from <preset>: + plan usage)`. Permite leer
-el uso del plan (`alfred usage`) y registrar avisos (`alfred usage-alert`).
+el uso del plan (`consiglieri usage`) y registrar avisos (`consiglieri usage-alert`).
 
 | Dónde | Cómo |
 | --- | --- |
@@ -708,25 +708,25 @@ el uso del plan (`alfred usage`) y registrar avisos (`alfred usage-alert`).
 
 ### Cómo se hace respetar
 
-1. **Claude Code**: sin el permiso, los ajustes del bot deniegan `Bash(alfred usage)`,
-   `Bash(alfred usage *)` (que cubre `check`, `running_low` y `forecast`), `Bash(alfred usage-alert)` y
-   `Bash(alfred usage-alert *)` (que cubre `waste`). Las reglas de denegación valen en todos los modos.
-2. **La orden `alfred`**: `alfred usage` y `alfred usage-alert add|list|remove` rechazan a un bot sin
+1. **Claude Code**: sin el permiso, los ajustes del bot deniegan `Bash(consiglieri usage)`,
+   `Bash(consiglieri usage *)` (que cubre `check`, `running_low` y `forecast`), `Bash(consiglieri usage-alert)` y
+   `Bash(consiglieri usage-alert *)` (que cubre `waste`). Las reglas de denegación valen en todos los modos.
+2. **La orden `consiglieri`**: `consiglieri usage` y `consiglieri usage-alert add|list|remove` rechazan a un bot sin
    el permiso. Es el segundo candado, como `require()` en el resto de órdenes.
 3. **El monitor**: en cada ciclo solo revisa los bots activos que tienen el permiso. Si se lo
    quitan, sus avisos se conservan pero no se evalúan ni lo despiertan.
 4. **Sandbox**: con `shell full` y sandbox, las órdenes salen del sandbox (`excludedCommands`:
-   `alfred usage`, `alfred usage *` y `alfred usage-alert *`) solo si el bot tiene el permiso, porque
+   `consiglieri usage`, `consiglieri usage *` y `consiglieri usage-alert *`) solo si el bot tiene el permiso, porque
    necesitan el estado de Consiglieri y el login de Claude Code.
 
 No afecta a la orden `/usage` del chat de cada bot: esa la usa el dueño, no el agente, y se ha
-mantenido igual. El operador en la terminal (`alfred usage` sin `CONSIGLIERI_BOT_ID`) tampoco cambia.
+mantenido igual. El operador en la terminal (`consiglieri usage` sin `CONSIGLIERI_BOT_ID`) tampoco cambia.
 
 ### Relación con el interruptor global (`CONSIGLIERI_USAGE_MONITOR`)
 
 Como se recomendó, **el permiso no tiene efecto mientras el interruptor global está apagado**:
 
-| Global | Permiso | `alfred usage` (bot) | Preguntas (`check`, `running_low`, `forecast`) | `usage-alert add` / `waste` | `list` / `remove` | Se evalúan sus avisos |
+| Global | Permiso | `consiglieri usage` (bot) | Preguntas (`check`, `running_low`, `forecast`) | `usage-alert add` / `waste` | `list` / `remove` | Se evalúan sus avisos |
 | --- | --- | --- | --- | --- | --- | --- |
 | apagado (defecto) | apagado | rechazado | rechazado | rechazado | rechazado | no: no hay monitor |
 | apagado (defecto) | encendido | rechazado | **sí** (lectura bajo demanda, sección 14) | rechazado | sí (para limpiar) | no: no hay monitor |
@@ -734,7 +734,7 @@ Como se recomendó, **el permiso no tiene efecto mientras el interruptor global 
 | encendido | encendido | sí | sí | sí | sí | sí |
 
 Las preguntas funcionan con el interruptor apagado porque solo son una lectura de `/usage` cuando el bot
-pregunta, cacheada y con tope, sin bucle ni despertares. El informe crudo (`alfred usage`) sigue pidiendo
+pregunta, cacheada y con tope, sin bucle ni despertares. El informe crudo (`consiglieri usage`) sigue pidiendo
 el interruptor como antes; además, un bot debe usar veredictos y no datos crudos (sección 14).
 
 El panel lo avisa con una nota, cuando el permiso está activado y el global apagado, en la respuesta
@@ -750,11 +750,11 @@ Cambios mínimos y localizados. No se ha cambiado `BotRecord`, `BotRegistry`, `o
 
 | Archivo | Cambio |
 | --- | --- |
-| `alfred/bots.py` | Una fila en `PERMISSIONS` (`usage`, `off`). `"usage"` al final de `SWITCHES`. Dos constantes nuevas tras `BROWSER_RULES`: `USAGE_RULES` y `USAGE_UNSANDBOXED`. Una entrada en la lista de frases de `permission_summary()`. En `claude_settings()`, dos líneas de `deny` cuando falta el permiso y una suma en `excludedCommands`. |
-| `alfred/presets.py` | `"usage": "plan usage"` en `WORDS`, para las listas de cambios. Ningún preset lo nombra. |
-| `alfred/menus.py` | `usage_monitor` en el import, una fila en `SWITCH_LABELS` (Customize) y tres líneas en `_permission_text()` para la nota. |
-| `alfred/telegram_bot.py` | `+usage` en el texto de ayuda de `/bot`, y la nota en `/bot perm` y `/bot show`. |
-| `alfred/cli.py` | Funciones nuevas (`require_usage`, `usage_alert_bot`, `cmd_usage_alert_*`) y la comprobación en `cmd_usage`. Reutiliza `require`, `calling_bot`, `own_bot_only` y `own_chat_only` sin cambiarlos. |
+| `consiglieri/bots.py` | Una fila en `PERMISSIONS` (`usage`, `off`). `"usage"` al final de `SWITCHES`. Dos constantes nuevas tras `BROWSER_RULES`: `USAGE_RULES` y `USAGE_UNSANDBOXED`. Una entrada en la lista de frases de `permission_summary()`. En `claude_settings()`, dos líneas de `deny` cuando falta el permiso y una suma en `excludedCommands`. |
+| `consiglieri/presets.py` | `"usage": "plan usage"` en `WORDS`, para las listas de cambios. Ningún preset lo nombra. |
+| `consiglieri/menus.py` | `usage_monitor` en el import, una fila en `SWITCH_LABELS` (Customize) y tres líneas en `_permission_text()` para la nota. |
+| `consiglieri/telegram_bot.py` | `+usage` en el texto de ayuda de `/bot`, y la nota en `/bot perm` y `/bot show`. |
+| `consiglieri/cli.py` | Funciones nuevas (`require_usage`, `usage_alert_bot`, `cmd_usage_alert_*`) y la comprobación en `cmd_usage`. Reutiliza `require`, `calling_bot`, `own_bot_only` y `own_chat_only` sin cambiarlos. |
 
 ### Merge con `refactor` (security-control y security-presets, `2cf5df6`)
 
@@ -790,9 +790,9 @@ que lo registró**, como un evento que lo despierta en el chat (y tema) donde lo
 ### Órdenes
 
 ```
-alfred usage-alert add --when "session.left < 1h and session.used = 0" [--repeat] [nota libre...]
-alfred usage-alert list
-alfred usage-alert remove <id o prefijo>
+consiglieri usage-alert add --when "session.left < 1h and session.used = 0" [--repeat] [nota libre...]
+consiglieri usage-alert list
+consiglieri usage-alert remove <id o prefijo>
 ```
 
 Salida en JSON, como el resto de órdenes del agente. `add` devuelve el aviso, cada cuánto se
@@ -818,7 +818,7 @@ y paréntesis, y `and` tiene prioridad sobre `or`. Los porcentajes usados van de
 `week.surplus` admite negativos y `week.max_spend` y `*.projected` pasan de 100. Los tiempos llevan
 unidad (`s`, `m`, `h`, `d`, `w`). Una condición mal escrita se rechaza al registrarla, con el motivo.
 Los valores de la previsión dependen del horario activo: el del aviso (`--hours`, `--days`, `--tz`) o
-`CONSIGLIERI_USAGE_ACTIVE_HOURS`. La condición puede ir como primer argumento (`alfred usage-alert add
+`CONSIGLIERI_USAGE_ACTIVE_HOURS`. La condición puede ir como primer argumento (`consiglieri usage-alert add
 'week.surplus > 0' --hours 9-20`) o con `--when`.
 
 Un valor que no se pudo leer hace falsa su comparación. Pasa con una lectura fallida o cuando no hay
@@ -837,7 +837,7 @@ que el servidor redondea a 0 %. Para detectar que "no hay ventana" haría falta 
 - Un aviso sobre la previsión (`week.windows_left`, `week.max_spend`, `week.surplus`) es de la semana de
   cuota: ver la sección 13.
 - El disparo se escribe en disco **antes** de crear el evento, con un bloqueo de archivo (lo
-  escriben tanto `alfred usage-alert` como el monitor), así que un reinicio del proceso no lo
+  escriben tanto `consiglieri usage-alert` como el monitor), así que un reinicio del proceso no lo
   repite.
 - Se guardan en `state/bots/<id>/usage-alerts.json`, fuera del directorio del bot, que no puede
   leer el estado de Consiglieri. Solo los cambia a través de la orden. Como mucho 20 avisos activos por
@@ -861,7 +861,7 @@ Plan usage read at Thu 12 Nov 10:00 CET:
 - Week (all models): 39% used, resets Sat 15 Nov 06:00 CET (in 2d 19h)
 - Week (Fable): 59% used
 
-Waking you used some plan usage. To stop an alert: alfred usage-alert remove <id>.
+Waking you used some plan usage. To stop an alert: consiglieri usage-alert remove <id>.
 ```
 
 ### Coste
@@ -886,7 +886,7 @@ Todo lo anterior está probado con Telegram y Claude Code simulados. Queda:
    cuando la ventana de 5 h no ha empezado.
 2. Que la lectura con `--setting-sources project --strict-mcp-config` funcione desde el servicio
    (launchd), con su `PATH` y su acceso al llavero.
-3. Que las reglas `deny` de `alfred usage*` bloqueen de verdad a un bot en Claude Code real, y que
+3. Que las reglas `deny` de `consiglieri usage*` bloqueen de verdad a un bot en Claude Code real, y que
    con `shell full` y sandbox las dos órdenes funcionen gracias a `excludedCommands`.
 4. Un ciclo completo con Telegram real: registrar un aviso desde un bot, verlo dispararse una vez y
    que solo conteste ese bot.
@@ -902,7 +902,7 @@ reinicio semanal y queda el 48 % del semanal, con un 8 % por ventana llena, las 
 pueden gastar el 48 %: hay que exprimirlas todas para no perder nada. Con el 50 % se perdería al menos
 un 2 %. Y si el usuario solo trabaja de 9:00 a 20:00, solo cuentan las ventanas que caben en ese horario.
 
-### El cálculo (`alfred/usage_forecast.py`)
+### El cálculo (`consiglieri/usage_forecast.py`)
 
 Funciones puras, probadas con reloj fijo. Entrada: la lectura (semanal usado y su reinicio, la ventana
 de 5 h en curso), la hora actual, el horario activo y la proporción de una ventana llena.
@@ -917,7 +917,7 @@ Se redondean las ventanas a 2 decimales y los porcentajes a 1, y se compara con 
 así que 6 ventanas × 8 % dan 48,0 exactos.
 
 **Supuestos sobre qué cuenta como ventana útil** (también en `Forecast.assumptions()` y en la salida
-`--json` de `alfred usage forecast`):
+`--json` de `consiglieri usage forecast`):
 
 1. Una ventana empieza con el primer mensaje y dura 5 h; la siguiente puede empezar cuando acaba.
 2. El usuario abre cada ventana **lo antes posible**: en el primer momento activo después de que acabe
@@ -957,18 +957,18 @@ quedar entre 0,5 y 100.
 - Si el usuario configuró `CONSIGLIERI_USAGE_WINDOW_SHARE`, se usa lo suyo; la medida se muestra solo como
   dato.
 - Si no, y hay datos suficientes, se usa la medida en lugar del 8; si no, el 8.
-- `CONSIGLIERI_USAGE_CALIBRATE=0` la desactiva. `alfred usage forecast --json` muestra la proporción usada, su
+- `CONSIGLIERI_USAGE_CALIBRATE=0` la desactiva. `consiglieri usage forecast --json` muestra la proporción usada, su
   fuente y la medida (`window_share`).
 - Limitación: el historial guarda 24 h (sección 9, punto 10).
 
-### Aviso: `alfred usage-alert waste`
+### Aviso: `consiglieri usage-alert waste`
 
 ```
-alfred usage-alert waste [--hours 9-20] [--days mon-fri] [--tz Europe/Madrid] [--margin N] [--repeat] [nota]
+consiglieri usage-alert waste [--hours 9-20] [--days mon-fri] [--tz Europe/Madrid] [--margin N] [--repeat] [nota]
 ```
 
 Registra `week.surplus >= N and week.used < 100` (N = `--margin`, 0 por defecto) con el horario dado. Es
-lo mismo que escribir la condición a mano; `alfred usage-alert add 'week.surplus > 0' --hours 9-20`
+lo mismo que escribir la condición a mano; `consiglieri usage-alert add 'week.surplus > 0' --hours 9-20`
 también funciona.
 
 **Límite exacto:** se avisa con `surplus >= margen`, margen 0 por defecto, así que **6 ventanas con el
@@ -1009,10 +1009,10 @@ It fires once per quota week, again this week only if the loss grows by 8 points
 This is the monitor's verdict: act on it; there is no need to read or recompute the usage yourself.
 ```
 
-### Verificar el cálculo: `alfred usage forecast`
+### Verificar el cálculo: `consiglieri usage forecast`
 
 ```
-$ alfred usage forecast --hours 9-20
+$ consiglieri usage forecast --hours 9-20
 true: 48% of the week is left and the 3.4 useful 5-hour windows before it resets in 1d 6h (active hours: 09:00-20:00 every day (local time)) can spend at most 27.2%: 20.8% will be lost even using every window fully
 ```
 
@@ -1035,21 +1035,21 @@ El bot pregunta al monitor y recibe una respuesta **concreta**: `true` o `false`
 línea. Nunca un dato crudo para que decida él: las reglas y los umbrales los evalúa el script.
 
 ```
-$ alfred usage running_low
+$ consiglieri usage running_low
 true: week 90% used (resets in 3d 0h)
 ```
 
 El desglose numérico completo solo sale con `--json`, para registros o para informar al usuario. La
-skill `alfred:usage` dice expresamente que el bot actúa por el veredicto y no recalcula ni interpreta
+skill `consiglieri:usage` dice expresamente que el bot actúa por el veredicto y no recalcula ni interpreta
 porcentajes.
 
 ### Órdenes
 
 | Orden | Responde |
 | --- | --- |
-| `alfred usage check '<condición>' [--hours ...]` | Si la condición (el lenguaje de la sección 12) se cumple ahora |
-| `alfred usage running_low [--limit any\|session\|week] [--threshold PCT] [--projected]` | Si algún límite (o el indicado) va por el umbral o más; con `--projected`, también si al ritmo reciente se agotaría antes de su reinicio |
-| `alfred usage forecast [--hours ...] [--margin N]` | Si se perderá cuota semanal (sección 13) |
+| `consiglieri usage check '<condición>' [--hours ...]` | Si la condición (el lenguaje de la sección 12) se cumple ahora |
+| `consiglieri usage running_low [--limit any\|session\|week] [--threshold PCT] [--projected]` | Si algún límite (o el indicado) va por el umbral o más; con `--projected`, también si al ritmo reciente se agotaría antes de su reinicio |
+| `consiglieri usage forecast [--hours ...] [--margin N]` | Si se perderá cuota semanal (sección 13) |
 
 - **Un solo motor.** `running_low` es una condición predefinida: `session.used >= T or week.used >= T`
   (según `--limit`), más `session.projected >= 100 or week.projected >= 100` con `--projected`.
@@ -1092,18 +1092,18 @@ Pensado para consultarse a menudo (`read_on_demand` en `usage_monitor.py`):
   cada 2 min mientras falle. El monitor también reutiliza una lectura reciente de una pregunta en lugar de
   leer otra.
 - Funciona con el interruptor global apagado (sección 11): solo es una lectura bajo demanda. Respeta el
-  permiso `usage` por las reglas de Claude Code (`Bash(alfred usage *)`) y por la propia orden.
+  permiso `usage` por las reglas de Claude Code (`Bash(consiglieri usage *)`) y por la propia orden.
 
-### Patrón para los bots (skill `alfred:usage`)
+### Patrón para los bots (skill `consiglieri:usage`)
 
-1. **Al despertar para una tarea no urgente** (programada, nota propia, evento): `alfred usage
+1. **Al despertar para una tarea no urgente** (programada, nota propia, evento): `consiglieri usage
    running_low`. Si es `true`, no hace la tarea y lo dice en una línea con la razón ("Skipped the 17:00
    report: the weekly limit is at 90% (resets in 3 days)"), o `NO_REPLY` si era un trabajo silencioso.
    Las tareas urgentes se lo saltan.
 2. **Reglas del usuario sobre el uso** (en su memoria, su SOUL o las instrucciones): no las juzga leyendo
    el uso; las traduce a una condición y obedece el veredicto. La skill trae ejemplos ("no hagas esta
-   tarea si el semanal pasa del 90 %" → `alfred usage check 'week.used > 90'`; "solo el backlog si se va a
-   perder cuota, trabajo de 9 a 20" → `alfred usage forecast --hours 9-20`). Si la regla no se puede
+   tarea si el semanal pasa del 90 %" → `consiglieri usage check 'week.used > 90'`; "solo el backlog si se va a
+   perder cuota, trabajo de 9 a 20" → `consiglieri usage forecast --hours 9-20`). Si la regla no se puede
    expresar (otro modelo, dinero, tokens), lo dice y pregunta; no actúa a ciegas. Las tareas urgentes
    solo se saltan una regla del usuario si la regla lo permite.
 3. **Si la pregunta falla** (elección documentada en la skill): código 2, corregir la condición; código
@@ -1113,7 +1113,7 @@ Pensado para consultarse a menudo (`read_on_demand` en `usage_monitor.py`):
    que haría por iniciativa propia. Motivo: un fallo de lectura no debe bloquear lo que el usuario pidió,
    y saltarse trabajo opcional cuesta poco.
 
-### Puerta en el planificador (`alfred schedule add --skip-if-low` y compañía)
+### Puerta en el planificador (`consiglieri schedule add --skip-if-low` y compañía)
 
 El servicio evalúa la condición **antes** de entregar el elemento, así que un elemento retenido no
 despierta al bot y no gasta cuota (la pregunta en la skill sí cuesta el despertar).
@@ -1141,7 +1141,7 @@ despierta al bot y no gasta cuota (la pregunta en la skill sí cuesta el despert
   menos de 5 min, una lectura a la vez, 2 min tras un fallo), así que muchos elementos con condición no
   multiplican las lecturas.
 - Permiso: `schedule add` con condición exige `usage` (el propio comando, y reglas de Claude Code
-  `Bash(alfred schedule * --skip-if*)` y `Bash(alfred schedule * --only-if*)` para un bot sin él). Si el
+  `Bash(consiglieri schedule * --skip-if*)` y `Bash(consiglieri schedule * --only-if*)` para un bot sin él). Si el
   bot pierde el permiso después, el elemento se trata como «no se pudo leer» y sigue `--if-unread`. No
   necesita `CONSIGLIERI_USAGE_MONITOR`, como las preguntas.
 - Elecciones: el umbral se fija al crear (lo que muestra `schedule list` es lo que se evalúa); un fallo
@@ -1153,7 +1153,7 @@ despierta al bot y no gasta cuota (la pregunta en la skill sí cuesta el despert
 
 1. Varios bots preguntando a la vez desde el servicio: que solo haya una lectura de `/usage` cada 5 min
    y que el bloqueo funcione entre procesos lanzados por Claude Code.
-2. Que `Bash(alfred usage *)` deniega `alfred usage running_low` a un bot sin el permiso en Claude Code
+2. Que `Bash(consiglieri usage *)` deniega `consiglieri usage running_low` a un bot sin el permiso en Claude Code
    real, y que con sandbox sale gracias a `excludedCommands`.
 3. Que un agente real sigue la skill: se salta la tarea con `true`, lo dice en una línea y no interpreta
    los números.
@@ -1161,7 +1161,7 @@ despierta al bot y no gasta cuota (la pregunta en la skill sí cuesta el despert
    ritmos bajos).
 5. La puerta del planificador en el servicio real: que `/usage` lanzado desde el hilo funciona bajo
    launchd, que un elemento retenido no despierta al bot y aparece en `schedule list`, y que las reglas
-   `Bash(alfred schedule * --skip-if*)` deniegan de verdad la opción (el comando la rechaza igualmente).
+   `Bash(consiglieri schedule * --skip-if*)` deniegan de verdad la opción (el comando la rechaza igualmente).
 
 ## Fuentes
 

@@ -1,7 +1,7 @@
 # Credenciales para los agentes
 
 Estado: implementado en la rama `credentials`, sin fusionar ni publicar. Fecha: 25 de noviembre de 2026. Sustituye
-al primer diseño de esta rama (secretos en el Llavero de macOS y ayudantes propios `alfred creds fill|totp|http`), que
+al primer diseño de esta rama (secretos en el Llavero de macOS y ayudantes propios `consiglieri creds fill|totp|http`), que
 se descartó y queda en la rama `credentials-keychain-old`. Probado de punta a punta con un home temporal, dos bots,
 KeePassXC 2.8.0, KeePassXC-Browser 1.10.4.1, el Chromium de Playwright 1.60 y una web de inicio de sesión local con
 TOTP (§9). Sin probar con una web real (§10).
@@ -27,7 +27,7 @@ los que se concedió.
 |---|---|---|
 | Almacén | KeePassXC (libre, GPL, macOS/Linux/Windows), una base `.kdbx` por credencial, abiertas con un fichero llave | Formato KDBX estándar; se maneja con `keepassxc-cli` |
 | Relleno | KeePassXC-Browser, la extensión oficial, en versión fijada y comprobada por su hash | Funciona en cualquier Chromium; el modelo no interviene |
-| Navegador | Un Chromium por bot (el de Playwright, que aún carga extensiones desempaquetadas), con su perfil | Cualquier agente lo maneja con órdenes de shell (`alfred browser ...`) por CDP |
+| Navegador | Un Chromium por bot (el de Playwright, que aún carga extensiones desempaquetadas), con su perfil | Cualquier agente lo maneja con órdenes de shell (`consiglieri browser ...`) por CDP |
 | Permisos | Las identidades de KeePassXC, más el permiso `creds` de cada bot | La separación la hace KeePassXC, no una regla de texto |
 
 Alternativas estudiadas y descartadas (precios a noviembre de 2026): 1Password for Claude (atado a Claude y a Mac,
@@ -44,7 +44,7 @@ siendo la vía; no está en esta rama (§10).
     hub.kdbx                      vacía; la identidad de cada bot con navegador. Siempre la base ACTIVA
     tum.kdbx, mail.kdbx, ...      una credencial cada una (usuario, contraseña, URLs, semilla TOTP)
                                   + las identidades de los bots a los que se concedió
-    identities.json               0600, {bot_id: {"id": "alfred-<id>", "key": <32 bytes aleatorios>}}
+    identities.json               0600, {bot_id: {"id": "consiglieri-<id>", "key": <32 bytes aleatorios>}}
     keepassxc.ini                 los ajustes de esta instancia de KeePassXC (nunca los del usuario)
 <home>/state/browsers/<bot_id>/   0700: el perfil de Chromium del bot, su run.json y su registro
 <home>/state/browser-extensions/keepassxc-browser-1.10.4.1/   la extensión, desempaquetada
@@ -75,12 +75,12 @@ En la máquina, en una terminal:
 
 ```bash
 brew install --cask keepassxc
-venv/bin/pip install -e '.[browser]' && venv/bin/alfred browser install
-echo CONSIGLIERI_BROWSER=bot >> ~/.alfred/.env      # todos los bots; o solo uno: /bot set <bot> browser bot
-venv/bin/alfred creds setup
-venv/bin/alfred creds add tum --url moodle.tum.de --url login.tum.de --username ge12abc --totp
-venv/bin/alfred creds grant tum @uni_bot            # o desde el panel; y /bot perm uni_bot creds on
-venv/bin/alfred creds list | revoke | remove | status | start | stop
+venv/bin/pip install -e '.[browser]' && venv/bin/consiglieri browser install
+echo CONSIGLIERI_BROWSER=bot >> ~/.consiglieri/.env      # todos los bots; o solo uno: /bot set <bot> browser bot
+venv/bin/consiglieri creds setup
+venv/bin/consiglieri creds add tum --url moodle.tum.de --url login.tum.de --username ge12abc --totp
+venv/bin/consiglieri creds grant tum @uni_bot            # o desde el panel; y /bot perm uni_bot creds on
+venv/bin/consiglieri creds list | revoke | remove | status | start | stop
 ```
 
 - `add` pide la contraseña dos veces, y con `--totp` la clave TOTP (el enlace `otpauth://` del QR o su base32), con
@@ -96,10 +96,10 @@ venv/bin/alfred creds list | revoke | remove | status | start | stop
   desde Telegram; con varios, solo los ids de `CONSIGLIERI_CREDENTIALS_GRANTERS` (`none`: nadie). Sin esto, otro usuario
   del panel podría darle a su bot las credenciales del dueño.
 
-El bot: `alfred creds list` (sus credenciales: nombre, usuario, sitios, si hay TOTP; nunca el secreto) y su navegador.
+El bot: `consiglieri creds list` (sus credenciales: nombre, usuario, sitios, si hay TOTP; nunca el secreto) y su navegador.
 La skill `web-logins` le dice qué hacer: cargar la página de inicio de sesión, comprobar en la instantánea que el
 usuario está y la contraseña sale como `[hidden]`, pulsar «Entrar»; lo mismo con el código; un solo intento, y si
-algo falla, pasárselo al usuario (con `alfred browser show` para que tenga ventana).
+algo falla, pasárselo al usuario (con `consiglieri browser show` para que tenga ventana).
 
 ## 5. Lo que el bot ve
 
@@ -113,11 +113,11 @@ algo falla, pasárselo al usuario (con `alfred browser show` para que tenga vent
 ## 6. Permisos
 
 - **`creds`**, apagado por defecto y en todos los presets y plantillas (Full access incluido), nunca lo da un
-  administrador de bots. Sin él, Claude Code niega `alfred creds` y su navegador no carga la extensión.
-- **Siempre negado a todo bot**: `alfred creds setup|add|remove|grant|revoke|start|stop`, `alfred browser install` y
+  administrador de bots. Sin él, Claude Code niega `consiglieri creds` y su navegador no carga la extensión.
+- **Siempre negado a todo bot**: `consiglieri creds setup|add|remove|grant|revoke|start|stop`, `consiglieri browser install` y
   cualquier orden que nombre KeePassXC. Además esas órdenes se niegan dentro del turno de un bot (`CONSIGLIERI_BOT_ID`).
-- `alfred browser` comprueba el bot con `CONSIGLIERI_BOT_KEY`: un bot no puede usar el navegador de otro cambiando
-  `CONSIGLIERI_BOT_ID`. Con sandbox, `alfred browser *`, `alfred creds list` y `status` corren fuera de él (arrancan
+- `consiglieri browser` comprueba el bot con `CONSIGLIERI_BOT_KEY`: un bot no puede usar el navegador de otro cambiando
+  `CONSIGLIERI_BOT_ID`. Con sandbox, `consiglieri browser *`, `consiglieri creds list` y `status` corren fuera de él (arrancan
   Chromium y leen el estado del panel) y comprueban los permisos en Python.
 - Destruir un bot para su navegador, borra su perfil y lo saca de todas las bases.
 
@@ -128,7 +128,7 @@ algo falla, pasárselo al usuario (con `alfred browser show` para que tenga vent
 | Una página pide al bot que teclee la contraseña en otra web | El bot no la tiene. La extensión rellena según la URL de la página, y KeePassXC solo devuelve credenciales cuyo sitio coincide |
 | Una redirección lleva la pestaña a otro dominio | La extensión vacía su caché de credenciales de la pestaña al cambiar la URL (probado: no rellena en el otro dominio) |
 | El bot lee la contraseña del campo | No hay orden para ello y lo que lee pasa por `scrub`. Con shell abierta podría hablar por CDP con su navegador y leerla |
-| Un bot usa las credenciales de otro | KeePassXC no le responde: su identidad no está en esas bases (probado). Su orden `alfred browser` no alcanza el navegador del otro |
+| Un bot usa las credenciales de otro | KeePassXC no le responde: su identidad no está en esas bases (probado). Su orden `consiglieri browser` no alcanza el navegador del otro |
 | Usar mal la credencial en el sitio bueno | No lo impide nada, igual que con una sesión abierta. Mitigan: credenciales de mínimo alcance, la skill (solo para la tarea del usuario) y la auditoría |
 | Retirar una credencial | Efecto en la siguiente carga de página. Una sesión ya abierta sigue hasta que caduque o se cierre |
 | Alguien con tu cuenta de Telegram | Puede conceder tus credenciales a tus bots (no ver las contraseñas ni añadir otras). Lo verías en `/bot audit` y en el aviso del chat del bot. Si no lo quieres, `CONSIGLIERI_CREDENTIALS_GRANTERS=none` deja conceder solo en la máquina |
@@ -140,7 +140,7 @@ algo falla, pasárselo al usuario (con `alfred browser show` para que tenga vent
   el navegador de cualquier bot y leer lo que rellena.
 - `state/credentials/` (las bases y el fichero llave) está negado por reglas de texto y, con sandbox, por el sandbox;
   sin sandbox, se puede leer.
-- Por eso: credenciales solo a bots Basic o Assistant (`shell alfred`). La separación fuerte de verdad es otro usuario
+- Por eso: credenciales solo a bots Basic o Assistant (`shell consiglieri`). La separación fuerte de verdad es otro usuario
   del sistema (o un contenedor) para los bots, con KeePassXC y los navegadores en el del usuario: un cambio de
   arquitectura que no está en esta rama.
 
@@ -151,7 +151,7 @@ Otros:
 - **TOTP junto a la contraseña** convierte el 2FA en un solo factor para quien tenga la máquina. Se decide credencial a
   credencial (`--totp` o no).
 - **Una sola instancia de KeePassXC por usuario** sirve a los navegadores. Si el usuario usa KeePassXC para sí mismo en
-  esa cuenta, choca: `alfred creds start` se niega mientras haya otro abierto.
+  esa cuenta, choca: `consiglieri creds start` se niega mientras haya otro abierto.
 
 ## 8. Lo que se encontró al probarlo
 
@@ -197,10 +197,10 @@ descartaba la salida de `goto`.
 
 - **Probar con webs reales**: el inicio de sesión de la TUM (`login.tum.de`, SSO, 2FA) y una web con el formulario en
   dos pasos o en un iframe.
-- **`alfred browser show`** (ventana visible) no se probó en vivo, para no robar el foco del escritorio.
+- **`consiglieri browser show`** (ventana visible) no se probó en vivo, para no robar el foco del escritorio.
 - **Linux sin escritorio**: KeePassXC es una app gráfica; en un servidor necesitaría un escritorio virtual. Windows no
   está soportado (tuberías con nombre).
-- **Codex**: `alfred browser` es una orden de shell y debería funcionar igual, pero su sandbox puede impedir arrancar
+- **Codex**: `consiglieri browser` es una orden de shell y debería funcionar igual, pero su sandbox puede impedir arrancar
   Chromium; sin probar.
 - **Tokens de API**: fuera de esta rama; la vía es un proxy que inyecte el token (§2).
 - **Aviso en cada uso**: la extensión rellena sin pasar por Consiglieri, así que solo se auditan concesiones y
