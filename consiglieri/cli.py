@@ -5,7 +5,7 @@ on its PATH): `schedule`, `send`, `event`, `skills`, `ext`. The agent-facing com
 the model can read the outcome reliably.
 
 There is no main agent. Whatever an agent does belongs to a bot: inside a bot's turn the bot is
-ALFRED_BOT_ID, and from a terminal or a script it is `--bot <@username|id>`. The control panel itself
+CONSIGLIERI_BOT_ID, and from a terminal or a script it is `--bot <@username|id>`. The control panel itself
 never posts, schedules or wakes anything through these commands.
 """
 
@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from . import __version__, home
-from .config import Config
+from .config import Config, env_get
 from .scheduler import KIND_EVENT, KIND_MESSAGE, KIND_TASK, SchedulerStore, parse_duration, parse_time, to_utc_text, utc_now
 
 LOCAL_CHAT_ID = 0
@@ -38,11 +38,11 @@ def emit(payload: Dict[str, Any]) -> int:
 
 
 def resolve_chat_id(args: argparse.Namespace) -> int:
-    value = args.chat_id if args.chat_id is not None else os.environ.get("ALFRED_CHAT_ID", "")
+    value = args.chat_id if args.chat_id is not None else env_get("CONSIGLIERI_CHAT_ID")
     try:
         return int(value)
     except (TypeError, ValueError):
-        raise CommandError("no chat: pass --chat-id or run inside an agent's turn (ALFRED_CHAT_ID)") from None
+        raise CommandError("no chat: pass --chat-id or run inside an agent's turn (CONSIGLIERI_CHAT_ID)") from None
 
 
 NO_BOT = ("which bot? Inside a bot's turn it is the bot whose turn it is; from a terminal or a script pass "
@@ -50,7 +50,7 @@ NO_BOT = ("which bot? Inside a bot's turn it is the bot whose turn it is; from a
 
 
 def resolve_bot_id(config: Config, args: argparse.Namespace) -> int:
-    """Which bot: `--bot <@username|id>`, else the one whose turn this is (ALFRED_BOT_ID), else 0 (none)."""
+    """Which bot: `--bot <@username|id>`, else the one whose turn this is (CONSIGLIERI_BOT_ID), else 0 (none)."""
     wanted = getattr(args, "bot", None)
     if wanted:
         from .bots import BotRegistry
@@ -59,11 +59,11 @@ def resolve_bot_id(config: Config, args: argparse.Namespace) -> int:
         if record is None:
             raise CommandError("no bot called %r; run `alfred bots list`" % wanted)
         return record.bot_id
-    value = os.environ.get("ALFRED_BOT_ID", "").strip()
+    value = env_get("CONSIGLIERI_BOT_ID").strip()
     try:
         return int(value) if value else 0
     except ValueError:
-        raise CommandError("ALFRED_BOT_ID is not a bot id: %r" % value) from None
+        raise CommandError("CONSIGLIERI_BOT_ID is not a bot id: %r" % value) from None
 
 
 def resolve_thread_id(args: argparse.Namespace) -> Optional[int]:
@@ -72,13 +72,13 @@ def resolve_thread_id(args: argparse.Namespace) -> Optional[int]:
         return int(args.thread_id)
     if getattr(args, "chat_id", None) is not None:
         return None  # another chat was named: its topic is not this turn's
-    value = os.environ.get("ALFRED_THREAD_ID", "").strip()
+    value = env_get("CONSIGLIERI_THREAD_ID").strip()
     return int(value) if value.isdigit() and int(value) else None
 
 
 def calling_bot(config: Config):
-    """The bot whose agent runs this command (ALFRED_BOT_ID), or None for the operator or the main home."""
-    value = os.environ.get("ALFRED_BOT_ID", "").strip()
+    """The bot whose agent runs this command (CONSIGLIERI_BOT_ID), or None for the operator or the main home."""
+    value = env_get("CONSIGLIERI_BOT_ID").strip()
     if not value or value == "0":
         return None
     from .bots import BotRegistry
@@ -233,8 +233,8 @@ def cmd_schedule_add(config: Config, args: argparse.Namespace) -> Dict[str, Any]
             text=args.task or args.message,
             kind=KIND_TASK if args.task else KIND_MESSAGE,
             repeat_seconds=repeat,
-            user_id=int(os.environ.get("ALFRED_USER_ID") or 0),
-            username=os.environ.get("ALFRED_USERNAME", ""),
+            user_id=int(env_get("CONSIGLIERI_USER_ID") or 0),
+            username=env_get("CONSIGLIERI_USERNAME"),
             bot_id=bot_id,
             thread_id=resolve_thread_id(args),
             gate=gate,
@@ -279,8 +279,8 @@ def cmd_event(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
         due=utc_now(),
         text=text,
         kind=KIND_EVENT,
-        user_id=int(os.environ.get("ALFRED_USER_ID") or 0),
-        username=os.environ.get("ALFRED_USERNAME", ""),
+        user_id=int(env_get("CONSIGLIERI_USER_ID") or 0),
+        username=env_get("CONSIGLIERI_USERNAME"),
         bot_id=bot_id,
         thread_id=resolve_thread_id(args),
     )
@@ -354,13 +354,13 @@ def bot_token(config: Config, bot_id: int) -> str:
 
 
 def verified_caller(config: Config):
-    """The bot calling `alfred bots`, checked against the key its agent was started with (ALFRED_BOT_KEY): a bot
-    that changes ALFRED_BOT_ID to another bot's does not know that bot's key. None outside a bot's turn."""
+    """The bot calling `alfred bots`, checked against the key its agent was started with (CONSIGLIERI_BOT_KEY): a bot
+    that changes CONSIGLIERI_BOT_ID to another bot's does not know that bot's key. None outside a bot's turn."""
     from .bots import key_matches
 
     record = calling_bot(config)
-    if record is not None and not key_matches(config, record.bot_id, os.environ.get("ALFRED_BOT_KEY", "")):
-        raise CommandError("can't confirm that this runs for %s (ALFRED_BOT_KEY does not match); run it from that "
+    if record is not None and not key_matches(config, record.bot_id, env_get("CONSIGLIERI_BOT_KEY")):
+        raise CommandError("can't confirm that this runs for %s (CONSIGLIERI_BOT_KEY does not match); run it from that "
                            "bot's own turn" % record.handle)
     return record
 
@@ -444,7 +444,7 @@ def cmd_bots_new(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
 
     caller = verified_caller(config)
     require(caller, "bots")
-    owner = caller.owner_id if caller is not None else int(os.environ.get("ALFRED_USER_ID") or args.owner or 0)
+    owner = caller.owner_id if caller is not None else int(env_get("CONSIGLIERI_USER_ID") or args.owner or 0)
     if not owner:
         raise CommandError("no owner: pass --owner <telegram user id>")
     task = " ".join(args.task).strip()
@@ -673,7 +673,7 @@ def cmd_screenshot(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
 def chrome_command(config: Config) -> List[str]:
     """How to open a window of Consiglieri's Chrome profile, starting Chrome if it is not running."""
     if not config.chrome_profile:
-        raise CommandError("no Chrome profile is set; put ALFRED_CHROME_PROFILE=<profile folder> in .env")
+        raise CommandError("no Chrome profile is set; put CONSIGLIERI_CHROME_PROFILE=<profile folder> in .env")
     flag = "--profile-directory=%s" % config.chrome_profile
     if sys.platform == "darwin":
         # -n so the arguments reach a Chrome that is already running, which then opens the profile's window.
@@ -832,8 +832,8 @@ def _add_usage_alert(config: Config, args: argparse.Namespace, when: str, note: 
             repeat=args.repeat,
             chat_id=chat_id,
             thread_id=resolve_thread_id(args),
-            user_id=int(os.environ.get("ALFRED_USER_ID") or 0),
-            username=os.environ.get("ALFRED_USERNAME", ""),
+            user_id=int(env_get("CONSIGLIERI_USER_ID") or 0),
+            username=env_get("CONSIGLIERI_USERNAME"),
             hours=_hours_spec(args),
         )
     except usage_alerts.ConditionError as exc:
@@ -849,7 +849,7 @@ def _add_usage_alert(config: Config, args: argparse.Namespace, when: str, note: 
     if alert.condition.uses_forecast:
         payload["active_hours"] = alert.hours or settings.active_hours.spec()
         payload["fires"] = ("once per quota week, and again that week only if the loss grows by one window's share "
-                            "or ALFRED_USAGE_SURPLUS_STEP points; " + ("armed again every week" if alert.repeat
+                            "or CONSIGLIERI_USAGE_SURPLUS_STEP points; " + ("armed again every week" if alert.repeat
                                                                        else "spent when that week resets"))
     return payload
 
@@ -1166,7 +1166,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     def hours_options(parser: argparse.ArgumentParser) -> None:
         parser.add_argument("--hours", help="active hours for the forecast values, such as 9-20 or \"9-20 mon-fri\"; "
-                                            "default ALFRED_USAGE_ACTIVE_HOURS, else every hour")
+                                            "default CONSIGLIERI_USAGE_ACTIVE_HOURS, else every hour")
         parser.add_argument("--days", help="days of the active hours, such as mon-fri or sat,sun")
         parser.add_argument("--tz", help="time zone of the active hours, such as Europe/Madrid; default local time")
 
@@ -1179,7 +1179,7 @@ def build_parser() -> argparse.ArgumentParser:
         low = questions.add_parser(name, help="is a plan limit nearly used up? true means: don't start non-urgent work")
         low.add_argument("--limit", choices=("any", "session", "week"), default="any")
         low.add_argument("--threshold", type=float, help="percent used that counts as low; default "
-                                                         "ALFRED_USAGE_LOW_THRESHOLD, else 90")
+                                                         "CONSIGLIERI_USAGE_LOW_THRESHOLD, else 90")
         low.add_argument("--projected", action="store_true",
                          help="also true when the recent pace would use a limit up before it resets")
         low.add_argument("--json", dest="as_json", action="store_true", help="the full breakdown")
@@ -1316,7 +1316,7 @@ def build_parser() -> argparse.ArgumentParser:
     from .browser_cli import add_parser as add_browser_parser
     from .creds_cli import add_parser as add_creds_parser
 
-    add_browser_parser(commands)  # alfred browser: each bot's own browser (ALFRED_BROWSER=bot)
+    add_browser_parser(commands)  # alfred browser: each bot's own browser (CONSIGLIERI_BROWSER=bot)
     add_creds_parser(commands)  # alfred creds: the credentials KeePassXC fills in (docs/CREDENTIALS.md)
 
     commands.add_parser("chrome", help="open a window of Consiglieri's own Chrome profile").set_defaults(json=cmd_chrome)
@@ -1341,7 +1341,7 @@ def build_parser() -> argparse.ArgumentParser:
     gate = add.add_argument_group("usage conditions (need the usage permission; checked before each delivery)")
     gate.add_argument("--skip-if-low", nargs="?", const="any", choices=("any", "session", "week"),
                       help="don't deliver it when a limit (the 5-hour window, the week, or any) is at the threshold")
-    gate.add_argument("--threshold", type=float, help="percent used for --skip-if-low (default ALFRED_USAGE_LOW_THRESHOLD, 90)")
+    gate.add_argument("--threshold", type=float, help="percent used for --skip-if-low (default CONSIGLIERI_USAGE_LOW_THRESHOLD, 90)")
     gate.add_argument("--projected", action="store_true",
                       help="--skip-if-low also when the recent pace would use that limit up before it resets")
     gate.add_argument("--skip-if", metavar="CONDITION", help="don't deliver it when this usage condition holds")
@@ -1373,7 +1373,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     config = Config.load()
-    bot_id = os.environ.get("ALFRED_BOT_ID", "").strip()
+    bot_id = env_get("CONSIGLIERI_BOT_ID").strip()
     if getattr(args, "json", None) and bot_id.isdigit() and int(bot_id):
         # Inside a bot's turn: its skills, extensions and directory, not the panel's home.
         from .bots import BotRegistry

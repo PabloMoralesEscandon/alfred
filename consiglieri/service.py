@@ -49,7 +49,7 @@ def service_environment(config: Config) -> Dict[str, str]:
         "PATH": os.pathsep.join(seen) or "/usr/bin:/bin",
         "PYTHONPATH": str(REPO_ROOT),
         "PYTHONUNBUFFERED": "1",
-        "ALFRED_HOME": str(config.home),
+        "CONSIGLIERI_HOME": str(config.home),
     }
 
 
@@ -61,7 +61,7 @@ def preflight(config: Config) -> List[str]:
     except RuntimeError as exc:
         problems.append(str(exc))
     if not config.allowed_users():
-        problems.append("ALFRED_ALLOWED_USERS is empty, so nobody could talk to the bot.")
+        problems.append("CONSIGLIERI_ALLOWED_USERS is empty, so nobody could talk to the bot.")
     backend_bin = config.codex_bin if config.default_backend == "codex" else config.claude_bin
     if not shutil.which(backend_bin, path=service_environment(config)["PATH"]):
         problems.append("`%s` was not found on PATH." % backend_bin)

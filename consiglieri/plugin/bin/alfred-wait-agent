@@ -41,7 +41,7 @@ def main():
     parser.add_argument("--interval", type=float, default=5, help="seconds between checks")
     args = parser.parse_args()
 
-    orca = os.environ.get("ALFRED_ORCA_BIN") or "orca"
+    orca = os.environ.get("CONSIGLIERI_ORCA_BIN") or os.environ.get("ALFRED_ORCA_BIN") or "orca"  # rename-compat
     deadline = time.monotonic() + args.timeout
     seen = None  # the last row Orca gave us for this agent
     misses = 0  # checks in a row where Orca did not list it

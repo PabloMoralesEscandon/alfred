@@ -1,6 +1,6 @@
 """Each bot's own browser: a Chromium with its own profile, driven with `alfred browser` (docs/CREDENTIALS.md).
 
-With ALFRED_BROWSER=bot, a bot with the browser permission gets a browser of its own instead of Orca's or the
+With CONSIGLIERI_BROWSER=bot, a bot with the browser permission gets a browser of its own instead of Orca's or the
 shared Chrome profile. It is a plain Chromium (Playwright's build, which still loads unpacked extensions),
 started by Consiglieri on demand, and driven over the DevTools protocol by `alfred browser ...`: commands any
 agent can run from a shell, whatever its harness or model.
@@ -134,7 +134,7 @@ def install(config: Config) -> List[str]:
 
 
 def chromium_path(config: Config) -> str:
-    configured = config.get("ALFRED_CHROMIUM")
+    configured = config.get("CONSIGLIERI_CHROMIUM")
     if configured:
         return configured
     try:

@@ -251,25 +251,25 @@ class KeePass:
         return self.dir / "keepassxc.pid"
 
     def cli(self) -> str:
-        found = _find([self.config.get("ALFRED_KEEPASSXC_CLI") or "", str(MAC_APP / "keepassxc-cli"), "keepassxc-cli"])
+        found = _find([self.config.get("CONSIGLIERI_KEEPASSXC_CLI") or "", str(MAC_APP / "keepassxc-cli"), "keepassxc-cli"])
         if not found:
             raise CredentialError("keepassxc-cli is not installed: install KeePassXC (on macOS: brew install --cask "
-                                  "keepassxc), or set ALFRED_KEEPASSXC_CLI")
+                                  "keepassxc), or set CONSIGLIERI_KEEPASSXC_CLI")
         return found
 
     def app(self) -> str:
-        found = _find([self.config.get("ALFRED_KEEPASSXC") or "", str(MAC_APP / "KeePassXC"), "keepassxc"])
+        found = _find([self.config.get("CONSIGLIERI_KEEPASSXC") or "", str(MAC_APP / "KeePassXC"), "keepassxc"])
         if not found:
             raise CredentialError("the KeePassXC app is not installed (on macOS: brew install --cask keepassxc), or set "
-                                  "ALFRED_KEEPASSXC")
+                                  "CONSIGLIERI_KEEPASSXC")
         return found
 
     def proxy(self) -> str:
         """The program a browser starts to talk to KeePassXC (native messaging)."""
-        found = _find([self.config.get("ALFRED_KEEPASSXC_PROXY") or "", str(MAC_APP / "keepassxc-proxy"),
+        found = _find([self.config.get("CONSIGLIERI_KEEPASSXC_PROXY") or "", str(MAC_APP / "keepassxc-proxy"),
                        "keepassxc-proxy"])
         if not found:
-            raise CredentialError("keepassxc-proxy is not installed with KeePassXC; set ALFRED_KEEPASSXC_PROXY")
+            raise CredentialError("keepassxc-proxy is not installed with KeePassXC; set CONSIGLIERI_KEEPASSXC_PROXY")
         return found
 
     def is_set_up(self) -> bool:

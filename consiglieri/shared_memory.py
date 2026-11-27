@@ -68,7 +68,7 @@ def ensure(config: Config) -> Path:
     folder = directory(config)
     problem = location_problem(config)
     if problem:
-        log.warning("%s; set ALFRED_SHARED_HOME to a folder outside both", problem)
+        log.warning("%s; set CONSIGLIERI_SHARED_HOME to a folder outside both", problem)
     folder.mkdir(parents=True, exist_ok=True)
     os.chmod(folder.parent, 0o700)
     os.chmod(folder, 0o700)

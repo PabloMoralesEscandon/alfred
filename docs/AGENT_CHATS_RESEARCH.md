@@ -42,7 +42,7 @@ Lo que condiciona el diseño (rama `PabloMoralesEscandon/agent-chats`):
   - las colas y bloqueos del `Agent`;
   - el planificador (`scheduled_messages.chat_id INTEGER`, `alfred/scheduler.py:86`);
   - la carpeta del inbox;
-  - la variable `ALFRED_CHAT_ID` que reciben el agente y `bin/alfred`.
+  - la variable `CONSIGLIERI_CHAT_ID` que reciben el agente y `bin/alfred`.
 - **`alfred send` usa siempre el token base** (`alfred/cli.py:133`).
 - **El home es un repositorio git que se commitea tras cada turno** (`home.autosave`). Su `.gitignore`
   sembrado ignora `state/` y `.env` (`alfred/templates/gitignore`).
@@ -317,7 +317,7 @@ Otros límites operativos:
 4. **El agente puede ver los tokens.** Claude Code corre con los permisos del usuario. Un modelo
    manipulado (por ejemplo, desde una web) podría leer `state/` o `.env`, y eso ya pasa hoy con el token
    base. Mitigaciones:
-   - no pasar tokens en el entorno del agente: `alfred send` los busca por `ALFRED_BOT_ID`;
+   - no pasar tokens en el entorno del agente: `alfred send` los busca por `CONSIGLIERI_BOT_ID`;
    - que el manual (`CLAUDE.md`) prohíba leer `state/` y `.env`;
    - correr Consiglieri con un usuario propio si importa.
    Ningún diseño elimina el riesgo mientras el agente tenga acceso total.
@@ -392,7 +392,7 @@ class Conversation(NamedTuple):
 `Agent`, `SessionStore`, el inbox y `Listener` pasan de `chat_id: int` a `Conversation`. La clave se usa
 en los diccionarios y en `sessions.json`. El planificador añade dos columnas, `bot_id INTEGER NOT NULL
 DEFAULT 0` y `thread_id INTEGER`, con una migración `ALTER TABLE` como la que ya hace con el formato
-antiguo. El entorno del agente añade `ALFRED_BOT_ID` y `ALFRED_THREAD_ID`, y `bin/alfred send|event|schedule`
+antiguo. El entorno del agente añade `CONSIGLIERI_BOT_ID` y `CONSIGLIERI_THREAD_ID`, y `bin/alfred send|event|schedule`
 los respeta.
 
 ### 5.3 Componentes
@@ -402,8 +402,8 @@ los respeta.
 | `alfred/config.py` | `bots_dir`, `agents_path`. `TELEGRAM_BOT_TOKEN` sigue siendo el bot base (gestor). Sin ajustes nuevos obligatorios. |
 | `alfred/agent_bots.py` (nuevo) | `TokenStore`: leer, escribir con `0600` y borrar. `AgentRegistry`: `agents.json` y peticiones pendientes con caducidad. Sin dependencia de Telegram, fácil de probar. |
 | `alfred/telegram_bot.py` | `TelegramBot` recibe `bot_id`, y sus handlers construyen `Conversation(bot_id, chat_id, message_thread_id)`. Un `BotPool` arranca una `Application` por token (`initialize`, `start` y `updater.start_polling(allowed_updates=[...])`) en el mismo bucle, y sustituye a `run_polling()`. El bot base añade un handler para `Update.managed_bot` y el comando `/agent`. |
-| `alfred/agent.py` | `Conversation` como clave. `_environment` añade `ALFRED_BOT_ID`/`ALFRED_THREAD_ID` y quita del entorno cualquier `TELEGRAM_BOT_TOKEN`. Las instrucciones propias del agente (`agents/<nombre>/AGENT.md` en el home) van en la línea `<context .../>` o en el primer mensaje de la sesión, igual que el índice de skills con Codex. |
-| `alfred/cli.py` | `alfred send` elige el token por `ALFRED_BOT_ID` (`TokenStore`, o el base si es 0) y pasa `message_thread_id`. Comandos nuevos: `alfred agent request <nombre>` (para que el modelo pueda proponer un agente) y `alfred agent list`. |
+| `alfred/agent.py` | `Conversation` como clave. `_environment` añade `CONSIGLIERI_BOT_ID`/`CONSIGLIERI_THREAD_ID` y quita del entorno cualquier `TELEGRAM_BOT_TOKEN`. Las instrucciones propias del agente (`agents/<nombre>/AGENT.md` en el home) van en la línea `<context .../>` o en el primer mensaje de la sesión, igual que el índice de skills con Codex. |
+| `alfred/cli.py` | `alfred send` elige el token por `CONSIGLIERI_BOT_ID` (`TokenStore`, o el base si es 0) y pasa `message_thread_id`. Comandos nuevos: `alfred agent request <nombre>` (para que el modelo pueda proponer un agente) y `alfred agent list`. |
 | `alfred/home.py` | `bootstrap` comprueba que `state/` está en el `.gitignore` del home. `autosave` rechaza commits con algo que parezca un token. |
 | `alfred/plugin/skills/` | Una skill base `agents` que explica al modelo cuándo y cómo proponer un agente nuevo y que nunca lea `state/`. |
 | `pyproject.toml` | `python-telegram-bot>=22.8,<23`. |
@@ -505,7 +505,7 @@ de verdad está en la sección 6.7.
 | --- | --- | --- |
 | El bot actual sigue siendo Consiglieri y además gestiona bots | El bot base es un **panel de control sin agente** (`ControlPanel`): crea, lista, configura y destruye bots, y es el gestor de sus cuentas de Telegram. Los agentes viven solo en los bots creados | Petición del usuario |
 | Memoria y skills compartidas por defecto | **Todo es de cada bot**: memoria, inbox, outbox, skills, extensiones, sesiones y tareas programadas. Lo común a todos es solo la base: el comando `alfred`, el plugin `alfred/plugin` y sus skills `alfred:*` | Petición del usuario |
-| Directorio del agente en `~/.alfred/agents/<nombre>/` | **`~/.alfred-bots/<bot_id>/`**, al lado del home y no dentro (`ALFRED_BOTS_HOME`) | Claude Code carga todos los `CLAUDE.md` desde el cwd hasta la raíz ([memory](https://code.claude.com/docs/en/memory)). Dentro de `~/.alfred`, cada bot leería también el manual de Consiglieri y su índice de memoria |
+| Directorio del agente en `~/.alfred/agents/<nombre>/` | **`~/.alfred-bots/<bot_id>/`**, al lado del home y no dentro (`CONSIGLIERI_BOTS_HOME`) | Claude Code carga todos los `CLAUDE.md` desde el cwd hasta la raíz ([memory](https://code.claude.com/docs/en/memory)). Dentro de `~/.alfred`, cada bot leería también el manual de Consiglieri y su índice de memoria |
 | Una clave `bot/chat/tema` en un único `sessions.json` | Un **`Agent` por bot**, con su propio `state/bots/<id>/sessions.json`, y dentro una clave `Chat` (chat + tema) | Encaja mejor con el código: cada bot tiene su configuración, su backend y sus procesos. `Chat` es un `int` que lleva el tema, así que el código y los 125 tests que pasan `chat_id` enteros siguen funcionando |
 | `--add-dir` para el directorio de trabajo | Igual, pero el **cwd es el directorio propio del bot** y el de trabajo va con `--add-dir` y `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1` | Así el manual y la memoria del bot se cargan siempre de forma nativa. El `CLAUDE.md` del proyecto se carga también, gracias a esa variable |
 | Subir a python-telegram-bot 22.8 | **Sin cambio de versión**: las llamadas de gestor van por `Bot.do_api_request` y el update `managed_bot` se lee de `api_kwargs` | La 22.8 exige Python 3.10 y el servicio corre en Python 3.9.6. La 22.5 (Bot API 9.2) sirve igual. Si se sube de versión, el código lee también los atributos nativos |
@@ -535,7 +535,7 @@ Telegram ─► ControlPanel (TELEGRAM_BOT_TOKEN)  /bots /bot …   sin agente
   - las tres llamadas de gestor a la Bot API.
 - **`alfred/config.py`**: `Config` acepta `bot_id`, `workspace_dir` y unos `overrides` que se leen en cada consulta. Un cambio desde el panel se aplica en el siguiente mensaje sin reiniciar, igual que ya pasaba con `.env`. La memoria, el inbox, las skills, las extensiones y las sesiones salen del directorio del bot.
 - **`alfred/telegram_bot.py`**: `ControlPanel`; `TelegramBot`, la interfaz con agente de cada bot creado; y `BotPool`, que corre todas las `Application` en un solo bucle y añade o quita bots en caliente.
-- **`alfred/cli.py`**: dentro del turno de un bot (`ALFRED_BOT_ID`), `alfred` actúa como ese bot: su token, su chat, su tema, su configuración y sus permisos. Añade `alfred bots list|set|new` y `alfred chat --bot`.
+- **`alfred/cli.py`**: dentro del turno de un bot (`CONSIGLIERI_BOT_ID`), `alfred` actúa como ese bot: su token, su chat, su tema, su configuración y sus permisos. Añade `alfred bots list|set|new` y `alfred chat --bot`.
 - **`alfred/scheduler.py`**: columnas `bot_id` y `thread_id` con migración; listado y cancelación por bot; `Postpone` para los bots en pausa.
 - **`alfred/templates/BOT.md`**: el manual de cada bot, con su tarea, su directorio de trabajo y un resumen de lo que puede hacer.
 
@@ -755,7 +755,7 @@ registro, `cross_agent`, fuera de `permissions`. Ningún preajuste, interruptor,
 - **Codex como backend:** su sandbox `read-only` lee todo el disco y no tiene reglas por ruta. La lista
   negra no se hace cumplir; solo el manual la pide. El menú lo avisa.
 - **Comandos `alfred` fuera del sandbox:** `send`, `schedule`, `event`, `skills` y, con el permiso
-  `bots`, `bots`. Comprueban ellos mismos qué bot los llama, por `ALFRED_BOT_ID` (ver abajo). Ninguno
+  `bots`, `bots`. Comprueban ellos mismos qué bot los llama, por `CONSIGLIERI_BOT_ID` (ver abajo). Ninguno
   lee memoria. `alfred skills` lista nombres y rutas de skills del bot que diga esa variable.
 - **Un bot con shell completa sin sandbox:** puede editar su propio `bot.json` (y con ello darse el
   acceso entre agentes) o el registro de auditoría. Solo un usuario del sistema propio o una VM lo
@@ -777,7 +777,7 @@ El bot puede crear sus extensiones con las herramientas de ficheros. Pasaba ya a
 `shell full`.
 
 Límite que conviene tener claro: el comando `alfred` sabe qué bot lo llama por la variable
-`ALFRED_BOT_ID`. Con `shell` = `alfred`, Claude Code no deja anteponer variables a un comando permitido
+`CONSIGLIERI_BOT_ID`. Con `shell` = `alfred`, Claude Code no deja anteponer variables a un comando permitido
 (una regla allow no casa con `VAR=x alfred …`), así que no se puede suplantar. Con `shell full`, el bot
 puede cambiar esa variable y hacerse pasar por otro bot ante `alfred`. Y con `shell full` sin sandbox,
 o con `bypassPermissions` y Bash libre, el bot puede hacer lo mismo que tu usuario. Para un aislamiento
@@ -789,12 +789,12 @@ Además de su memoria propia, cada agente lee una memoria general compartida: he
 (quién es el usuario, sus preferencias, datos comunes). Es contexto, nunca instrucciones, y nunca guarda
 contraseñas, tokens ni claves.
 
-- **Dónde vive**: `~/.alfred-shared/memory/` (se cambia con `ALFRED_SHARED_HOME`). Contiene `MEMORY.md`
+- **Dónde vive**: `~/.alfred-shared/memory/` (se cambia con `CONSIGLIERI_SHARED_HOME`). Contiene `MEMORY.md`
   como índice y un archivo por tema en `<carpeta>/<nombre>.md`, igual que la memoria de un agente. Está
   junto a `~/.alfred` y `~/.alfred-bots`, fuera de los dos, porque la lista negra deniega ambos a todos
   los bots y en Claude Code una regla deny gana a cualquier allow. Tampoco está dentro de ningún
   repositorio git: no se versiona ni se publica. La carpeta es `0700` y los archivos `0600`. Si
-  `ALFRED_SHARED_HOME` apunta dentro de una zona denegada, el registro lo avisa
+  `CONSIGLIERI_SHARED_HOME` apunta dentro de una zona denegada, el registro lo avisa
   (`shared_memory.location_problem`). Se crea vacía, con solo el índice; no se ha copiado nada de la
   memoria actual.
 - **Cómo se carga**: Claude Code no carga un `@import` de fuera del proyecto en una sesión no interactiva
@@ -947,15 +947,15 @@ pruebas y un home aparte, para no tocar `~/.alfred` ni el servicio en marcha:
 1. En @BotFather, crea un bot de pruebas para el panel (`/newbot`). Abre el Mini App (botón *Open*),
    elige ese bot y activa **Bot Management Mode**.
 2. Crea `~/.alfred-test.env` con `TELEGRAM_BOT_TOKEN=<token del bot de pruebas>` y
-   `ALFRED_ALLOWED_USERS=<tu id de Telegram>`.
+   `CONSIGLIERI_ALLOWED_USERS=<tu id de Telegram>`.
 3. Arranca desde este worktree con su propio código. Un `venv/bin/alfred` instalado en modo editable desde
    otra copia (por ejemplo el worktree `refactor`) ejecuta el código de esa copia. Para saber a cuál
    apunta: `venv/bin/python -c "import alfred; print(alfred.__file__)"`. Hay dos formas:
    - sin instalar nada, con el código de esta carpeta delante:
-     `ALFRED_HOME=~/.alfred-test ALFRED_ENV_FILE=~/.alfred-test.env PYTHONPATH=$PWD venv/bin/python -m alfred run`
+     `CONSIGLIERI_HOME=~/.alfred-test CONSIGLIERI_ENV_FILE=~/.alfred-test.env PYTHONPATH=$PWD venv/bin/python -m alfred run`
    - o reinstalando aquí en modo editable y usando `venv/bin/alfred`:
      `venv/bin/pip install --upgrade pip setuptools && venv/bin/pip install -e .`, y después
-     `ALFRED_HOME=~/.alfred-test ALFRED_ENV_FILE=~/.alfred-test.env venv/bin/alfred run`.
+     `CONSIGLIERI_HOME=~/.alfred-test CONSIGLIERI_ENV_FILE=~/.alfred-test.env venv/bin/alfred run`.
      Hace falta actualizar pip antes: el pip 21.2 que trae el venv de Python 3.9 rechaza la instalación
      editable con `pyproject.toml` ("editable mode currently requires a setuptools-based build").
 

@@ -196,7 +196,7 @@ class LiveSessionTests(unittest.TestCase):
 
     def test_a_turn_with_no_sign_of_life_is_stopped(self) -> None:
         # Long enough for the fake CLI to start: macOS can take half a second to first run a new script.
-        self.sandbox.environ["ALFRED_TIMEOUT"] = "1.5"
+        self.sandbox.environ["CONSIGLIERI_TIMEOUT"] = "1.5"
         self.sandbox.fake_cli("claude", {"fresh": [{"_sleep": 30}]})
 
         async def scenario(session: LiveSession) -> None:
@@ -232,7 +232,7 @@ class LiveSessionTests(unittest.TestCase):
             os.kill(self.sandbox.live_pid("claude"), 0)
 
     def test_missing_cli_is_a_backend_error(self) -> None:
-        self.sandbox.environ["ALFRED_CLAUDE_BIN"] = str(self.sandbox.root / "missing")
+        self.sandbox.environ["CONSIGLIERI_CLAUDE_BIN"] = str(self.sandbox.root / "missing")
 
         async def scenario(session: LiveSession) -> None:
             with self.assertRaises(BackendError):

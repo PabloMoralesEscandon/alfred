@@ -23,14 +23,14 @@ class ServiceTests(unittest.TestCase):
 
     def make_ready(self) -> None:
         self.sandbox.environ["TELEGRAM_BOT_TOKEN"] = "123:abc"
-        self.sandbox.environ["ALFRED_ALLOWED_USERS"] = "99"
+        self.sandbox.environ["CONSIGLIERI_ALLOWED_USERS"] = "99"
         self.sandbox.fake_cli("claude", {"fresh": claude_lines("ok")})
 
     def test_environment_records_a_deduplicated_path_and_the_home(self) -> None:
         self.sandbox.environ["PATH"] = "/a/bin:/b/bin:/a/bin::/c/bin"
         env = service.service_environment(self.config)
         self.assertEqual(env["PATH"], "/a/bin:/b/bin:/c/bin")
-        self.assertEqual(env["ALFRED_HOME"], str(self.config.home))
+        self.assertEqual(env["CONSIGLIERI_HOME"], str(self.config.home))
         self.assertEqual(env["PYTHONPATH"], str(REPO_ROOT))
 
     def test_launchd_plist_restarts_forever_and_logs_to_the_home(self) -> None:
@@ -40,30 +40,30 @@ class ServiceTests(unittest.TestCase):
         self.assertIs(plist["KeepAlive"], True)
         self.assertIs(plist["RunAtLoad"], True)
         self.assertEqual(plist["StandardErrorPath"], str(self.config.state_dir / "consiglieri.log"))
-        self.assertEqual(plist["EnvironmentVariables"]["ALFRED_HOME"], str(self.config.home))
+        self.assertEqual(plist["EnvironmentVariables"]["CONSIGLIERI_HOME"], str(self.config.home))
         self.assertNotIn("TELEGRAM_BOT_TOKEN", plist["EnvironmentVariables"])  # secrets stay in .env
 
     def test_systemd_unit(self) -> None:
         unit = service.systemd_unit(self.config)
         self.assertIn('ExecStart="%s" "-m" "consiglieri" "run"' % sys.executable, unit)
         self.assertIn("Restart=always", unit)
-        self.assertIn('Environment="ALFRED_HOME=%s"' % self.config.home, unit)
+        self.assertIn('Environment="CONSIGLIERI_HOME=%s"' % self.config.home, unit)
         self.assertIn("WantedBy=default.target", unit)
         self.assertNotIn("TELEGRAM_BOT_TOKEN", unit)
 
     def test_preflight_names_everything_that_would_make_the_bot_crash_loop(self) -> None:
-        self.sandbox.environ["ALFRED_CLAUDE_BIN"] = str(self.sandbox.root / "missing-claude")
+        self.sandbox.environ["CONSIGLIERI_CLAUDE_BIN"] = str(self.sandbox.root / "missing-claude")
         problems = service.preflight(self.config)
         self.assertEqual(len(problems), 3)
         self.assertIn("TELEGRAM_BOT_TOKEN", problems[0])
-        self.assertIn("ALFRED_ALLOWED_USERS", problems[1])
+        self.assertIn("CONSIGLIERI_ALLOWED_USERS", problems[1])
         self.assertIn("missing-claude", problems[2])
 
         self.make_ready()
         self.assertEqual(service.preflight(self.config), [])
 
-        self.sandbox.environ["ALFRED_BACKEND"] = "codex"
-        self.sandbox.environ["ALFRED_CODEX_BIN"] = str(self.sandbox.root / "missing-codex")
+        self.sandbox.environ["CONSIGLIERI_BACKEND"] = "codex"
+        self.sandbox.environ["CONSIGLIERI_CODEX_BIN"] = str(self.sandbox.root / "missing-codex")
         self.assertIn("missing-codex", service.preflight(self.config)[0])
 
     def test_install_refuses_before_touching_the_service_manager(self) -> None:

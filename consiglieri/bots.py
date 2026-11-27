@@ -82,7 +82,7 @@ PERMISSIONS = (
     ("edit", "off", "edit files in its working directory and extra folders (its own directory always)"),
     ("folders", "", "extra folders it may read (and edit, with edit on), separated by commas"),
     ("web", "off", "WebSearch and WebFetch"),
-    ("browser", "off", "Consiglieri's browser (Orca's, Chrome, or with ALFRED_BROWSER=bot its own)"),
+    ("browser", "off", "Consiglieri's browser (Orca's, Chrome, or with CONSIGLIERI_BROWSER=bot its own)"),
     ("mcp", "off", "MCP tools (your connectors and servers, its extensions'); off removes them all"),
     ("schedule", "on", "reminders and timed tasks with alfred schedule"),
     ("contact", "off", "post or schedule messages to chats other than its owner's"),
@@ -90,7 +90,7 @@ PERMISSIONS = (
     ("admin", "off", "bot admin: create and set up bots for its owner from a spec, up to its own permissions; "
                      "the owner confirms each one in Telegram (never destroy)"),
     ("usage", "on", "read the Claude plan usage and set usage alerts, only with the user's express permission; "
-                    "the report and the alerts need ALFRED_USAGE_MONITOR on"),
+                    "the report and the alerts need CONSIGLIERI_USAGE_MONITOR on"),
     ("calendar", "on", "read and create events in your Google Calendar (the claude.ai connector), even with mcp off"),
     ("creds", "off", "log in with the credentials you grant it: KeePassXC fills them into its own browser, only on their "
                      "sites, and it never sees them; you grant each one (/bot → Credentials, or alfred creds grant), never a bot admin"),
@@ -411,7 +411,7 @@ class BotRegistry:
             return {}
         settings = record.settings
         backend = settings.get("backend") or self.config.default_backend
-        prefix = "ALFRED_CODEX" if backend == "codex" else "ALFRED_CLAUDE"
+        prefix = "CONSIGLIERI_CODEX" if backend == "codex" else "CONSIGLIERI_CLAUDE"
         mode = record.permission("mode")
         if mode == "bypassPermissions":
             codex_sandbox = "danger-full-access"
@@ -420,17 +420,17 @@ class BotRegistry:
         else:
             codex_sandbox = "read-only"
         return {
-            "ALFRED_BACKEND": settings.get("backend", ""),
+            "CONSIGLIERI_BACKEND": settings.get("backend", ""),
             prefix + "_MODEL": settings.get("model", ""),
             prefix + "_EFFORT": settings.get("effort", ""),
-            "ALFRED_CLAUDE_PERMISSION_MODE": mode,
-            "ALFRED_CODEX_SANDBOX": codex_sandbox,
+            "CONSIGLIERI_CLAUDE_PERMISSION_MODE": mode,
+            "CONSIGLIERI_CODEX_SANDBOX": codex_sandbox,
             # Its own browser setting, else Consiglieri's (.env); none without the permission.
-            "ALFRED_BROWSER": settings.get("browser", "") if record.allows("browser") else "none",
-            "ALFRED_WORKDIR": settings.get("workdir", ""),
-            "ALFRED_ADD_DIRS": os.pathsep.join(str(path) for path in record.working_dirs()),
-            "ALFRED_CLAUDE_SETTINGS": str(self.settings_file(bot_id)),
-            "ALFRED_EXTENSION_MCP": "on" if record.allows("mcp") else "off",  # see extensions.held_back
+            "CONSIGLIERI_BROWSER": settings.get("browser", "") if record.allows("browser") else "none",
+            "CONSIGLIERI_WORKDIR": settings.get("workdir", ""),
+            "CONSIGLIERI_ADD_DIRS": os.pathsep.join(str(path) for path in record.working_dirs()),
+            "CONSIGLIERI_CLAUDE_SETTINGS": str(self.settings_file(bot_id)),
+            "CONSIGLIERI_EXTENSION_MCP": "on" if record.allows("mcp") else "off",  # see extensions.held_back
         }
 
     def config_for(self, bot_id: int) -> Config:
@@ -964,8 +964,8 @@ KEY_FILE = "bot-key.secret"  # in <home>/state/: closed to every bot, like the r
 
 
 def bot_key(config: Config, bot_id: int, create: bool = False) -> str:
-    """The key a bot's agent gets in ALFRED_BOT_KEY, so `alfred bots` can tell that the bot calling really is the one
-    ALFRED_BOT_ID names. It is derived from a secret in the panel's state, which no bot can read (the home is
+    """The key a bot's agent gets in CONSIGLIERI_BOT_KEY, so `alfred bots` can tell that the bot calling really is the one
+    CONSIGLIERI_BOT_ID names. It is derived from a secret in the panel's state, which no bot can read (the home is
     denied to every file tool and, with a shell, to the sandbox), so a bot only ever knows its own key.
     Only the panel's process creates the secret (`create`); the command never does. Empty if there is none."""
     path = config.state_dir / KEY_FILE

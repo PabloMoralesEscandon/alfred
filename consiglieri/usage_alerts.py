@@ -19,7 +19,7 @@ Conditions compare these values, joined with `and`, `or`, `not` and parentheses 
     week.projected      recent pace (from the readings in the history)
 
 The three forecast values (`usage_forecast.py`) depend on the active hours: the alert's own (--hours) or
-ALFRED_USAGE_ACTIVE_HOURS, every hour by default. Operators: < <= > >= = == !=. Percentages are plain
+CONSIGLIERI_USAGE_ACTIVE_HOURS, every hour by default. Operators: < <= > >= = == !=. Percentages are plain
 numbers, with or without %. Times take a unit: s, m, h, d or w (90m, 1h, 2d). `reset` is accepted for
 `left`, `windows` for `windows_left`, and `5h` for `session`. A value that was not read (no 5-hour
 window running, a failed reading, no pace yet) makes its comparison false.
@@ -27,12 +27,12 @@ window running, a failed reading, no pace yet) makes its comparison false.
 An alert fires once and is then spent, unless it was added with --repeat: then it fires at most once
 per window (the windows its condition names), and again in the next one. An alert on the forecast
 values belongs to the quota week: it fires once in a week, and again that week only if the surplus has
-grown by ALFRED_USAGE_SURPLUS_STEP points (one window's share by default) since it last fired. Without
+grown by CONSIGLIERI_USAGE_SURPLUS_STEP points (one window's share by default) since it last fired. Without
 --repeat it is spent when that week ends; with it, it is armed again every week. What was fired is
 written to disk before the bot is woken, so a restart does not fire it again.
 
 Waking a bot costs plan usage (one agent turn with its whole context), unlike reading `/usage`.
-So one bot is woken at most once per `ALFRED_USAGE_WAKE_INTERVAL`: alerts that hold sooner wait,
+So one bot is woken at most once per `CONSIGLIERI_USAGE_WAKE_INTERVAL`: alerts that hold sooner wait,
 unspent, for the next cycle after it, and alerts that hold together arrive in one event.
 """
 

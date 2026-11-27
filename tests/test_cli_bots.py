@@ -66,9 +66,9 @@ class BotCliTests(unittest.TestCase):
     def as_bot(self, bot_id: int, thread: str = "") -> None:
         from consiglieri.bots import bot_key
 
-        environ = dict(self.sandbox.environ, ALFRED_BOT_ID=str(bot_id), ALFRED_CHAT_ID="99", ALFRED_USER_ID="99",
-                       ALFRED_BOT_KEY=bot_key(self.sandbox.config, bot_id, create=True),
-                       ALFRED_USERNAME="pablo", ALFRED_THREAD_ID=thread)
+        environ = dict(self.sandbox.environ, CONSIGLIERI_BOT_ID=str(bot_id), CONSIGLIERI_CHAT_ID="99", CONSIGLIERI_USER_ID="99",
+                       CONSIGLIERI_BOT_KEY=bot_key(self.sandbox.config, bot_id, create=True),
+                       CONSIGLIERI_USERNAME="pablo", CONSIGLIERI_THREAD_ID=thread)
         patcher = mock.patch.dict(os.environ, environ)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -179,7 +179,7 @@ class BotCliTests(unittest.TestCase):
         self.assertFalse(self.registry.get(RESEARCH).cross_agent)
         self.assertFalse(self.registry.get(CHEF).cross_agent)
         # Nor the operator's own `alfred` outside a bot's turn: only the control panel grants it.
-        with mock.patch.dict(os.environ, {"ALFRED_BOT_ID": ""}):
+        with mock.patch.dict(os.environ, {"CONSIGLIERI_BOT_ID": ""}):
             self.assertFalse(self.run_json("bots", "set", "chef_bot", "cross", "on")["ok"])
         self.assertFalse(self.registry.get(CHEF).cross_agent)
         # A bot that asks for a new bot can't smuggle it in: the request carries no cross-agent access.
@@ -210,10 +210,10 @@ class BotCliTests(unittest.TestCase):
 
     def test_bots_commands_refuse_a_bot_pretending_to_be_another(self) -> None:
         self.grant(CHEF, bots="on")
-        with mock.patch.dict(os.environ, {"ALFRED_BOT_ID": str(CHEF)}):  # research's key, chef's id
+        with mock.patch.dict(os.environ, {"CONSIGLIERI_BOT_ID": str(CHEF)}):  # research's key, chef's id
             refused = self.run_json("bots", "list")
         self.assertFalse(refused["ok"])
-        self.assertIn("ALFRED_BOT_KEY does not match", refused["error"])
+        self.assertIn("CONSIGLIERI_BOT_KEY does not match", refused["error"])
 
 
 if __name__ == "__main__":

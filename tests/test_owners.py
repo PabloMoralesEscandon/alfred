@@ -31,7 +31,7 @@ MINE, THEIRS = 5000000011, 5000000022  # OWNER's bot, SECOND's bot
 class TwoUsersTests(PanelHarness):  # type: ignore[misc,valid-type]
     def setUp(self) -> None:
         super().setUp()
-        self.sandbox.environ["ALFRED_ALLOWED_USERS"] = "%d,%d" % (OWNER, SECOND)
+        self.sandbox.environ["CONSIGLIERI_ALLOWED_USERS"] = "%d,%d" % (OWNER, SECOND)
 
     async def create_for(self, user_id: int, bot_id: int, username: str, name: str) -> bots.BotRecord:
         self.panel_bot.tokens[bot_id] = token_for(bot_id)
@@ -222,7 +222,7 @@ class TwoUsersTests(PanelHarness):  # type: ignore[misc,valid-type]
                     mock.patch.object(keepass.KeePass, "list", return_value=[tum]), \
                     mock.patch.object(keepass.KeePass, "get", return_value=tum), \
                     mock.patch.object(keepass.KeePass, "grant", return_value=True) as granted:
-                # Two panel users and no ALFRED_CREDENTIALS_GRANTERS: nobody gets a grant button, forged or not.
+                # Two panel users and no CONSIGLIERI_CREDENTIALS_GRANTERS: nobody gets a grant button, forged or not.
                 await self.command_as(SECOND, "/bot")
                 second = self.pool.main.menus.sessions[SECOND]
                 await self.press(SECOND, menus.callback(second.token, "bot:%d" % THEIRS))
@@ -235,7 +235,7 @@ class TwoUsersTests(PanelHarness):  # type: ignore[misc,valid-type]
                 granted.assert_not_called()
 
                 # Only OWNER is listed: SECOND still cannot, OWNER can, and only to OWNER's own bot.
-                self.sandbox.environ["ALFRED_CREDENTIALS_GRANTERS"] = str(OWNER)
+                self.sandbox.environ["CONSIGLIERI_CREDENTIALS_GRANTERS"] = str(OWNER)
                 text, labels = await self.press(SECOND, menus.callback(second.token, "go:bot_creds"))
                 self.assertFalse(any("Grant" in label for label in labels), labels)
                 second.creds_other = [tum]
@@ -334,8 +334,8 @@ class TwoUsersTests(PanelHarness):  # type: ignore[misc,valid-type]
             await self.pool.set_permission(self.pool.registry.get(MINE), "bots", "on")
 
         self.play(scenario)
-        environ = dict(self.sandbox.environ, ALFRED_BOT_ID=str(MINE), ALFRED_CHAT_ID=str(OWNER),
-                       ALFRED_BOT_KEY=bots.bot_key(self.config, MINE, create=True))
+        environ = dict(self.sandbox.environ, CONSIGLIERI_BOT_ID=str(MINE), CONSIGLIERI_CHAT_ID=str(OWNER),
+                       CONSIGLIERI_BOT_KEY=bots.bot_key(self.config, MINE, create=True))
         with mock.patch.dict(os.environ, environ):
             buffer = io.StringIO()
             with redirect_stdout(buffer):

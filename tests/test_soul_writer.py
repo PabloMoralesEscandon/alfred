@@ -72,7 +72,7 @@ class WriterTests(unittest.TestCase):
         self.assertNotIn("patient tutor", system)  # the user's text is never in the system prompt
         self.assertNotIn("--resume", argv)
         # Cheaper or different, if the user wants: the settings name the model and effort.
-        self.sandbox.environ.update(ALFRED_SOUL_MODEL="sonnet", ALFRED_SOUL_EFFORT="medium")
+        self.sandbox.environ.update(CONSIGLIERI_SOUL_MODEL="sonnet", CONSIGLIERI_SOUL_EFFORT="medium")
         argv = self.writer.command()
         self.assertEqual((argv[argv.index("--model") + 1], argv[argv.index("--effort") + 1]), ("sonnet", "medium"))
 
@@ -98,17 +98,17 @@ class WriterTests(unittest.TestCase):
             encoding="utf-8",
         )
         fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
-        self.sandbox.environ["ALFRED_CLAUDE_BIN"] = str(fake)
+        self.sandbox.environ["CONSIGLIERI_CLAUDE_BIN"] = str(fake)
         self.write("calm")
         info = json.loads(seen.read_text())
         self.assertEqual(info["files"], [])  # no CLAUDE.md, no project settings
         self.assertFalse(os.path.exists(info["cwd"]))  # a temporary folder, gone afterwards
-        for name in ("TELEGRAM_BOT_TOKEN", "CLAUDECODE", "ALFRED_HOME"):
+        for name in ("TELEGRAM_BOT_TOKEN", "CLAUDECODE", "CONSIGLIERI_HOME"):
             self.assertNotIn(name, info["env"])
         self.assertIn("HOME", info["env"])  # Claude Code's own login still works
 
     def test_attempts_are_limited_per_user_and_hour(self) -> None:
-        self.sandbox.environ["ALFRED_SOUL_ATTEMPTS"] = "2"
+        self.sandbox.environ["CONSIGLIERI_SOUL_ATTEMPTS"] = "2"
         now = [1000.0]
         self.writer = soul_writer.SoulWriter(self.sandbox.config, clock=lambda: now[0])
         self.sandbox.fake_cli("claude", {"fresh": result(DRAFT)})
@@ -139,7 +139,7 @@ class WriterTests(unittest.TestCase):
             with self.assertRaises(soul_writer.SoulWriterError) as caught:
                 self.write("calm")
             self.assertIn(expected, str(caught.exception), lines)
-        self.sandbox.environ["ALFRED_CLAUDE_BIN"] = str(self.sandbox.root / "missing")
+        self.sandbox.environ["CONSIGLIERI_CLAUDE_BIN"] = str(self.sandbox.root / "missing")
         with self.assertRaises(soul_writer.SoulWriterError) as caught:
             self.write("calm")
         self.assertIn("not available", str(caught.exception))
@@ -273,7 +273,7 @@ class DraftMenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
         self.play(scenario)
 
     def test_the_hourly_limit_and_a_failed_call_in_the_menu(self) -> None:
-        self.sandbox.environ["ALFRED_SOUL_ATTEMPTS"] = "1"
+        self.sandbox.environ["CONSIGLIERI_SOUL_ATTEMPTS"] = "1"
 
         async def scenario() -> None:
             await self.open()
@@ -293,7 +293,7 @@ class DraftMenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
         self.play(scenario)
 
     def test_only_the_owner_can_draft_a_bots_personality(self) -> None:
-        self.sandbox.environ["ALFRED_ALLOWED_USERS"] = "%d,%d" % (OWNER, SECOND)
+        self.sandbox.environ["CONSIGLIERI_ALLOWED_USERS"] = "%d,%d" % (OWNER, SECOND)
 
         async def scenario() -> None:
             await self.create(RESEARCH, "alfredpanel_research_bot", "Research", "/bot new Research")

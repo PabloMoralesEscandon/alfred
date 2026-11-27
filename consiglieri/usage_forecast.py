@@ -14,7 +14,7 @@ Assumptions, also listed by `Forecast.assumptions()` and in docs/USAGE_MONITOR_R
 2. The user starts each window as early as possible: at the first active moment after the previous one
    ends. That gives the most that could be spent, so the forecast is an upper bound and a positive
    surplus means quota is lost even in the best case.
-3. One fully used window takes `share` percent of the weekly limit (ALFRED_USAGE_WINDOW_SHARE, 8 by
+3. One fully used window takes `share` percent of the weekly limit (CONSIGLIERI_USAGE_WINDOW_SHARE, 8 by
    default, or the share measured from the history when there is enough of it).
 4. Partial windows (`partial`):
    - `prorata` (default): a window counts by the part of its 5 hours that falls inside the active hours

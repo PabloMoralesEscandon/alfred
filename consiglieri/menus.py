@@ -31,7 +31,7 @@ CLAUDE_MODELS = (("Default", ""), ("Fable", "fable"), ("Opus", "opus"), ("Sonnet
 CODEX_MODELS = (("Default", ""),)
 CLAUDE_EFFORTS = ("", "low", "medium", "high", "xhigh", "max")
 CODEX_EFFORTS = ("", "low", "medium", "high")
-# What the bot editor's Browser screen offers. The empty value means Consiglieri's default from .env (ALFRED_BROWSER).
+# What the bot editor's Browser screen offers. The empty value means Consiglieri's default from .env (CONSIGLIERI_BROWSER).
 BROWSERS = (("Default", ""), ("Orca", "orca"), ("Chrome", "chrome"), ("Own browser", "bot"))
 BROWSER_LABELS = {"orca": "Orca", "chrome": "Chrome", "bot": "Own browser", "none": "none"}
 # The modes the selector cycles through. plan and default are left to /bot perm: with nobody there to
@@ -168,7 +168,7 @@ CALENDAR_WARNING = (
 CREDS_WARNING = (
     "🔑 Credentials: KeePassXC fills the credentials you grant it into its own browser, only on their sites; it "
     "never sees them. You add them on the machine (alfred creds add) and grant each one in Credentials. It needs "
-    "ALFRED_BROWSER=bot. With an open shell it is not walled off from them: keep those bots on Basic or Assistant.")
+    "CONSIGLIERI_BROWSER=bot. With an open shell it is not walled off from them: keep those bots on Basic or Assistant.")
 
 
 def permission_warnings(record: BotRecord, backend: str = "claude") -> List[str]:
@@ -432,7 +432,7 @@ class Menus:
             self._record(session)
             index = int(argument) if argument.isdigit() else -1
             if not self.pool.config.may_grant_credentials(session.user_id):
-                session.notice = "⚠️ Only the users in ALFRED_CREDENTIALS_GRANTERS may grant credentials from here."
+                session.notice = "⚠️ Only the users in CONSIGLIERI_CREDENTIALS_GRANTERS may grant credentials from here."
                 return await self._open_creds(session)
             if not (0 <= index < len(session.creds_other)):
                 session.notice = "⚠️ That credential is no longer listed."
@@ -689,7 +689,7 @@ class Menus:
             return await self._open_creds(session)
         name, session.cred_name = session.cred_name, ""
         if not self.pool.config.may_grant_credentials(session.user_id):
-            session.notice = "⚠️ Only the users in ALFRED_CREDENTIALS_GRANTERS may grant credentials from here."
+            session.notice = "⚠️ Only the users in CONSIGLIERI_CREDENTIALS_GRANTERS may grant credentials from here."
             return await self._open_creds(session)
         store = keepass.KeePass(self.pool.config)
         try:
@@ -1187,7 +1187,7 @@ class Menus:
                     lines.append("• %s — sites: %s" % (cred.name, ", ".join(cred.urls) or "none"))
                     rows.append([("🔓 Grant %s" % cred.name, "credgrant:%d" % index)])
             elif not self.pool.config.may_grant_credentials(session.user_id):
-                lines += ["", "Only the users in ALFRED_CREDENTIALS_GRANTERS may grant credentials from here."]
+                lines += ["", "Only the users in CONSIGLIERI_CREDENTIALS_GRANTERS may grant credentials from here."]
             lines += ["", "New credentials (with their password) are added on the machine:\n"
                           "alfred creds add <name> --url <site> --username <user>"]
         return Screen("\n".join(lines), rows + [[("⬅️ Back", "back")]])

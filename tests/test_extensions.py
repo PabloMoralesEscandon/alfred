@@ -22,7 +22,7 @@ class ExtensionTests(unittest.TestCase):
     def setUp(self) -> None:
         self.sandbox = Sandbox()
         self.addCleanup(self.sandbox.cleanup)
-        self.sandbox.environ["ALFRED_CLAUDE_BIN"] = str(self.sandbox.root / "no-claude")  # no plugin validator
+        self.sandbox.environ["CONSIGLIERI_CLAUDE_BIN"] = str(self.sandbox.root / "no-claude")  # no plugin validator
         # Every agent is a bot: extensions live in a bot's own directory.
         self.record, self.config = self.sandbox.add_bot()
 
@@ -124,7 +124,7 @@ class ExtensionTests(unittest.TestCase):
         validator = self.sandbox.root / "claude"
         validator.write_text('#!/bin/sh\necho "✘ Validation failed: hooks: Invalid input"\nexit 1\n', encoding="utf-8")
         validator.chmod(0o755)
-        self.sandbox.environ["ALFRED_CLAUDE_BIN"] = str(validator)
+        self.sandbox.environ["CONSIGLIERI_CLAUDE_BIN"] = str(validator)
 
         report = extensions.check(self.config, "weather")
 
@@ -189,7 +189,7 @@ class ExtensionTests(unittest.TestCase):
 
     def test_the_cli(self) -> None:
         env = dict(os.environ, **self.sandbox.environ)
-        env["ALFRED_BOT_ID"] = str(self.record.bot_id)  # inside the bot's turn
+        env["CONSIGLIERI_BOT_ID"] = str(self.record.bot_id)  # inside the bot's turn
 
         def alfred(*argv: str):
             completed = subprocess.run(

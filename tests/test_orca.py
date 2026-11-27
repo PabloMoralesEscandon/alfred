@@ -54,7 +54,7 @@ class OrcaTests(unittest.TestCase):
         self.assertIn(["open"], [call["argv"] for call in self.calls(state)])
 
     def test_missing_cli_is_reported_not_raised(self) -> None:
-        self.sandbox.environ["ALFRED_ORCA_BIN"] = str(self.sandbox.root / "no-orca")
+        self.sandbox.environ["CONSIGLIERI_ORCA_BIN"] = str(self.sandbox.root / "no-orca")
         steps = orca.setup_browser(self.config)
         self.assertEqual(len(steps), 1)
         self.assertFalse(steps[0][1])
@@ -81,7 +81,7 @@ class OrcaTests(unittest.TestCase):
         self.assertLess(len(buffer.getvalue()), 300)
 
     def test_screenshot_command_reports_orca_errors_as_json(self) -> None:
-        self.sandbox.environ["ALFRED_ORCA_BIN"] = str(self.sandbox.root / "no-orca")
+        self.sandbox.environ["CONSIGLIERI_ORCA_BIN"] = str(self.sandbox.root / "no-orca")
         buffer = io.StringIO()
         with mock.patch.dict(os.environ, self.sandbox.environ), redirect_stdout(buffer):
             code = cli.main(["screenshot"])
@@ -97,7 +97,7 @@ class OrcaTests(unittest.TestCase):
             encoding="utf-8",
         )
         probe.chmod(0o755)
-        self.sandbox.environ["ALFRED_CLAUDE_BIN"] = str(probe)
+        self.sandbox.environ["CONSIGLIERI_CLAUDE_BIN"] = str(probe)
         with mock.patch.dict(os.environ, {"ORCA_WORKTREE_ID": "someone-elses", "ORCA_PAIRING_CODE": "pair"}):
             result = asyncio.run(Agent(self.sandbox.add_bot()[1]).ask(1, "hi"))
         self.assertEqual(result.text, "[][pair]")
@@ -109,19 +109,19 @@ class OrcaTests(unittest.TestCase):
         self.assertNotIn("--chrome", self.sandbox.calls("claude")[0]["argv"])
         self.assertEqual(self.config.browser, "orca")
 
-        self.sandbox.environ["ALFRED_BROWSER"] = "Chrome"
-        self.sandbox.environ["ALFRED_CLAUDE_EXTRA_ARGS"] = "--chrome"  # set both ways: still passed once
+        self.sandbox.environ["CONSIGLIERI_BROWSER"] = "Chrome"
+        self.sandbox.environ["CONSIGLIERI_CLAUDE_EXTRA_ARGS"] = "--chrome"  # set both ways: still passed once
         asyncio.run(agent.ask(2, "hi"))
         self.assertEqual(self.sandbox.calls("claude")[1]["argv"].count("--chrome"), 1)
         self.assertIn("Claude in Chrome", orca.summary(self.config))
 
-        self.sandbox.environ["ALFRED_BROWSER"] = "none"
+        self.sandbox.environ["CONSIGLIERI_BROWSER"] = "none"
         self.assertEqual(orca.summary(self.config), "off")
-        self.sandbox.environ["ALFRED_BROWSER"] = "netscape"
+        self.sandbox.environ["CONSIGLIERI_BROWSER"] = "netscape"
         self.assertEqual(self.config.browser, "orca")
 
     def test_extra_claude_arguments_are_appended(self) -> None:
-        self.sandbox.environ["ALFRED_CLAUDE_EXTRA_ARGS"] = '--chrome --effort "high"'
+        self.sandbox.environ["CONSIGLIERI_CLAUDE_EXTRA_ARGS"] = '--chrome --effort "high"'
         self.sandbox.fake_cli("claude", {"fresh": claude_lines("ok")})
         asyncio.run(Agent(self.sandbox.add_bot()[1]).ask(1, "hi"))
         self.assertEqual(self.sandbox.calls("claude")[0]["argv"][-3:], ["--chrome", "--effort", "high"])

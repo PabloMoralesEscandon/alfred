@@ -86,18 +86,18 @@ class DisabledTests(SkeletonTestCase):
 
     def test_off_values(self) -> None:
         for value in ("0", "false", "no", "off"):
-            self.sandbox.environ["ALFRED_USAGE_MONITOR"] = value
+            self.sandbox.environ["CONSIGLIERI_USAGE_MONITOR"] = value
             self.assertIsNone(usage_monitor.start(self.sandbox.config), value)
         self.assertEqual(self.sandbox.calls("claude"), [])
 
     def test_switch_is_read_from_the_env_file_too(self) -> None:
-        (self.sandbox.home / ".env").write_text("ALFRED_USAGE_MONITOR=1\n", encoding="utf-8")
+        (self.sandbox.home / ".env").write_text("CONSIGLIERI_USAGE_MONITOR=1\n", encoding="utf-8")
         self.assertTrue(usage_monitor.is_enabled(self.sandbox.config))
 
 
 class EnabledTests(SkeletonTestCase):
     def test_on_without_a_scheduler_logs_one_line_and_reads_nothing(self) -> None:
-        self.sandbox.environ["ALFRED_USAGE_MONITOR"] = "1"
+        self.sandbox.environ["CONSIGLIERI_USAGE_MONITOR"] = "1"
         before = self.files_in_home()
         with mock.patch.object(usage_monitor.usage, "run_json_lines", side_effect=AssertionError("read usage")):
             monitor = usage_monitor.start(self.sandbox.config)
@@ -221,14 +221,14 @@ class SettingsTests(SkeletonTestCase):
 
     def test_values_are_parsed(self) -> None:
         self.sandbox.environ.update({
-            "ALFRED_USAGE_MONITOR": "1",
-            "ALFRED_USAGE_CHAT_ID": "12345",
-            "ALFRED_USAGE_POLL": "30m",
-            "ALFRED_USAGE_WARN": "95, 70%",
-            "ALFRED_USAGE_CAP": "off",
-            "ALFRED_QUIET_HOURS": "22-7",
-            "ALFRED_USAGE_SPARE": "0",
-            "ALFRED_USAGE_AUTORUN": "1",
+            "CONSIGLIERI_USAGE_MONITOR": "1",
+            "CONSIGLIERI_USAGE_CHAT_ID": "12345",
+            "CONSIGLIERI_USAGE_POLL": "30m",
+            "CONSIGLIERI_USAGE_WARN": "95, 70%",
+            "CONSIGLIERI_USAGE_CAP": "off",
+            "CONSIGLIERI_QUIET_HOURS": "22-7",
+            "CONSIGLIERI_USAGE_SPARE": "0",
+            "CONSIGLIERI_USAGE_AUTORUN": "1",
         })
         settings = MonitorSettings.from_config(self.sandbox.config)
         self.assertEqual(
@@ -239,10 +239,10 @@ class SettingsTests(SkeletonTestCase):
 
     def test_bad_values_keep_their_defaults(self) -> None:
         self.sandbox.environ.update({
-            "ALFRED_USAGE_POLL": "1m",
-            "ALFRED_USAGE_WARN": "lots",
-            "ALFRED_USAGE_CAP": "150",
-            "ALFRED_QUIET_HOURS": "late",
+            "CONSIGLIERI_USAGE_POLL": "1m",
+            "CONSIGLIERI_USAGE_WARN": "lots",
+            "CONSIGLIERI_USAGE_CAP": "150",
+            "CONSIGLIERI_QUIET_HOURS": "late",
         })
         settings = MonitorSettings.from_config(self.sandbox.config)
         self.assertEqual(
@@ -252,15 +252,15 @@ class SettingsTests(SkeletonTestCase):
         self.assertEqual(len(self.logs.records), 4)
 
     def test_chat_id_falls_back_to_the_only_allowed_id(self) -> None:
-        self.sandbox.environ["ALFRED_ALLOWED_USERS"] = "123456789, somebody"
+        self.sandbox.environ["CONSIGLIERI_ALLOWED_USERS"] = "123456789, somebody"
         self.assertEqual(MonitorSettings.from_config(self.sandbox.config).chat_id, 123456789)
-        self.sandbox.environ["ALFRED_ALLOWED_USERS"] = "123456789,987654321"
+        self.sandbox.environ["CONSIGLIERI_ALLOWED_USERS"] = "123456789,987654321"
         self.assertIsNone(MonitorSettings.from_config(self.sandbox.config).chat_id)
 
 
 class CreatedBotTests(SkeletonTestCase):
     def test_a_created_bots_configuration_never_starts_one(self) -> None:
-        self.sandbox.environ["ALFRED_USAGE_MONITOR"] = "1"
+        self.sandbox.environ["CONSIGLIERI_USAGE_MONITOR"] = "1"
         config = Config(home=self.sandbox.home, env_files=self.sandbox.config.env_files,
                         environ=self.sandbox.environ, bot_id=5000000001)
         self.assertIsNone(usage_monitor.start(config))
@@ -276,7 +276,7 @@ class PoolWiringTests(SkeletonTestCase):
 
     def setUp(self) -> None:
         super().setUp()
-        self.sandbox.environ["ALFRED_ALLOWED_USERS"] = str(OWNER)
+        self.sandbox.environ["CONSIGLIERI_ALLOWED_USERS"] = str(OWNER)
         self.sandbox.environ["TELEGRAM_BOT_TOKEN"] = token_for(1, "P")
         home.prepare(self.sandbox.config)
 
@@ -309,7 +309,7 @@ class PoolWiringTests(SkeletonTestCase):
         self.assertEqual(self.logs.records, [])
 
     def test_pool_start_with_the_monitor_on_logs_once_for_all_bots(self) -> None:
-        self.sandbox.environ["ALFRED_USAGE_MONITOR"] = "1"
+        self.sandbox.environ["CONSIGLIERI_USAGE_MONITOR"] = "1"
         self.register_bots()
         pool = self.start_pool()
         self.assertEqual(len(pool.connections), 3)

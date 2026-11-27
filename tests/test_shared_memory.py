@@ -23,7 +23,7 @@ class SharedMemoryTests(unittest.TestCase):
         self.assertEqual(self.config.shared_memory_dir, self.config.shared_dir / "memory")
         self.assertIsNone(shared_memory.location_problem(self.config))
         for inside in (self.config.home / "shared", self.config.bots_home / "shared"):
-            environ = dict(self.sandbox.environ, ALFRED_SHARED_HOME=str(inside))
+            environ = dict(self.sandbox.environ, CONSIGLIERI_SHARED_HOME=str(inside))
             config = Config(home=self.config.home, env_files=self.config.env_files, environ=environ)
             self.assertIn("which every bot is denied", shared_memory.location_problem(config) or "")
 

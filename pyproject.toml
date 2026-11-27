@@ -11,7 +11,7 @@ requires-python = ">=3.9"
 dependencies = ["python-telegram-bot>=21,<23"]
 
 [project.optional-dependencies]
-# Each bot's own browser (ALFRED_BROWSER=bot, `alfred browser`), where KeePassXC fills in credentials.
+# Each bot's own browser (CONSIGLIERI_BROWSER=bot, `alfred browser`), where KeePassXC fills in credentials.
 browser = ["playwright>=1.55"]
 
 [project.scripts]

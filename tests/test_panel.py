@@ -136,7 +136,7 @@ class PanelHarness(unittest.TestCase):
             self.skipTest("python-telegram-bot is not installed")
         self.sandbox = Sandbox()
         self.addCleanup(self.sandbox.cleanup)
-        self.sandbox.environ["ALFRED_ALLOWED_USERS"] = str(OWNER)
+        self.sandbox.environ["CONSIGLIERI_ALLOWED_USERS"] = str(OWNER)
         self.sandbox.environ["TELEGRAM_BOT_TOKEN"] = token_for(1, "P")
         self.config = self.sandbox.config
         home.prepare(self.config)

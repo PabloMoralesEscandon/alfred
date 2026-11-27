@@ -54,7 +54,7 @@ class OrcaAgentsSkillTests(unittest.TestCase):
         orca.chmod(orca.stat().st_mode | stat.S_IXUSR)
         completed = subprocess.run(
             [sys.executable, str(self.script), "--pane", "tab:leaf", "--interval", "0.02", *extra],
-            env=dict(os.environ, ALFRED_ORCA_BIN=str(orca)), stdout=subprocess.PIPE, text=True, timeout=30,
+            env=dict(os.environ, CONSIGLIERI_ORCA_BIN=str(orca)), stdout=subprocess.PIPE, text=True, timeout=30,
         )
         return dict(json.loads(completed.stdout), returncode=completed.returncode)
 

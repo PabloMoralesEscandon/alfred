@@ -146,13 +146,13 @@ pasado se omite y se le dice al administrador.
 
 El propietario es siempre el usuario que confirma en Telegram (`creator_id` del update `managed_bot`), y la
 petición solo casa con un `pending` de ese mismo usuario. El administrador queda en `created_by` y
-`request_id`, nada más. `ALFRED_USER_ID` del entorno se ignora: la petición va siempre al propietario del
+`request_id`, nada más. `CONSIGLIERI_USER_ID` del entorno se ignora: la petición va siempre al propietario del
 administrador.
 
-### 5.5 Qué bot llama: `ALFRED_BOT_KEY`
+### 5.5 Qué bot llama: `CONSIGLIERI_BOT_KEY`
 
-`alfred` sabe qué bot lo llama por `ALFRED_BOT_ID`. Con `shell full`, un bot podía cambiar esa variable y
-hacerse pasar por otro. Ahora cada agente recibe `ALFRED_BOT_KEY = HMAC(secreto, bot_id)`; el secreto está en
+`alfred` sabe qué bot lo llama por `CONSIGLIERI_BOT_ID`. Con `shell full`, un bot podía cambiar esa variable y
+hacerse pasar por otro. Ahora cada agente recibe `CONSIGLIERI_BOT_KEY = HMAC(secreto, bot_id)`; el secreto está en
 `<home>/state/bot-key.secret` (0600), que ningún bot puede leer (el home está denegado a todas las
 herramientas de ficheros y, con shell, al sandbox). Todos los `alfred bots …` comprueban la clave: un bot solo
 conoce la suya. Los ayudantes del administrador, además, no corren fuera del turno de un bot (sin bot que
@@ -168,9 +168,9 @@ sube los permisos, el administrador deja de poder dirigirlo. Permisos, carpetas 
 
 | Variable | Por defecto | Qué cuenta |
 |---|---|---|
-| `ALFRED_ADMIN_MAX_BOTS` | 0 (sin límite) | Bots que un administrador pidió: creados (`created_by`) y peticiones esperando |
-| `ALFRED_ADMIN_MAX_BOTS_PER_USER` | 0 (sin límite) | Bots del usuario y peticiones esperando. Solo frena a los administradores: el usuario puede crear más desde el panel |
-| `ALFRED_ADMIN_REQUESTS_PER_HOUR` | 0 (sin límite) | Peticiones enviadas por un administrador en la última hora (persistido en disco, un reinicio no lo pone a cero) |
+| `CONSIGLIERI_ADMIN_MAX_BOTS` | 0 (sin límite) | Bots que un administrador pidió: creados (`created_by`) y peticiones esperando |
+| `CONSIGLIERI_ADMIN_MAX_BOTS_PER_USER` | 0 (sin límite) | Bots del usuario y peticiones esperando. Solo frena a los administradores: el usuario puede crear más desde el panel |
+| `CONSIGLIERI_ADMIN_REQUESTS_PER_HOUR` | 0 (sin límite) | Peticiones enviadas por un administrador en la última hora (persistido en disco, un reinicio no lo pone a cero) |
 
 Telegram tiene su propio límite de bots por usuario (20, 40 con Premium, contando el panel).
 
@@ -231,16 +231,16 @@ ellos corre dentro y no puede leer el estado. Con ellos, la clave impide hacerse
   username y, si no casa, toma la última petición del usuario: con dos peticiones a la vez y el username
   cambiado, podría casar la otra. Ambas son del mismo usuario y ambas ya validadas.
 - Los botones de aprobación viven en memoria: un reinicio los caduca (el usuario lo da desde el menú).
-- Ya existía y sigue: con shell abierta, un bot con `bots` puede quitarse `ALFRED_BOT_ID` y usar `alfred bots
+- Ya existía y sigue: con shell abierta, un bot con `bots` puede quitarse `CONSIGLIERI_BOT_ID` y usar `alfred bots
   set|new` como operador (sin bot que llama). Los ayudantes del administrador no corren así.
 
 ## 9. Probarlo en vivo con un bot de pruebas
 
 Usa el panel de pruebas de `docs/AGENT_CHATS_RESEARCH.md` §6.7 (bot de pruebas con Bot Management Mode,
-`~/.alfred-test.env`, `ALFRED_HOME=~/.alfred-test`), arrancado desde este worktree:
+`~/.alfred-test.env`, `CONSIGLIERI_HOME=~/.alfred-test`), arrancado desde este worktree:
 
 ```bash
-ALFRED_HOME=~/.alfred-test ALFRED_ENV_FILE=~/.alfred-test.env PYTHONPATH=$PWD venv/bin/python -m alfred run
+CONSIGLIERI_HOME=~/.alfred-test CONSIGLIERI_ENV_FILE=~/.alfred-test.env PYTHONPATH=$PWD venv/bin/python -m alfred run
 ```
 
 1. En el panel: `/bot new Admin` y crea el bot. Luego `/bot perm Admin botadmin`: lee el aviso y confirma.
@@ -258,7 +258,7 @@ ALFRED_HOME=~/.alfred-test ALFRED_ENV_FILE=~/.alfred-test.env PYTHONPATH=$PWD ve
    rechazo y explicártelo; `/bot audit` debe mostrar «bot request refused». Pídele un bot con «memoria
    compartida» con el administrador sin `shared`: rechazo. Dale `shared` al administrador, repite: el bot nace
    sin él y llega el botón «⚠️ Approve them». Prueba «No» y, en otra, «Approve».
-7. Límites: `ALFRED_ADMIN_REQUESTS_PER_HOUR=1` en `~/.alfred-test.env` (se lee en cada llamada) y pide dos bots.
+7. Límites: `CONSIGLIERI_ADMIN_REQUESTS_PER_HOUR=1` en `~/.alfred-test.env` (se lee en cada llamada) y pide dos bots.
 8. Sin permiso: `/bot perm Admin admin off` y pídele otro bot. Debe decir que no puede (Claude Code deniega
    `alfred bots create`; si lo intenta, el comando también).
 9. Cancel: pide un bot y pulsa la tecla «Cancel» del teclado. El administrador debe despertar con «cancelled».
@@ -304,5 +304,5 @@ worktree (`python -c "import alfred; print(alfred.__file__)"`). 361 tests, todos
   administrador, Cancel, confirmación de `admin`, auditoría de `admin`.
 - `alfred/presets.py`: plantillas (`TEMPLATES`, `TEMPLATE_INFO`, `choices`, `info`).
 - `alfred/menus.py`: interruptor y aviso de `admin`, plantilla en las pantallas de presets.
-- `alfred/agent.py`: `ALFRED_BOT_KEY` en el entorno del agente.
+- `alfred/agent.py`: `CONSIGLIERI_BOT_KEY` en el entorno del agente.
 - `alfred/templates/BOT.md`, `alfred/plugin/skills/bot-admin/SKILL.md` (nueva).

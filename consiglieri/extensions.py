@@ -198,7 +198,7 @@ def held_back(config: Config, extension: Extension) -> List[str]:
     if manifest.get("lspServers") or (path / ".lsp.json").exists():
         reasons.append("LSP servers")
     has_mcp = extension.mcp_servers or manifest.get("mcpServers") or (path / ".mcp.json").exists()
-    if has_mcp and config._bot_value("ALFRED_EXTENSION_MCP") != "on":
+    if has_mcp and config._bot_value("CONSIGLIERI_EXTENSION_MCP") != "on":
         reasons.append("MCP servers (needs the mcp permission)")
     return reasons
 

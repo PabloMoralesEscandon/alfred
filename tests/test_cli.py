@@ -18,8 +18,8 @@ class CliTests(unittest.TestCase):
         self.addCleanup(self.sandbox.cleanup)
         # As inside a bot's turn: every agent is a bot, and the commands act as it.
         self.record, self.bot_config = self.sandbox.add_bot()
-        environ = dict(self.sandbox.environ, ALFRED_CHAT_ID="7", ALFRED_USER_ID="99", ALFRED_USERNAME="pablo",
-                       ALFRED_BOT_ID=str(self.record.bot_id))
+        environ = dict(self.sandbox.environ, CONSIGLIERI_CHAT_ID="7", CONSIGLIERI_USER_ID="99", CONSIGLIERI_USERNAME="pablo",
+                       CONSIGLIERI_BOT_ID=str(self.record.bot_id))
         patcher = mock.patch.dict(os.environ, environ)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -60,16 +60,16 @@ class CliTests(unittest.TestCase):
     def test_chrome_opens_alfreds_own_profile(self) -> None:
         code, refused = self.run_json("chrome")
         self.assertEqual((code, refused["ok"]), (1, False))
-        self.assertIn("ALFRED_CHROME_PROFILE", refused["error"])
+        self.assertIn("CONSIGLIERI_CHROME_PROFILE", refused["error"])
 
-        os.environ["ALFRED_CHROME_PROFILE"] = "Alfred"
+        os.environ["CONSIGLIERI_CHROME_PROFILE"] = "Alfred"
         with mock.patch("consiglieri.cli.subprocess.Popen") as popen, mock.patch("consiglieri.cli.sys.platform", "darwin"):
             code, opened = self.run_json("chrome")
         self.assertEqual((code, opened["profile"]), (0, "Alfred"))
         self.assertEqual(popen.call_args[0][0], ["open", "-na", "Google Chrome", "--args", "--profile-directory=Alfred"])
 
         with mock.patch("consiglieri.cli.sys.platform", "linux"):
-            self.sandbox.environ.update(ALFRED_CHROME_PROFILE="Alfred", ALFRED_CHROME_APP="chromium")
+            self.sandbox.environ.update(CONSIGLIERI_CHROME_PROFILE="Alfred", CONSIGLIERI_CHROME_APP="chromium")
             self.assertEqual(cli.chrome_command(self.sandbox.config), ["chromium", "--profile-directory=Alfred"])
 
     def test_event_is_queued_for_the_chat_and_due_at_once(self) -> None:
@@ -80,7 +80,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual((queued["item"]["kind"], queued["item"]["text"]), ("event", "The agent in mus-solver finished"))
 
         # Another process on this machine names the bot and the chat itself.
-        with mock.patch.dict(os.environ, {"ALFRED_BOT_ID": "", "ALFRED_CHAT_ID": ""}):
+        with mock.patch.dict(os.environ, {"CONSIGLIERI_BOT_ID": "", "CONSIGLIERI_CHAT_ID": ""}):
             code, other = self.run_json("event", "--bot", "helper_bot", "--chat-id", "8", "Backup done")
         self.assertEqual((code, other["ok"]), (0, True))
         store = SchedulerStore(self.sandbox.config.db_path)
@@ -112,7 +112,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual((code, payload["ok"]), (1, False))
 
     def test_agent_commands_need_a_chat(self) -> None:
-        with mock.patch.dict(os.environ, {"ALFRED_CHAT_ID": ""}):
+        with mock.patch.dict(os.environ, {"CONSIGLIERI_CHAT_ID": ""}):
             code, payload = self.run_json("schedule", "list")
         self.assertEqual(code, 1)
         self.assertIn("no chat", payload["error"])
@@ -139,7 +139,7 @@ class CliTests(unittest.TestCase):
 
     def test_without_a_bot_there_is_no_agent_to_act_as(self) -> None:
         # From a terminal, outside any bot's turn: there is no main agent to post, schedule, wake or chat as.
-        with mock.patch.dict(os.environ, {"ALFRED_BOT_ID": ""}):
+        with mock.patch.dict(os.environ, {"CONSIGLIERI_BOT_ID": ""}):
             for argv in (("schedule", "add", "--in", "20m", "--message", "x"), ("schedule", "list"),
                          ("event", "hello"), ("send", "hello"), ("skills",), ("ext", "list")):
                 code, payload = self.run_json(*argv)

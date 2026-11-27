@@ -370,7 +370,7 @@ class TelegramBot(Listener):
     async def _cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         user = update.effective_user
         if user is not None and update.effective_message is not None and not self.config.is_allowed(user.id, user.username):
-            # The id is what the owner needs to put in ALFRED_ALLOWED_USERS.
+            # The id is what the owner needs to put in CONSIGLIERI_ALLOWED_USERS.
             await update.effective_message.reply_text("This is a private bot. Your Telegram user id is %s." % user.id)
             return
         if user is not None and update.effective_message is not None and int(user.id) != int(self.record.owner_id):
@@ -1047,7 +1047,7 @@ class BotPool:
                 await self.launch(record)
         # Polled often because `alfred event` relies on it to wake the agent promptly.
         self._scheduler = asyncio.ensure_future(run_scheduler(self.store, self.deliver, poll_seconds=2.0))
-        # Off unless ALFRED_USAGE_MONITOR is set. When on, it checks the bots' usage alerts with one reading per cycle.
+        # Off unless CONSIGLIERI_USAGE_MONITOR is set. When on, it checks the bots' usage alerts with one reading per cycle.
         self.usage_monitor = usage_monitor.start(self.config, scheduler=self.store)
         log.info(
             "Consiglieri is up. home=%s backend=%s bots=%d running=%d manager=%s",

@@ -125,7 +125,7 @@ class ScheduleCommandTests(unittest.TestCase):
                                      permissions={"usage": "on" if usage else "off"}))
 
     def add(self, *argv: str, extra: Optional[Dict[str, str]] = None) -> Tuple[int, Dict[str, Any], str]:
-        environ = dict(self.sandbox.environ, ALFRED_BOT_ID=str(BOT), ALFRED_CHAT_ID="99", **(extra or {}))
+        environ = dict(self.sandbox.environ, CONSIGLIERI_BOT_ID=str(BOT), CONSIGLIERI_CHAT_ID="99", **(extra or {}))
         out, err = io.StringIO(), io.StringIO()
         with mock.patch.dict(os.environ, environ), redirect_stdout(out), redirect_stderr(err):
             code = cli.main(["schedule", "add", "--in", "1h", "--task", "write the report"] + list(argv))
@@ -144,7 +144,7 @@ class ScheduleCommandTests(unittest.TestCase):
 
         _, payload, _ = self.add("--skip-if-low", "week", "--threshold", "80", "--projected")
         self.assertEqual(self.stored(payload).skip_if, "week.used >= 80 or week.projected >= 100")
-        _, payload, _ = self.add("--skip-if-low", "session", extra={"ALFRED_USAGE_LOW_THRESHOLD": "75"})
+        _, payload, _ = self.add("--skip-if-low", "session", extra={"CONSIGLIERI_USAGE_LOW_THRESHOLD": "75"})
         self.assertEqual(self.stored(payload).skip_if, "session.used >= 75")
 
     def test_skip_if_only_if_waste_hours_and_unread_policy(self) -> None:
@@ -183,11 +183,11 @@ class ScheduleCommandTests(unittest.TestCase):
         self.assertNotIn("usage", payload["item"])
 
     def test_the_monitor_switch_is_not_needed(self) -> None:
-        code, payload, _ = self.add("--skip-if-low", extra={"ALFRED_USAGE_MONITOR": "0"})
+        code, payload, _ = self.add("--skip-if-low", extra={"CONSIGLIERI_USAGE_MONITOR": "0"})
         self.assertEqual(code, 0, payload)
 
     def list_items(self) -> list:
-        environ = dict(self.sandbox.environ, ALFRED_BOT_ID=str(BOT), ALFRED_CHAT_ID="99")
+        environ = dict(self.sandbox.environ, CONSIGLIERI_BOT_ID=str(BOT), CONSIGLIERI_CHAT_ID="99")
         out = io.StringIO()
         with mock.patch.dict(os.environ, environ), redirect_stdout(out), redirect_stderr(io.StringIO()):
             cli.main(["schedule", "list"])

@@ -207,7 +207,7 @@ class MenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
         self.play(scenario)
 
     def test_menu_only_its_owner_can_press_its_buttons(self) -> None:
-        self.sandbox.environ["ALFRED_ALLOWED_USERS"] = "%d,%d" % (OWNER, STRANGER)
+        self.sandbox.environ["CONSIGLIERI_ALLOWED_USERS"] = "%d,%d" % (OWNER, STRANGER)
 
         async def scenario() -> None:
             await self.open()
@@ -215,7 +215,7 @@ class MenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
             text = self.text
             # An allowed user who is not the one who opened it: the session is not theirs.
             self.assertEqual(await self.tap("", user_id=STRANGER, data=self.data("Cancel")), "This menu has expired.")
-            self.sandbox.environ["ALFRED_ALLOWED_USERS"] = str(OWNER)
+            self.sandbox.environ["CONSIGLIERI_ALLOWED_USERS"] = str(OWNER)
             await self.open()
             await self.tap("Create bot")
             text = self.text
@@ -762,7 +762,7 @@ class MenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
             self.assertIn("🧭 Browser: Chrome", self.labels())
 
             # Default follows the panel config's .env value and clears the per-bot override.
-            self.sandbox.environ["ALFRED_BROWSER"] = "chrome"
+            self.sandbox.environ["CONSIGLIERI_BROWSER"] = "chrome"
             await self.tap("Browser")
             self.assertIn("Default (Chrome)", self.labels())
             self.assertIn("now: Chrome", self.text)
@@ -774,7 +774,7 @@ class MenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
 
             # With browser permission off, the choice screen says so.
             await self.pool.set_permission(self.pool.registry.get(RESEARCH), "browser", "off")
-            self.sandbox.environ["ALFRED_BROWSER"] = "bot"
+            self.sandbox.environ["CONSIGLIERI_BROWSER"] = "bot"
             await self.tap("Browser")
             self.assertIn("● Default (Own browser)", self.labels())
             self.assertIn("Browser permission is off", self.text)
@@ -784,7 +784,7 @@ class MenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
     def test_menu_credentials_status_errors_thread_and_confirmed_changes(self) -> None:
         async def scenario() -> None:
             # Here nobody may grant from Telegram (several panel users and none listed): the grant path is shut.
-            self.sandbox.environ["ALFRED_CREDENTIALS_GRANTERS"] = "none"
+            self.sandbox.environ["CONSIGLIERI_CREDENTIALS_GRANTERS"] = "none"
             await self.create(RESEARCH, "alfredpanel_research_bot", "Research", "/bot new Research")
             await self.open()
             await self.tap("My bots")
@@ -843,7 +843,7 @@ class MenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
                 self.assertIn("TOTP: yes", self.text)
                 self.assertIn("🔒 Withdraw tum", self.labels())
                 self.assertFalse(any("Grant" in label for label in self.labels()))
-                self.assertIn("Only the users in ALFRED_CREDENTIALS_GRANTERS", self.text)
+                self.assertIn("Only the users in CONSIGLIERI_CREDENTIALS_GRANTERS", self.text)
 
                 # Forged actions cannot grant or skip confirmation.
                 token = self.pool.main.menus.sessions[OWNER].token

@@ -17,7 +17,7 @@ The pieces, and what each does today (see docs/USAGE_MONITOR_RESEARCH.md, sectio
 - `read_on_demand()`: the reading behind `alfred usage check`, `running_low` and `forecast`: the last one
   in the history if it is recent enough, otherwise a new `/usage`, one process at a time.
 
-The monitor is off unless `ALFRED_USAGE_MONITOR` is set. When it is off, `start()`
+The monitor is off unless `CONSIGLIERI_USAGE_MONITOR` is set. When it is off, `start()`
 reads no other setting, builds nothing and returns None: no reading, no message, no wake-up.
 When it is on, it reads usage only while some bot with the usage permission has an alert,
 and the only thing it does is wake that bot. It sends the user nothing yet. On-demand checks work
@@ -48,7 +48,7 @@ except ImportError:  # pragma: no cover
 
 log = logging.getLogger("consiglieri.usage_monitor")
 
-ENABLE_SETTING = "ALFRED_USAGE_MONITOR"
+ENABLE_SETTING = "CONSIGLIERI_USAGE_MONITOR"
 
 # Meter kinds as Claude Code's structured usage report names them.
 KIND_SESSION = "session"
@@ -456,33 +456,33 @@ class MonitorSettings:
     have an effect; the chat, warning, cap, quiet-hours, spare and autorun ones are for the rules to come."""
 
     enabled: bool = False
-    chat_id: Optional[int] = None  # ALFRED_USAGE_CHAT_ID, or the only numeric id in ALFRED_ALLOWED_USERS
-    poll_seconds: int = 15 * 60  # ALFRED_USAGE_POLL
-    warn_percents: Tuple[int, ...] = (80, 95)  # ALFRED_USAGE_WARN
-    cap_percent: Optional[int] = 95  # ALFRED_USAGE_CAP; None never pauses scheduled tasks
-    quiet_hours: Optional[Tuple[int, int]] = (23, 8)  # ALFRED_QUIET_HOURS, local start and end hour
-    spare: bool = True  # ALFRED_USAGE_SPARE
-    autorun: bool = False  # ALFRED_USAGE_AUTORUN
-    # ALFRED_USAGE_WAKE_INTERVAL: the least time between two usage-alert wake-ups of one bot. Waking costs usage.
+    chat_id: Optional[int] = None  # CONSIGLIERI_USAGE_CHAT_ID, or the only numeric id in CONSIGLIERI_ALLOWED_USERS
+    poll_seconds: int = 15 * 60  # CONSIGLIERI_USAGE_POLL
+    warn_percents: Tuple[int, ...] = (80, 95)  # CONSIGLIERI_USAGE_WARN
+    cap_percent: Optional[int] = 95  # CONSIGLIERI_USAGE_CAP; None never pauses scheduled tasks
+    quiet_hours: Optional[Tuple[int, int]] = (23, 8)  # CONSIGLIERI_QUIET_HOURS, local start and end hour
+    spare: bool = True  # CONSIGLIERI_USAGE_SPARE
+    autorun: bool = False  # CONSIGLIERI_USAGE_AUTORUN
+    # CONSIGLIERI_USAGE_WAKE_INTERVAL: the least time between two usage-alert wake-ups of one bot. Waking costs usage.
     wake_interval_seconds: int = 60 * 60
-    # ALFRED_USAGE_WINDOW_SHARE: percent of the weekly limit one fully used 5-hour window takes. Not published by
+    # CONSIGLIERI_USAGE_WINDOW_SHARE: percent of the weekly limit one fully used 5-hour window takes. Not published by
     # Anthropic; 8 is a rounded community median for Pro (and Max, which official pages put at 5x Pro in both
     # limits), measured in November 2026. Sources and range: docs/USAGE_MONITOR_RESEARCH.md, section 10.
     window_share_percent: float = 8.0
     window_share_configured: bool = False  # set by the user: then it is used as is, never replaced by a measure
-    # ALFRED_USAGE_CALIBRATE: measure the share from the history (usage_forecast.estimate_share) and use it
+    # CONSIGLIERI_USAGE_CALIBRATE: measure the share from the history (usage_forecast.estimate_share) and use it
     # instead of the default when there is enough data. Never replaces a configured share.
     calibrate: bool = True
-    # ALFRED_USAGE_ACTIVE_HOURS: the hours the user works, for the forecast values, such as "9-20 mon-fri".
+    # CONSIGLIERI_USAGE_ACTIVE_HOURS: the hours the user works, for the forecast values, such as "9-20 mon-fri".
     # Alerts and commands can give their own with --hours. Default: every hour of every day.
     active_hours: usage_forecast.ActiveHours = usage_forecast.ALWAYS
-    partial_windows: str = "prorata"  # ALFRED_USAGE_PARTIAL_WINDOWS: prorata or full (usage_forecast.py)
-    # ALFRED_USAGE_SURPLUS_STEP: how many more points of lost weekly quota fire a forecast alert again in the
+    partial_windows: str = "prorata"  # CONSIGLIERI_USAGE_PARTIAL_WINDOWS: prorata or full (usage_forecast.py)
+    # CONSIGLIERI_USAGE_SURPLUS_STEP: how many more points of lost weekly quota fire a forecast alert again in the
     # same week. None: one window's share (losing one more full window is worth a new wake-up).
     surplus_step: Optional[float] = None
-    max_age_seconds: int = 5 * 60  # ALFRED_USAGE_MAX_AGE: on-demand checks reuse a reading this recent
-    retry_seconds: int = 2 * 60  # ALFRED_USAGE_RETRY: after a failed reading, on-demand checks wait this long
-    low_threshold: float = 90.0  # ALFRED_USAGE_LOW_THRESHOLD: percent used at which running_low answers true
+    max_age_seconds: int = 5 * 60  # CONSIGLIERI_USAGE_MAX_AGE: on-demand checks reuse a reading this recent
+    retry_seconds: int = 2 * 60  # CONSIGLIERI_USAGE_RETRY: after a failed reading, on-demand checks wait this long
+    low_threshold: float = 90.0  # CONSIGLIERI_USAGE_LOW_THRESHOLD: percent used at which running_low answers true
     history_path: Path = field(default_factory=lambda: Path("usage.json"))
 
     MIN_POLL_SECONDS = 5 * 60
@@ -494,22 +494,22 @@ class MonitorSettings:
         return cls(
             enabled=is_enabled(config),
             chat_id=_chat_id(config),
-            poll_seconds=_setting(config, "ALFRED_USAGE_POLL", defaults.poll_seconds, _poll_seconds),
-            warn_percents=_setting(config, "ALFRED_USAGE_WARN", defaults.warn_percents, _percents),
-            cap_percent=_setting(config, "ALFRED_USAGE_CAP", defaults.cap_percent, _optional_percent),
-            quiet_hours=_setting(config, "ALFRED_QUIET_HOURS", defaults.quiet_hours, _hours),
-            spare=config.get_bool("ALFRED_USAGE_SPARE", defaults.spare),
-            autorun=config.get_bool("ALFRED_USAGE_AUTORUN", defaults.autorun),
-            wake_interval_seconds=_setting(config, "ALFRED_USAGE_WAKE_INTERVAL", defaults.wake_interval_seconds, _poll_seconds),
-            window_share_percent=_setting(config, "ALFRED_USAGE_WINDOW_SHARE", defaults.window_share_percent, _share),
-            window_share_configured=_setting(config, "ALFRED_USAGE_WINDOW_SHARE", False, lambda text: bool(_share(text))),
-            calibrate=config.get_bool("ALFRED_USAGE_CALIBRATE", defaults.calibrate),
-            active_hours=_setting(config, "ALFRED_USAGE_ACTIVE_HOURS", defaults.active_hours, _active_hours),
-            partial_windows=_setting(config, "ALFRED_USAGE_PARTIAL_WINDOWS", defaults.partial_windows, _partial),
-            surplus_step=_setting(config, "ALFRED_USAGE_SURPLUS_STEP", defaults.surplus_step, _step),
-            max_age_seconds=_setting(config, "ALFRED_USAGE_MAX_AGE", defaults.max_age_seconds, _short_seconds),
-            retry_seconds=_setting(config, "ALFRED_USAGE_RETRY", defaults.retry_seconds, _short_seconds),
-            low_threshold=_setting(config, "ALFRED_USAGE_LOW_THRESHOLD", defaults.low_threshold, _threshold),
+            poll_seconds=_setting(config, "CONSIGLIERI_USAGE_POLL", defaults.poll_seconds, _poll_seconds),
+            warn_percents=_setting(config, "CONSIGLIERI_USAGE_WARN", defaults.warn_percents, _percents),
+            cap_percent=_setting(config, "CONSIGLIERI_USAGE_CAP", defaults.cap_percent, _optional_percent),
+            quiet_hours=_setting(config, "CONSIGLIERI_QUIET_HOURS", defaults.quiet_hours, _hours),
+            spare=config.get_bool("CONSIGLIERI_USAGE_SPARE", defaults.spare),
+            autorun=config.get_bool("CONSIGLIERI_USAGE_AUTORUN", defaults.autorun),
+            wake_interval_seconds=_setting(config, "CONSIGLIERI_USAGE_WAKE_INTERVAL", defaults.wake_interval_seconds, _poll_seconds),
+            window_share_percent=_setting(config, "CONSIGLIERI_USAGE_WINDOW_SHARE", defaults.window_share_percent, _share),
+            window_share_configured=_setting(config, "CONSIGLIERI_USAGE_WINDOW_SHARE", False, lambda text: bool(_share(text))),
+            calibrate=config.get_bool("CONSIGLIERI_USAGE_CALIBRATE", defaults.calibrate),
+            active_hours=_setting(config, "CONSIGLIERI_USAGE_ACTIVE_HOURS", defaults.active_hours, _active_hours),
+            partial_windows=_setting(config, "CONSIGLIERI_USAGE_PARTIAL_WINDOWS", defaults.partial_windows, _partial),
+            surplus_step=_setting(config, "CONSIGLIERI_USAGE_SURPLUS_STEP", defaults.surplus_step, _step),
+            max_age_seconds=_setting(config, "CONSIGLIERI_USAGE_MAX_AGE", defaults.max_age_seconds, _short_seconds),
+            retry_seconds=_setting(config, "CONSIGLIERI_USAGE_RETRY", defaults.retry_seconds, _short_seconds),
+            low_threshold=_setting(config, "CONSIGLIERI_USAGE_LOW_THRESHOLD", defaults.low_threshold, _threshold),
             history_path=config.state_dir / "usage.json",
         )
 
@@ -526,7 +526,7 @@ def _setting(config: Config, name: str, default: Any, parse: Any) -> Any:
 
 
 def _chat_id(config: Config) -> Optional[int]:
-    text = config.get("ALFRED_USAGE_CHAT_ID")
+    text = config.get("CONSIGLIERI_USAGE_CHAT_ID")
     if text.lstrip("-").isdigit():
         return int(text)
     ids = [entry for entry in config.allowed_users() if entry.isdigit()]
@@ -636,7 +636,7 @@ def window_share(settings: MonitorSettings, readings: Sequence[Reading]) -> Shar
     on; then the default. The measure is reported either way, for information."""
     measured = usage_forecast.estimate_share(readings) if settings.calibrate else None
     if settings.window_share_configured:
-        return Share(settings.window_share_percent, "set in ALFRED_USAGE_WINDOW_SHARE", measured)
+        return Share(settings.window_share_percent, "set in CONSIGLIERI_USAGE_WINDOW_SHARE", measured)
     if measured is not None:
         return Share(measured.share, "measured from this account's readings (%g points of 5-hour windows)"
                      % measured.session_points, measured)

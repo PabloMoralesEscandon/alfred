@@ -38,7 +38,7 @@ contains no domain logic at all.
 
 ```text
  Telegram ──► telegram_bot.py ──► agent.py ──► backends/claude.py ──► claude -p --resume <id>
-   ▲            auth, files,       per-chat      (or codex.py)            cwd = ALFRED_HOME
+   ▲            auth, files,       per-chat      (or codex.py)            cwd = CONSIGLIERI_HOME
    │            /commands,         lock and                                 │ reads CLAUDE.md, SOUL.md,
    │            progress           session                                  │ memory/,   .claude/skills/*
    │                                  ▲                                     │ writes memory/, new skills  
@@ -48,7 +48,7 @@ contains no domain logic at all.
 
 ## Design decisions
 
-**The home lives outside the repo** (`~/.alfred`, set by `ALFRED_HOME`). Code is the runtime; the home
+**The home lives outside the repo** (`~/.alfred`, set by `CONSIGLIERI_HOME`). Code is the runtime; the home
 is the agent's state. This keeps self-modification away from the source tree and makes the old blanket
 `*.md` gitignore unnecessary.
 
@@ -87,7 +87,7 @@ when one of its background commands finishes. Messages and results are therefore
 result can answer two messages, and some results answer none. This replaced "one process per message",
 which could not be corrected mid-task, could not be woken, and capped every job at one turn. The
 process is tracked per message through the CLI's `command_lifecycle` events, restarted fresh when its
-stored session is gone, and stopped when a turn shows no sign of life for `ALFRED_TIMEOUT` seconds.
+stored session is gone, and stopped when a turn shows no sign of life for `CONSIGLIERI_TIMEOUT` seconds.
 `/stop` kills it; the next message resumes the conversation in a new one.
 
 **The last message of a turn is the reply, and the agent can stay quiet.** Its final text is posted,
@@ -123,7 +123,7 @@ weighed for browser access:
 | Option | Verdict |
 | --- | --- |
 | Orca's built-in browser via the `orca` CLI | Default. Already installed and running here, plain shell commands (so it works headless and with either backend), persistent logins, tabs visible in the app. Verified live. |
-| Claude in Chrome (`claude --chrome`) | Supported with `ALFRED_BROWSER=chrome`. Uses the user's real Chrome and its sessions. Claude backend only, and needs a Chrome window with the extension signed in. Verified live. |
+| Claude in Chrome (`claude --chrome`) | Supported with `CONSIGLIERI_BROWSER=chrome`. Uses the user's real Chrome and its sessions. Claude backend only, and needs a Chrome window with the extension signed in. Verified live. |
 | Safari | Rejected. No scripting surface short of desktop control (clicking by screenshot), which is slow and fragile. |
 
 Running the whole agent inside Orca (Telegram messages typed into an Orca terminal, replies scraped
@@ -158,7 +158,7 @@ when asked to learn a procedure, and used that skill in a brand-new conversation
 
 Browser verified live the same way: Consiglieri opened Hacker News in Orca's browser, clicked through to
 another page, read it, saved a screenshot and closed its tab, all inside its own Orca workspace. The
-same task was then repeated through Claude in Chrome with `ALFRED_BROWSER=chrome`.
+same task was then repeated through Claude in Chrome with `CONSIGLIERI_BROWSER=chrome`.
 
 Not verified live:
 

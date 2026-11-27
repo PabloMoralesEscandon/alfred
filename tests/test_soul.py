@@ -250,7 +250,7 @@ class SoulMenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
         self.play(scenario)
 
     def test_only_the_owner_sees_or_changes_a_bots_personality(self) -> None:
-        self.sandbox.environ["ALFRED_ALLOWED_USERS"] = "%d,%d" % (OWNER, SECOND)
+        self.sandbox.environ["CONSIGLIERI_ALLOWED_USERS"] = "%d,%d" % (OWNER, SECOND)
 
         async def scenario() -> None:
             await self.create(RESEARCH, "alfredpanel_research_bot", "Research", "/bot new Research")

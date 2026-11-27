@@ -51,9 +51,9 @@ REMINDER_TEXT_LIMIT = 1000
 USERNAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]{1,28}bot$", re.I)
 
 # Limits on bot admins. 0, the default, is no limit: Telegram's own cap on bots per account still applies.
-DEFAULT_MAX_PER_ADMIN = 0  # ALFRED_ADMIN_MAX_BOTS: bots one admin asked for, created or waiting
-DEFAULT_MAX_PER_USER = 0  # ALFRED_ADMIN_MAX_BOTS_PER_USER: the user's bots, created or waiting
-DEFAULT_PER_HOUR = 0  # ALFRED_ADMIN_REQUESTS_PER_HOUR: requests one admin sends in an hour
+DEFAULT_MAX_PER_ADMIN = 0  # CONSIGLIERI_ADMIN_MAX_BOTS: bots one admin asked for, created or waiting
+DEFAULT_MAX_PER_USER = 0  # CONSIGLIERI_ADMIN_MAX_BOTS_PER_USER: the user's bots, created or waiting
+DEFAULT_PER_HOUR = 0  # CONSIGLIERI_ADMIN_REQUESTS_PER_HOUR: requests one admin sends in an hour
 APPROVAL_SECONDS = 24 * 3600  # how long the button that approves the extras is honoured
 
 # What needs the user's own yes, even within the admin's ceiling: key -> (label, warning).
@@ -120,9 +120,9 @@ def _number(config: Config, name: str, default: int) -> int:
 
 def limits(config: Config) -> Dict[str, int]:
     return {
-        "bots_per_admin": _number(config, "ALFRED_ADMIN_MAX_BOTS", DEFAULT_MAX_PER_ADMIN),
-        "bots_per_user": _number(config, "ALFRED_ADMIN_MAX_BOTS_PER_USER", DEFAULT_MAX_PER_USER),
-        "requests_per_hour": _number(config, "ALFRED_ADMIN_REQUESTS_PER_HOUR", DEFAULT_PER_HOUR),
+        "bots_per_admin": _number(config, "CONSIGLIERI_ADMIN_MAX_BOTS", DEFAULT_MAX_PER_ADMIN),
+        "bots_per_user": _number(config, "CONSIGLIERI_ADMIN_MAX_BOTS_PER_USER", DEFAULT_MAX_PER_USER),
+        "requests_per_hour": _number(config, "CONSIGLIERI_ADMIN_REQUESTS_PER_HOUR", DEFAULT_PER_HOUR),
     }
 
 
@@ -137,18 +137,18 @@ def limit_problems(config: Config, admin: BotRecord) -> List[str]:
     problems = []
     if allowed["bots_per_admin"] and len(mine) + len(mine_waiting) >= allowed["bots_per_admin"]:
         problems.append("limit reached: %s already has %d bot(s) created or waiting for the user, and a bot admin may "
-                        "have at most %d (ALFRED_ADMIN_MAX_BOTS)" % (admin.handle, len(mine) + len(mine_waiting),
+                        "have at most %d (CONSIGLIERI_ADMIN_MAX_BOTS)" % (admin.handle, len(mine) + len(mine_waiting),
                                                                      allowed["bots_per_admin"]))
     owned = len(registry.list(owner_id=admin.owner_id)) + len(registry.pending_for(admin.owner_id))
     if allowed["bots_per_user"] and owned >= allowed["bots_per_user"]:
         problems.append("limit reached: the user already has %d bot(s) created or waiting, and bot admins may take "
-                        "them to at most %d (ALFRED_ADMIN_MAX_BOTS_PER_USER); the user can still create more from "
+                        "them to at most %d (CONSIGLIERI_ADMIN_MAX_BOTS_PER_USER); the user can still create more from "
                         "the panel" % (owned, allowed["bots_per_user"]))
     hour_ago = time.time() - 3600
     recent = [item for item in requests if item["admin_bot_id"] == admin.bot_id and item["created"] > hour_ago]
     if allowed["requests_per_hour"] and len(recent) >= allowed["requests_per_hour"]:
         problems.append("limit reached: %s sent %d request(s) in the last hour, the most allowed "
-                        "(ALFRED_ADMIN_REQUESTS_PER_HOUR); try again later" % (admin.handle, len(recent)))
+                        "(CONSIGLIERI_ADMIN_REQUESTS_PER_HOUR); try again later" % (admin.handle, len(recent)))
     return problems
 
 

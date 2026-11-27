@@ -1,6 +1,6 @@
 # Monitor de uso de la suscripción de Claude: investigación y diseño
 
-Estado: monitor implementado en parte y **desactivado por defecto** (`ALFRED_USAGE_MONITOR=0`). Hay un
+Estado: monitor implementado en parte y **desactivado por defecto** (`CONSIGLIERI_USAGE_MONITOR=0`). Hay un
 permiso `usage` por bot (sección 11), avisos para agentes con condiciones sobre el uso (sección 12), una
 estimación de cuánto del semanal consume una ventana de 5 h (sección 10), una previsión de cuota semanal
 que no se podrá gastar con su aviso `usage-alert waste` (sección 13) y preguntas bajo demanda que
@@ -338,7 +338,7 @@ para que no se repita ni tras reiniciar el bot.
 `percent ≤ transcurrido × 100 - 10`. Ejemplo: a mitad de semana (50 %) con un 39 % usado hay
 margen; con un 59 % no.
 
-**Horas de silencio** (`ALFRED_QUIET_HOURS`, por defecto 23-08 en hora local): se descartan R2,
+**Horas de silencio** (`CONSIGLIERI_QUIET_HOURS`, por defecto 23-08 en hora local): se descartan R2,
 R5 y R6; R1, R3 y R4 se acumulan y se envían al terminar el silencio, salvo los críticos. R6 a 6 h
 se adelanta si cae dentro del silencio.
 
@@ -359,13 +359,13 @@ Hoy Consiglieri no tiene una lista de pendientes (memoria y skills sí, backlog 
   `KIND_TASK` para ese chat. Solo entonces se gasta cuota, y en algo que el usuario ha elegido.
 - Más adelante: botones inline de Telegram en lugar de `/spare N` (encaja con "Inline approvals" de
   la fase 2 de `docs/PLAN.md`).
-- `ALFRED_USAGE_AUTORUN` (por defecto desactivado) ejecutaría el primer elemento sin preguntar.
+- `CONSIGLIERI_USAGE_AUTORUN` (por defecto desactivado) ejecutaría el primer elemento sin preguntar.
   No se recomienda activarlo por defecto (ver riesgos).
 
 ### Tope de gasto (fase 2 de `docs/PLAN.md`)
 
 Con la misma instantánea, en `_deliver` antes de despertar al agente con un `KIND_TASK`: si algún
-medidor que afecta al modelo de Consiglieri está a ≥ `ALFRED_USAGE_CAP` (95 %), o el último
+medidor que afecta al modelo de Consiglieri está a ≥ `CONSIGLIERI_USAGE_CAP` (95 %), o el último
 `rate_limit_event` dice `rejected`, la tarea se aplaza a `resets_at + 2 min` y se avisa una vez. Hace
 falta un `SchedulerStore.defer(item_id, due)` que cambie `due_at_utc` sin contar un intento. Los
 recordatorios fijos (`KIND_MESSAGE`) no se aplazan nunca.
@@ -456,21 +456,21 @@ desde una skill.
 
 ```env
 # Avisos de uso del plan de Claude. Default: 0 (desactivado) en la primera versión
-# ALFRED_USAGE_MONITOR=1
-# Chat que recibe los avisos. Default: el primer id numérico de ALFRED_ALLOWED_USERS
-# ALFRED_USAGE_CHAT_ID=
+# CONSIGLIERI_USAGE_MONITOR=1
+# Chat que recibe los avisos. Default: el primer id numérico de CONSIGLIERI_ALLOWED_USERS
+# CONSIGLIERI_USAGE_CHAT_ID=
 # Cada cuánto consultar /usage (mínimo 5m). Default: 15m
-# ALFRED_USAGE_POLL=15m
+# CONSIGLIERI_USAGE_POLL=15m
 # Porcentajes que disparan aviso. Default: 80,95
-# ALFRED_USAGE_WARN=80,95
+# CONSIGLIERI_USAGE_WARN=80,95
 # Proponer tareas cuando sobre cuota antes del reinicio. Default: 1
-# ALFRED_USAGE_SPARE=1
+# CONSIGLIERI_USAGE_SPARE=1
 # Pausar tareas programadas al llegar a este porcentaje. Vacío = nunca. Default: 95
-# ALFRED_USAGE_CAP=95
+# CONSIGLIERI_USAGE_CAP=95
 # Sin avisos no urgentes en este rango de horas locales. Default: 23-8
-# ALFRED_QUIET_HOURS=23-8
+# CONSIGLIERI_QUIET_HOURS=23-8
 # Ejecutar sin preguntar la primera tarea pendiente cuando sobre cuota. Default: 0
-# ALFRED_USAGE_AUTORUN=0
+# CONSIGLIERI_USAGE_AUTORUN=0
 ```
 
 ### Pasos de implementación
@@ -491,7 +491,7 @@ Cada paso se puede integrar por separado y deja las pruebas en verde.
 4. **`evaluate()` con R1, R3 y R4**, la deduplicación y las horas de silencio. Tests de tabla con
    relojes fijos.
 5. **Bucle `run_usage_monitor`** en `_post_init`, con intervalo adaptativo y espera exponencial,
-   detrás de `ALFRED_USAGE_MONITOR`. Test con un `probe` falso que verifique que nunca llama a
+   detrás de `CONSIGLIERI_USAGE_MONITOR`. Test con un `probe` falso que verifique que nunca llama a
    `agent.submit`.
 6. **R2 (proyección)**, R5 y R6 (cuota sobrante) con un mensaje simple, todavía sin backlog.
 7. **Tope en `_deliver`** con `SchedulerStore.defer`, reanudando en R4. Cierra el "Spend cap" de
@@ -500,7 +500,7 @@ Cada paso se puede integrar por separado y deja las pruebas en verde.
    tamaño en R5 y R6.
 9. **Documentación**: tabla de comandos del README (`/spare`), `.env.example`, `docs/PLAN.md` (marcar
    el tope de gasto y añadir el monitor) y una nota en `/help`.
-10. **Prueba real**: dejar `alfred run` un día con `ALFRED_USAGE_POLL=5m`, comprobar que
+10. **Prueba real**: dejar `alfred run` un día con `CONSIGLIERI_USAGE_POLL=5m`, comprobar que
     `total_cost_usd` de cada consulta es 0, que no aparece `rate limited until`, y contrastar los
     avisos con `/usage` en una sesión interactiva.
 
@@ -526,7 +526,7 @@ Cada paso se puede integrar por separado y deja las pruebas en verde.
 | `ClaudeUsageSource` | Pide `/usage` con `stream-json --verbose --no-session-persistence --setting-sources project --strict-mcp-config` desde `state/usage-probe/`, con `run_json_lines`, `INHERITED_SESSION_VARS` y `USAGE_TIMEOUT` de `usage.py`. Toma `usage_report` y, si no llega, analiza el texto. Un "rate limited" sin datos es una lectura fallida. Si alguna vez `total_cost_usd` no es 0, lo registra como aviso. `/usage` y `alfred usage` siguen usando `usage.fetch()` sin cambios. |
 | `Rule` y las seis reglas | Declaradas, sin lógica (`evaluate()` devuelve `[]`). `SpareWeeklyRule.estimate()` ya calcula, con `window_share_percent`, cuántas ventanas de 5 h haría falta para gastar el semanal sobrante y cuántas caben antes del reinicio. La regla aún no actúa. |
 | `UsageHistory` | `state/usage.json`: cada lectura del monitor, con poda a 24 h y escritura atómica. |
-| `MonitorSettings` | Interruptor y ajustes. Tienen efecto `ALFRED_USAGE_MONITOR`, `ALFRED_USAGE_POLL` (15 min), `ALFRED_USAGE_WAKE_INTERVAL` (1 h), los de la previsión (`ALFRED_USAGE_WINDOW_SHARE`, `_CALIBRATE`, `_ACTIVE_HOURS`, `_PARTIAL_WINDOWS`, `_SURPLUS_STEP`, sección 13) y los de las preguntas (`_MAX_AGE`, `_RETRY`, `_LOW_THRESHOLD`, sección 14). Los demás siguen reservados. |
+| `MonitorSettings` | Interruptor y ajustes. Tienen efecto `CONSIGLIERI_USAGE_MONITOR`, `CONSIGLIERI_USAGE_POLL` (15 min), `CONSIGLIERI_USAGE_WAKE_INTERVAL` (1 h), los de la previsión (`CONSIGLIERI_USAGE_WINDOW_SHARE`, `_CALIBRATE`, `_ACTIVE_HOURS`, `_PARTIAL_WINDOWS`, `_SURPLUS_STEP`, sección 13) y los de las preguntas (`_MAX_AGE`, `_RETRY`, `_LOW_THRESHOLD`, sección 14). Los demás siguen reservados. |
 | `usage_forecast.py` | Cálculo puro de la previsión semanal: horario activo, ventanas útiles, máximo consumible, excedente, calibración de la proporción y proyección por ritmo (sección 13). |
 | `Evaluation`, `read_on_demand()` (`usage_monitor.py`) | Lo que ve una condición en una lectura (valores, previsión, proyección, proporción en uso) y la lectura cacheada de las preguntas (sección 14). |
 | `alfred usage check\|running_low\|forecast` (`cli.py`) | Preguntas con veredicto de una línea (sección 14). |
@@ -674,7 +674,7 @@ Incertidumbre: Anthropic cambia los límites sin publicar cifras (mayo y septiem
 reserva limitar "at our discretion". La medición es de un solo tercero y casi toda de Pro. Si los
 semanales subieron un 25 %, el dato ya lo incluye, porque se midió después.
 
-**Parámetro**: `ALFRED_USAGE_WINDOW_SHARE`, por defecto `8` (`MonitorSettings.window_share_percent`),
+**Parámetro**: `CONSIGLIERI_USAGE_WINDOW_SHARE`, por defecto `8` (`MonitorSettings.window_share_percent`),
 con la fuente en el código y en `.env.example`. Lo usa la previsión semanal (sección 13). Mejor que el
 valor por defecto es medirlo en la propia cuenta, y eso ya se hace: con el historial de lecturas, la
 subida del semanal dividida por la de la ventana en un mismo tramo da la proporción real
@@ -720,9 +720,9 @@ el uso del plan (`alfred usage`) y registrar avisos (`alfred usage-alert`).
    necesitan el estado de Consiglieri y el login de Claude Code.
 
 No afecta a la orden `/usage` del chat de cada bot: esa la usa el dueño, no el agente, y se ha
-mantenido igual. El operador en la terminal (`alfred usage` sin `ALFRED_BOT_ID`) tampoco cambia.
+mantenido igual. El operador en la terminal (`alfred usage` sin `CONSIGLIERI_BOT_ID`) tampoco cambia.
 
-### Relación con el interruptor global (`ALFRED_USAGE_MONITOR`)
+### Relación con el interruptor global (`CONSIGLIERI_USAGE_MONITOR`)
 
 Como se recomendó, **el permiso no tiene efecto mientras el interruptor global está apagado**:
 
@@ -741,7 +741,7 @@ El panel lo avisa con una nota, cuando el permiso está activado y el global apa
 de `/bot perm`, en `/bot show` (después de `Preset: ...`) y en las pantallas de los menús que
 muestran el resumen de permisos: Customize, el resumen del asistente y la página del bot. Dice que el bot
 ya puede hacer preguntas bajo demanda, pero no leer el informe ni registrar avisos hasta poner
-`ALFRED_USAGE_MONITOR=1` y reiniciar.
+`CONSIGLIERI_USAGE_MONITOR=1` y reiniciar.
 
 ### Qué se tocó del sistema de permisos
 
@@ -818,7 +818,7 @@ y paréntesis, y `and` tiene prioridad sobre `or`. Los porcentajes usados van de
 `week.surplus` admite negativos y `week.max_spend` y `*.projected` pasan de 100. Los tiempos llevan
 unidad (`s`, `m`, `h`, `d`, `w`). Una condición mal escrita se rechaza al registrarla, con el motivo.
 Los valores de la previsión dependen del horario activo: el del aviso (`--hours`, `--days`, `--tz`) o
-`ALFRED_USAGE_ACTIVE_HOURS`. La condición puede ir como primer argumento (`alfred usage-alert add
+`CONSIGLIERI_USAGE_ACTIVE_HOURS`. La condición puede ir como primer argumento (`alfred usage-alert add
 'week.surplus > 0' --hours 9-20`) o con `--when`.
 
 Un valor que no se pudo leer hace falsa su comparación. Pasa con una lectura fallida o cuando no hay
@@ -870,11 +870,11 @@ Waking you used some plan usage. To stop an alert: alfred usage-alert remove <id
   bots. Si ningún bot activo con permiso tiene avisos pendientes, no se lee nada.
 - **Despertar sí gasta.** Cada aviso disparado es un turno del agente con todo su contexto, igual
   que si el usuario le escribiera. En una sesión larga puede ser una parte apreciable de la ventana.
-- Límites: un bot no se despierta más de una vez por `ALFRED_USAGE_WAKE_INTERVAL` (1 h por
+- Límites: un bot no se despierta más de una vez por `CONSIGLIERI_USAGE_WAKE_INTERVAL` (1 h por
   defecto, mínimo 5 min). Los avisos que se cumplen antes esperan **sin gastarse** al primer ciclo
   después del intervalo. Si para entonces la condición ya no se cumple, no se disparan en esa
   ventana. Los avisos que se cumplen a la vez llegan en un solo evento. La comprobación es cada
-  `ALFRED_USAGE_POLL` (15 min): una condición de menos de 15 minutos de margen, como
+  `CONSIGLIERI_USAGE_POLL` (15 min): una condición de menos de 15 minutos de margen, como
   `session.left < 10m`, puede pasar sin verse. El intervalo debe ser menor que el margen más
   estrecho.
 
@@ -909,7 +909,7 @@ de 5 h en curso), la hora actual, el horario activo y la proporción de una vent
 
 ```
 ventanas_útiles = lo que queda de la ventana en curso + ventanas nuevas hasta el reinicio semanal
-max_spend       = ventanas_útiles × proporción          (ALFRED_USAGE_WINDOW_SHARE o la medida)
+max_spend       = ventanas_útiles × proporción          (CONSIGLIERI_USAGE_WINDOW_SHARE o la medida)
 surplus         = (100 − semanal usado) − max_spend     (positivo = cuota que se perderá)
 ```
 
@@ -924,7 +924,7 @@ así que 6 ventanas × 8 % dan 48,0 exactos.
    la anterior. Así sale lo **máximo** que se podría gastar: la previsión es una cota superior, y un
    excedente positivo es cuota que se pierde incluso en el mejor caso.
 3. Una ventana llena se lleva `proporción` % del semanal (sección 10).
-4. **Ventanas parciales** (`ALFRED_USAGE_PARTIAL_WINDOWS`, o `--partial` en `forecast`):
+4. **Ventanas parciales** (`CONSIGLIERI_USAGE_PARTIAL_WINDOWS`, o `--partial` en `forecast`):
    - `prorata` (por defecto): una ventana cuenta por la parte de sus 5 h que cae en el horario activo y
      antes del reinicio semanal. Como mucho, una ventana llena por cada 5 h activas: una ventana que
      empieza a las 19:00 con horario hasta las 20:00 cuenta 0,2. Con esta regla, las ventanas útiles son
@@ -941,7 +941,7 @@ así que 6 ventanas × 8 % dan 48,0 exactos.
 7. **Horario activo**: un rango diario (`9-20`, `08:30-18:00`, `22-2` cruza la medianoche y pertenece al
    día en que empieza), días opcionales (`mon-fri`, `sat,sun`, `weekdays`) y zona horaria opcional
    (`Europe/Madrid`; por defecto la del equipo, con su horario de verano). Sin horario, cuentan las 24 h.
-   Por defecto `ALFRED_USAGE_ACTIVE_HOURS`; cada aviso o pregunta puede dar el suyo.
+   Por defecto `CONSIGLIERI_USAGE_ACTIVE_HOURS`; cada aviso o pregunta puede dar el suyo.
 
 No se modela que el usuario use otras superficies (claude.ai, otro equipo): el porcentaje del servidor
 ya las incluye, y las ventanas son de la cuenta.
@@ -954,10 +954,10 @@ entre la de las ventanas × 100. Hace falta que los tramos cubran al menos 100 p
 ventana llena en total), porque el servidor redondea ambos medidores a enteros, y el resultado debe
 quedar entre 0,5 y 100.
 
-- Si el usuario configuró `ALFRED_USAGE_WINDOW_SHARE`, se usa lo suyo; la medida se muestra solo como
+- Si el usuario configuró `CONSIGLIERI_USAGE_WINDOW_SHARE`, se usa lo suyo; la medida se muestra solo como
   dato.
 - Si no, y hay datos suficientes, se usa la medida en lugar del 8; si no, el 8.
-- `ALFRED_USAGE_CALIBRATE=0` la desactiva. `alfred usage forecast --json` muestra la proporción usada, su
+- `CONSIGLIERI_USAGE_CALIBRATE=0` la desactiva. `alfred usage forecast --json` muestra la proporción usada, su
   fuente y la medida (`window_share`).
 - Limitación: el historial guarda 24 h (sección 9, punto 10).
 
@@ -983,7 +983,7 @@ condición escrita a mano con `> 0` es estricta y no avisa en el límite.
 `week.max_spend` o `week.surplus`):
 
 - **Una vez por semana de cuota**, no por lectura: su clave es solo el reinicio semanal.
-- **De nuevo en la misma semana solo si el excedente crece** al menos `ALFRED_USAGE_SURPLUS_STEP` puntos
+- **De nuevo en la misma semana solo si el excedente crece** al menos `CONSIGLIERI_USAGE_SURPLUS_STEP` puntos
   desde el último disparo; por defecto, la proporción de una ventana (8): se avisa otra vez cuando se ha
   perdido una ventana más.
 - Sin `--repeat`, queda gastado al acabar esa semana (`expires_at`); con `--repeat`, se arma de nuevo cada
@@ -1057,7 +1057,7 @@ porcentajes.
   resultado (en un `and` cierto, todas; en uno falso, la primera que falla; en un `or` cierto, las que se
   cumplen; en uno falso, todas), con su valor leído, lo que necesitaba si no se cumple y cuándo se
   reinicia: `week 39% used, needs >= 90 (resets in 2d 19h)`.
-- `T` es `--threshold`, o `ALFRED_USAGE_LOW_THRESHOLD` (90 por defecto). `--limit any` mira la ventana
+- `T` es `--threshold`, o `CONSIGLIERI_USAGE_LOW_THRESHOLD` (90 por defecto). `--limit any` mira la ventana
   de 5 h y el semanal de todos los modelos; no el semanal por modelo (Fable), que aún no está en el
   lenguaje (sección 9, punto 8). Sin ventana de 5 h en marcha, `session.used` no se puede comparar y esa
   parte es falsa.
@@ -1082,11 +1082,11 @@ también lo alimentan las preguntas.
 
 Pensado para consultarse a menudo (`read_on_demand` en `usage_monitor.py`):
 
-- Si el historial (`state/usage.json`) tiene una lectura buena de hace como mucho `ALFRED_USAGE_MAX_AGE`
+- Si el historial (`state/usage.json`) tiene una lectura buena de hace como mucho `CONSIGLIERI_USAGE_MAX_AGE`
   (5 min por defecto), se usa esa: la del monitor o la de otra pregunta.
 - Si no, un solo proceso a la vez lee `/usage` (bloqueo `usage.json.probe.lock`); los que esperaban usan
   su respuesta. La lectura se añade al historial (bloqueo `usage.json.lock`, que también usa el monitor).
-- Tras una lectura fallida nadie vuelve a preguntar durante `ALFRED_USAGE_RETRY` (2 min): responden con
+- Tras una lectura fallida nadie vuelve a preguntar durante `CONSIGLIERI_USAGE_RETRY` (2 min): responden con
   el código 3.
 - Así, por muchos bots que pregunten, `/usage` se lee como mucho una vez cada 5 min, más un reintento
   cada 2 min mientras falle. El monitor también reutiliza una lectura reciente de una pregunta en lugar de
@@ -1121,7 +1121,7 @@ despierta al bot y no gasta cuota (la pregunta en la skill sí cuesta el despert
 | Opción | Condición guardada |
 | --- | --- |
 | `--skip-if-low [any\|session\|week]` (`any` sin valor) | `running_low`: `session.used >= T or week.used >= T` |
-| `--threshold T` | el umbral de `--skip-if-low`; por defecto `ALFRED_USAGE_LOW_THRESHOLD` (90) **al crear** el elemento |
+| `--threshold T` | el umbral de `--skip-if-low`; por defecto `CONSIGLIERI_USAGE_LOW_THRESHOLD` (90) **al crear** el elemento |
 | `--projected` | añade `<límite>.projected >= 100` a `--skip-if-low` |
 | `--skip-if CONDICIÓN` | no se entrega si se cumple |
 | `--only-if CONDICIÓN` | solo se entrega si se cumple |
@@ -1143,7 +1143,7 @@ despierta al bot y no gasta cuota (la pregunta en la skill sí cuesta el despert
 - Permiso: `schedule add` con condición exige `usage` (el propio comando, y reglas de Claude Code
   `Bash(alfred schedule * --skip-if*)` y `Bash(alfred schedule * --only-if*)` para un bot sin él). Si el
   bot pierde el permiso después, el elemento se trata como «no se pudo leer» y sigue `--if-unread`. No
-  necesita `ALFRED_USAGE_MONITOR`, como las preguntas.
+  necesita `CONSIGLIERI_USAGE_MONITOR`, como las preguntas.
 - Elecciones: el umbral se fija al crear (lo que muestra `schedule list` es lo que se evalúa); un fallo
   de lectura entrega por defecto (un recordatorio perdido es peor que uno de más), salvo con `--only-if`,
   que existe para gastar cuota sobrante y no debe hacerlo a ciegas; un elemento único retenido no se

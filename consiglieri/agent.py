@@ -25,7 +25,7 @@ from . import extensions, home, orca
 from .backends import (
     BACKENDS, Backend, BackendError, LiveEvents, LiveSession, ProgressCallback, RunResult, create_backend,
 )
-from .config import Config
+from .config import Config, with_legacy_names
 
 log = logging.getLogger("consiglieri.agent")
 
@@ -406,26 +406,26 @@ class Agent:
         chat = Chat(chat_id)
         # Tokens stay with the runtime: `alfred send` looks them up by bot id, so the agent never needs them.
         env = {key: value for key, value in orca.detached_env(os.environ).items() if key != "TELEGRAM_BOT_TOKEN"}
-        env["ALFRED_HOME"] = str(self.config.home)
-        env["ALFRED_BOT_ID"] = str(self.config.bot_id)
+        env["CONSIGLIERI_HOME"] = str(self.config.home)
+        env["CONSIGLIERI_BOT_ID"] = str(self.config.bot_id)
         # Proves to `alfred bots` that the caller is this bot: another bot can't compute it (docs/BOT_ADMIN.md).
         from .bots import bot_key
 
-        env["ALFRED_BOT_KEY"] = bot_key(self.config, self.config.bot_id, create=True)
-        env["ALFRED_CHAT_ID"] = str(int(chat))
-        env["ALFRED_THREAD_ID"] = str(chat.thread_id or "")
+        env["CONSIGLIERI_BOT_KEY"] = bot_key(self.config, self.config.bot_id, create=True)
+        env["CONSIGLIERI_CHAT_ID"] = str(int(chat))
+        env["CONSIGLIERI_THREAD_ID"] = str(chat.thread_id or "")
         workdir = self.config.workdir
-        env["ALFRED_WORKDIR"] = str(workdir) if workdir else ""
+        env["CONSIGLIERI_WORKDIR"] = str(workdir) if workdir else ""
         if workdir:
             # Claude Code then also reads the working directory's CLAUDE.md, as project instructions.
             env["CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD"] = "1"
-        env["ALFRED_WORKSPACE"] = str(self.config.workspace)
-        env["ALFRED_USER_ID"] = "" if user_id is None else str(user_id)
-        env["ALFRED_USERNAME"] = username or ""
+        env["CONSIGLIERI_WORKSPACE"] = str(self.config.workspace)
+        env["CONSIGLIERI_USER_ID"] = "" if user_id is None else str(user_id)
+        env["CONSIGLIERI_USERNAME"] = username or ""
         # The launcher in the home, then the base plugin's and each extension's bin/ (Claude Code adds those too).
         folders = [self.config.home / "bin"] + extensions.bin_dirs(self.config)
         env["PATH"] = os.pathsep.join([str(folder) for folder in folders] + [env.get("PATH", "")])
-        return env
+        return with_legacy_names(env)
 
     async def ask(
         self,

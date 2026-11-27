@@ -1,6 +1,6 @@
 """`alfred browser`: a bot drives its own browser (alfred/bot_browser.py, docs/CREDENTIALS.md).
 
-In a bot's turn it is that bot's browser, checked against ALFRED_BOT_KEY; from a terminal, `--bot` says whose
+In a bot's turn it is that bot's browser, checked against CONSIGLIERI_BOT_KEY; from a terminal, `--bot` says whose
 (the user opening it to log in by hand, for instance). Every command answers JSON. What comes back of a page is
 scrubbed: no password, no TOTP code of the bot's credentials, no value of a password field.
 """
@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .bot_browser import BotBrowser, BrowserError, install, locate, page_secrets, scrub
-from .config import Config
+from .config import Config, in_bot_turn
 from .keepass import CredentialError, KeePass
 
 TEXT_LIMIT = 20000
@@ -44,7 +44,7 @@ def _target(config: Config, args: argparse.Namespace):
 
     browser = BotRegistry(config).config_for(record.bot_id).browser
     if browser != "bot":
-        raise CommandError("%s uses %s, not a browser of its own (/bot set %s browser bot, or ALFRED_BROWSER=bot for "
+        raise CommandError("%s uses %s, not a browser of its own (/bot set %s browser bot, or CONSIGLIERI_BROWSER=bot for "
                            "every bot); see the alfred:browser skill"
                            % (record.handle, {"orca": "Orca's browser", "chrome": "the Chrome profile",
                                               "none": "no browser"}.get(browser, browser), record.username))
@@ -122,7 +122,7 @@ def _page_command(action):
 def cmd_install(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
     from .cli import CommandError
 
-    if os.environ.get("ALFRED_BOT_ID", "").strip("0 "):
+    if in_bot_turn():
         raise CommandError("`alfred browser install` is for the user, on the machine")
     return {"ok": True, "done": install(config)}
 
@@ -274,7 +274,7 @@ def cmd_close(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
 
 
 def add_parser(commands: Any) -> None:
-    browser = commands.add_parser("browser", help="a bot's own browser (ALFRED_BROWSER=bot)")
+    browser = commands.add_parser("browser", help="a bot's own browser (CONSIGLIERI_BROWSER=bot)")
     actions = browser.add_subparsers(dest="action", required=True)
 
     def sub(name: str, help_text: str, handler, page: bool = False):

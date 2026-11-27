@@ -118,7 +118,7 @@ def setup_browser(config: Config, *, test: bool = True) -> List[Step]:
         return ok
 
     located = shutil.which(config.orca_bin)
-    if not record("Orca CLI", bool(located), located or "not found; install Orca or set ALFRED_ORCA_BIN"):
+    if not record("Orca CLI", bool(located), located or "not found; install Orca or set CONSIGLIERI_ORCA_BIN"):
         return steps
 
     if not runtime_ready(config):

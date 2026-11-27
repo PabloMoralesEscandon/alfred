@@ -8,12 +8,12 @@ low effort. The system prompt is fixed; the user's description goes in the messa
 `<` and `>` escaped so it can't close the delimiter, never as instructions.
 
 What comes back is only a proposal: the menu shows it, and nothing is saved until the owner taps Accept.
-Cost is kept in check: one call per attempt, at most `ALFRED_SOUL_ATTEMPTS` per user per hour (in memory:
+Cost is kept in check: one call per attempt, at most `CONSIGLIERI_SOUL_ATTEMPTS` per user per hour (in memory:
 a restart starts the count again), and a warning when the usage monitor's last reading says the plan is
 nearly used up. The log gets only metadata: who, which bot, how long, how many characters; never the text.
 
-Settings (in .env): ALFRED_SOUL_MODEL (default haiku), ALFRED_SOUL_EFFORT (default low),
-ALFRED_SOUL_ATTEMPTS (per user per hour, default 5), ALFRED_SOUL_TIMEOUT (seconds, default 120).
+Settings (in .env): CONSIGLIERI_SOUL_MODEL (default haiku), CONSIGLIERI_SOUL_EFFORT (default low),
+CONSIGLIERI_SOUL_ATTEMPTS (per user per hour, default 5), CONSIGLIERI_SOUL_TIMEOUT (seconds, default 120).
 """
 
 from __future__ import annotations
@@ -31,9 +31,10 @@ from typing import Deque, Dict, List, Optional
 
 from . import soul
 from .backends.claude import INHERITED_SESSION_VARS
-from .config import Config
+from .config import LEGACY_PREFIX, PREFIX, Config
 
 log = logging.getLogger("consiglieri.soul")
+SETTING_PREFIXES = (PREFIX, LEGACY_PREFIX)  # rename-compat: neither the new names nor the old ones reach it
 
 DEFAULT_MODEL = "haiku"
 DEFAULT_EFFORT = "low"
@@ -140,7 +141,7 @@ class SoulWriter:
 
     def limit(self) -> int:
         try:
-            return max(1, int(_setting(self.config, "ALFRED_SOUL_ATTEMPTS", str(DEFAULT_ATTEMPTS))))
+            return max(1, int(_setting(self.config, "CONSIGLIERI_SOUL_ATTEMPTS", str(DEFAULT_ATTEMPTS))))
         except ValueError:
             return DEFAULT_ATTEMPTS
 
@@ -192,8 +193,8 @@ class SoulWriter:
             "--strict-mcp-config",
             "--disable-slash-commands",
             "--no-chrome",
-            "--model", _setting(self.config, "ALFRED_SOUL_MODEL", DEFAULT_MODEL),
-            "--effort", _setting(self.config, "ALFRED_SOUL_EFFORT", DEFAULT_EFFORT),
+            "--model", _setting(self.config, "CONSIGLIERI_SOUL_MODEL", DEFAULT_MODEL),
+            "--effort", _setting(self.config, "CONSIGLIERI_SOUL_EFFORT", DEFAULT_EFFORT),
             "--system-prompt", system_prompt(),
         ]
 
@@ -201,7 +202,7 @@ class SoulWriter:
         """The panel's environment for Claude Code's own login, without a parent session's variables, the bot
         token or Consiglieri's settings."""
         env = {key: value for key, value in self.config.environ.items()
-               if key not in INHERITED_SESSION_VARS and key != "TELEGRAM_BOT_TOKEN" and not key.startswith("ALFRED_")}
+               if key not in INHERITED_SESSION_VARS and key != "TELEGRAM_BOT_TOKEN" and not key.startswith(SETTING_PREFIXES)}
         env.setdefault("PATH", os.environ.get("PATH", "/usr/bin:/bin"))
         return env
 
@@ -231,7 +232,7 @@ class SoulWriter:
 
     async def _call(self, message: str) -> str:
         try:
-            timeout = float(_setting(self.config, "ALFRED_SOUL_TIMEOUT", str(DEFAULT_TIMEOUT)))
+            timeout = float(_setting(self.config, "CONSIGLIERI_SOUL_TIMEOUT", str(DEFAULT_TIMEOUT)))
         except ValueError:
             timeout = DEFAULT_TIMEOUT
         with tempfile.TemporaryDirectory(prefix="soul-") as empty:  # no project files, no CLAUDE.md

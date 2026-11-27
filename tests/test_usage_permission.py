@@ -113,7 +113,7 @@ class UsageCommandTests(unittest.TestCase):
                                      permissions={"usage": "off"}))
 
     def run_usage(self, bot: bool = True) -> Tuple[int, str, str]:
-        environ = dict(self.sandbox.environ, ALFRED_BOT_ID=str(BOT) if bot else "")
+        environ = dict(self.sandbox.environ, CONSIGLIERI_BOT_ID=str(BOT) if bot else "")
         out, err = io.StringIO(), io.StringIO()
         with mock.patch.dict(os.environ, environ), redirect_stdout(out), redirect_stderr(err):
             code = cli.main(["usage"])
@@ -139,7 +139,7 @@ class UsageCommandTests(unittest.TestCase):
 
     def test_allowed_with_the_permission_and_the_monitor_on(self) -> None:
         self.grant("on")
-        self.sandbox.environ["ALFRED_USAGE_MONITOR"] = "1"
+        self.sandbox.environ["CONSIGLIERI_USAGE_MONITOR"] = "1"
         code, out, _ = self.run_usage()
         self.assertEqual(code, 0)
         self.assertIn("Session: 33% used", out)
@@ -168,7 +168,7 @@ class PanelTests(PanelHarness):  # type: ignore[misc,valid-type]
         self.play(scenario)
 
     def test_no_warning_when_the_monitor_is_on(self) -> None:
-        self.sandbox.environ["ALFRED_USAGE_MONITOR"] = "1"
+        self.sandbox.environ["CONSIGLIERI_USAGE_MONITOR"] = "1"
 
         async def scenario() -> None:
             await self.create(RESEARCH, "research_bot", "Research", "/bot new Research")

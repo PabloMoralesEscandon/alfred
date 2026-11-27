@@ -87,7 +87,7 @@ class QuestionCommandTests(unittest.TestCase):
             path.unlink()
 
     def ask(self, *argv: str, bot: Optional[int] = BOT) -> Tuple[int, str, str]:
-        environ = dict(self.sandbox.environ, ALFRED_BOT_ID=str(bot) if bot else "")
+        environ = dict(self.sandbox.environ, CONSIGLIERI_BOT_ID=str(bot) if bot else "")
         out, err = io.StringIO(), io.StringIO()
         with mock.patch.dict(os.environ, environ), redirect_stdout(out), redirect_stderr(err):
             code = cli.main(["usage"] + list(argv))
@@ -115,7 +115,7 @@ class QuestionCommandTests(unittest.TestCase):
     def test_the_threshold(self) -> None:
         self.assert_verdict(self.ask("running_low", "--threshold", "95")[1], False)
         self.assert_verdict(self.ask("running_low", "--threshold", "90")[1], True)
-        self.sandbox.environ["ALFRED_USAGE_LOW_THRESHOLD"] = "95"
+        self.sandbox.environ["CONSIGLIERI_USAGE_LOW_THRESHOLD"] = "95"
         self.assert_verdict(self.ask("running_low")[1], False)
         self.assertEqual(self.ask("running_low", "--threshold", "0")[0], cli.EXIT_BAD_QUESTION)
 
@@ -170,14 +170,14 @@ class QuestionCommandTests(unittest.TestCase):
         self.assertEqual(self.ask("check", "week.used > 3")[0], 0)
         self.assertEqual(len(self.sandbox.calls("claude")), 1)  # one /usage for five questions
         self.assertTrue(json.loads(self.ask("running_low", "--json")[1])["reading"]["cached"])
-        # older than ALFRED_USAGE_MAX_AGE: read again
+        # older than CONSIGLIERI_USAGE_MAX_AGE: read again
         history = UsageHistory(self.sandbox.config.state_dir / "usage.json")
         old = history.readings()[-1]
         self.forget()
         history.append(Reading(old.taken_at - timedelta(minutes=10), old.source, old.windows), now=old.taken_at)
         self.ask("running_low")
         self.assertEqual(len(self.sandbox.calls("claude")), 2)
-        # after a failed reading, nobody asks again for ALFRED_USAGE_RETRY
+        # after a failed reading, nobody asks again for CONSIGLIERI_USAGE_RETRY
         self.forget()
         self.serve(fail=True)
         self.assertEqual(self.ask("running_low")[0], cli.EXIT_UNREAD)
@@ -185,7 +185,7 @@ class QuestionCommandTests(unittest.TestCase):
         self.assertEqual(len(self.sandbox.calls("claude")), 3)
 
     def test_works_with_the_monitor_off_but_needs_the_permission(self) -> None:
-        self.assertNotEqual(self.sandbox.environ.get("ALFRED_USAGE_MONITOR"), "1")
+        self.assertNotEqual(self.sandbox.environ.get("CONSIGLIERI_USAGE_MONITOR"), "1")
         self.assertEqual(self.ask("running_low")[0], 0)
         record = self.registry.get(BOT)
         record.permissions["usage"] = "off"
@@ -288,7 +288,7 @@ class ForecastConditionTests(unittest.TestCase):
         configured = Evaluation(MonitorSettings(window_share_percent=10, window_share_configured=True), reading(), NOW,
                                 history).share
         self.assertEqual((configured.value, configured.measured.share), (10, 8.3))
-        self.assertIn("ALFRED_USAGE_WINDOW_SHARE", configured.source)
+        self.assertIn("CONSIGLIERI_USAGE_WINDOW_SHARE", configured.source)
         off = Evaluation(MonitorSettings(calibrate=False), reading(), NOW, history).share
         self.assertEqual((off.value, off.measured), (8.0, None))
 
@@ -306,7 +306,7 @@ class ForecastAlertTests(unittest.TestCase):
         self.sandbox = Sandbox()
         self.addCleanup(self.sandbox.cleanup)
         self.sandbox.environ["TELEGRAM_BOT_TOKEN"] = "1:PANELPANELPANELPANELPANELPANELPANEL"
-        self.sandbox.environ["ALFRED_USAGE_MONITOR"] = "1"
+        self.sandbox.environ["CONSIGLIERI_USAGE_MONITOR"] = "1"
         home.prepare(self.sandbox.config)
         self.config = self.sandbox.config
         self.registry = BotRegistry(self.config)
@@ -321,8 +321,8 @@ class ForecastAlertTests(unittest.TestCase):
         self.monitor.settings.wake_interval_seconds = 5 * 60
 
     def run_json(self, *argv: str, bot: int = BOT) -> Dict[str, Any]:
-        environ = dict(self.sandbox.environ, ALFRED_BOT_ID=str(bot), ALFRED_CHAT_ID="99", ALFRED_USER_ID="99",
-                       ALFRED_USERNAME="pablo", ALFRED_THREAD_ID="")
+        environ = dict(self.sandbox.environ, CONSIGLIERI_BOT_ID=str(bot), CONSIGLIERI_CHAT_ID="99", CONSIGLIERI_USER_ID="99",
+                       CONSIGLIERI_USERNAME="pablo", CONSIGLIERI_THREAD_ID="")
         buffer = io.StringIO()
         with mock.patch.dict(os.environ, environ), redirect_stdout(buffer):
             cli.main(list(argv))
@@ -354,7 +354,7 @@ class ForecastAlertTests(unittest.TestCase):
         record.permissions["usage"] = "off"
         self.registry.save(record)
         self.assertIn("usage permission", self.run_json("usage-alert", "waste")["error"])
-        self.sandbox.environ["ALFRED_USAGE_MONITOR"] = "0"
+        self.sandbox.environ["CONSIGLIERI_USAGE_MONITOR"] = "0"
         self.assertIn("usage monitor is off", self.run_json("usage-alert", "waste", bot=OTHER)["error"])
 
     def test_the_users_example_fires_at_the_exact_limit_with_a_clear_event(self) -> None:

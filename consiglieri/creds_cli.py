@@ -13,10 +13,10 @@ import os
 import sys
 from typing import Any, Dict, List
 
-from .config import Config
+from .config import Config, in_bot_turn
 from .keepass import CredentialError, KeePass
 
-NOTIFY_SETTING = "ALFRED_CREDENTIALS_NOTIFY"
+NOTIFY_SETTING = "CONSIGLIERI_CREDENTIALS_NOTIFY"
 
 
 class CredsError(Exception):
@@ -24,12 +24,12 @@ class CredsError(Exception):
 
 
 def _in_bot_turn() -> bool:
-    return bool(os.environ.get("ALFRED_BOT_ID", "").strip("0 ") or os.environ.get("ALFRED_BOT_KEY", "").strip())
+    return in_bot_turn()
 
 
 def owner_only(action: str) -> None:
-    """Credentials are added and given out only by the user on the machine. A bot's agent always has ALFRED_BOT_ID
-    and ALFRED_BOT_KEY set; Claude Code's rules deny these subcommands to every bot as well."""
+    """Credentials are added and given out only by the user on the machine. A bot's agent always has CONSIGLIERI_BOT_ID
+    and CONSIGLIERI_BOT_KEY set; Claude Code's rules deny these subcommands to every bot as well."""
     if _in_bot_turn():
         raise CredsError("`alfred creds %s` is for the user, on the machine; a bot never runs it" % action)
 

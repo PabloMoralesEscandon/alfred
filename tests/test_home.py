@@ -25,7 +25,7 @@ class HomeTests(unittest.TestCase):
 
         # The launcher is what every bot has on PATH: inside a bot's turn it works on that bot's directory.
         record, bot_config = self.sandbox.add_bot()
-        env = {"PATH": os.environ["PATH"], "ALFRED_BOT_ID": str(record.bot_id)}
+        env = {"PATH": os.environ["PATH"], "CONSIGLIERI_BOT_ID": str(record.bot_id)}
         output = subprocess.run([str(launcher), "skills"], stdout=subprocess.PIPE, text=True, check=True, env=env)
         self.assertIn('"alfred:extensions"', output.stdout)
         # Outside a bot's turn there is no agent whose skills these would be.
@@ -110,7 +110,7 @@ class HomeTests(unittest.TestCase):
         self.assertEqual([skill.name for skill in local], ["rough-notes"])
 
     def test_autosave_commits_a_bots_directory_and_never_the_home(self) -> None:
-        self.sandbox.environ["ALFRED_AUTOSAVE"] = "1"
+        self.sandbox.environ["CONSIGLIERI_AUTOSAVE"] = "1"
         _, bot_config = self.sandbox.add_bot()
         self.assertFalse(home.autosave(bot_config, "nothing changed"))
         (bot_config.memory_dir / "MEMORY.md").write_text("- new fact\n", encoding="utf-8")

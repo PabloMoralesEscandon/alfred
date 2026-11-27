@@ -82,7 +82,7 @@ class RegistryTests(BotsTestCase):
         self.assertIsNone(self.registry.token(5000000001))
 
     def test_the_token_stays_out_of_every_git_history(self) -> None:
-        self.sandbox.environ["ALFRED_AUTOSAVE"] = "1"
+        self.sandbox.environ["CONSIGLIERI_AUTOSAVE"] = "1"
         home.prepare(self.config)
         self.add_bot()
         self.registry.set_token(5000000001, TOKEN)
@@ -135,7 +135,7 @@ class ConfigTests(BotsTestCase):
         self.assertEqual(self.config.memory_dir, self.config.home / "memory")  # the main home is unchanged
 
     def test_settings_override_env_and_unset_ones_fall_back(self) -> None:
-        self.sandbox.environ.update(ALFRED_CLAUDE_MODEL="opus", ALFRED_CLAUDE_EFFORT="high", ALFRED_WORKDIR="/tmp")
+        self.sandbox.environ.update(CONSIGLIERI_CLAUDE_MODEL="opus", CONSIGLIERI_CLAUDE_EFFORT="high", CONSIGLIERI_WORKDIR="/tmp")
         self.add_bot(settings={"model": "sonnet"})
         config = self.registry.config_for(5000000001)
         self.assertEqual(config.claude_model, "sonnet")
@@ -559,7 +559,7 @@ class BlacklistTests(BotsTestCase):
 
 class WorkspaceTests(BotsTestCase):
     def test_prepare_writes_manual_settings_and_memory(self) -> None:
-        self.sandbox.environ["ALFRED_AUTOSAVE"] = "1"
+        self.sandbox.environ["CONSIGLIERI_AUTOSAVE"] = "1"
         self.add_bot(settings={"task": "Summarize new papers on protein folding.", "workdir": str(self.work)})
         config = self.registry.config_for(5000000001)
         folder = bots.prepare_workspace(config)
@@ -630,7 +630,7 @@ class AgentIsolationTests(BotsTestCase):
         workspace = self.registry.workspace(5000000001)
         self.assertEqual(os.path.realpath((self.sandbox.root / "cwd.txt").read_text().strip()), os.path.realpath(str(workspace)))
         env = dict(line.split("=", 1) for line in (self.sandbox.root / "env.txt").read_text().splitlines() if "=" in line)
-        self.assertEqual((env["ALFRED_BOT_ID"], env["ALFRED_CHAT_ID"], env["ALFRED_WORKDIR"]), ("5000000001", "99", str(self.work)))
+        self.assertEqual((env["CONSIGLIERI_BOT_ID"], env["CONSIGLIERI_CHAT_ID"], env["CONSIGLIERI_WORKDIR"]), ("5000000001", "99", str(self.work)))
         self.assertEqual(env["CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD"], "1")
         self.assertNotIn("TELEGRAM_BOT_TOKEN", env)
         self.assertEqual(self.registry.config_for(5000000001).sessions_path.exists(), True)

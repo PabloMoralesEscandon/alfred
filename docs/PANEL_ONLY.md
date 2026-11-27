@@ -22,7 +22,7 @@ creación; cada usuario decide sus agentes».
 |---|---|---|---|
 | 1 | `agent.py`, `Agent` | Se podía crear con la configuración del panel (bot 0) y trabajar en el home | `Agent` rechaza la configuración del panel (`NoAgent`). Solo un bot tiene agente |
 | 2 | `agent.py`, `_prepare_workspace` | Para el bot 0 refrescaba `SHARED_MEMORY.md` en el home | Eliminado: siempre prepara el directorio del bot |
-| 3 | `agent.py`, `_environment` | `ALFRED_WORKSPACE` solo para bots | Siempre: todo agente es un bot |
+| 3 | `agent.py`, `_environment` | `CONSIGLIERI_WORKSPACE` solo para bots | Siempre: todo agente es un bot |
 | 4 | `telegram_bot.py`, `TelegramBot` | `record=None` era «el bot principal», con `/help` «I'm Alfred», `title` «Alfred» y su propio planificador (`_post_init`/`_post_shutdown`, `run_polling`) | Exige un bot registrado y su token. Eliminados la rama principal, el planificador propio y el arranque suelto |
 | 5 | `home.py`, `bootstrap` | Escribía `CLAUDE.md`, `AGENTS.md`, `SOUL.md`, `MEMORY.md`, `memory/`, `.claude/skills/`, `extensions/` y `inbox/` en el home, iniciaba un repo git, importaba el diseño de la primera versión y retiraba skills sembradas | Sustituido por `home.prepare`: solo `state/`, el lanzador `bin/alfred` y la memoria compartida (fuera del home). Eliminados la importación antigua, la memoria de un fichero y la retirada de skills |
 | 6 | `home.autosave` | Hacía commit del home tras cada turno del agente principal | Nunca hace commit del home; solo del directorio de un bot |
@@ -32,7 +32,7 @@ creación; cada usuario decide sus agentes».
 | 10 | `bots.py`, `other_agents` | El agente principal era un «otro agente» (`OtherAgent("Alfred", home, main=True)`) | Eliminado. Los «otros agentes» son solo bots |
 | 11 | `bots.py`, `blacklist` | Con acceso entre agentes se abrían la memoria y las herramientas del home | El home queda cerrado siempre, a todos los niveles y también con acceso entre agentes, incluidas sus transcripciones de Claude Code |
 | 12 | `extensions.held_back` | El bot 0 cargaba hooks y servidores MCP de sus extensiones sin límites | Sin excepción: las mismas reglas para todos |
-| 13 | `cli.py`, `resolve_bot_id` | Sin `--bot` ni `ALFRED_BOT_ID`, el bot 0; alias `main` y `alfred` | Sin alias. `send`, `schedule`, `event` y `usage-alert` exigen un bot; `skills` y `ext`, el turno de un bot |
+| 13 | `cli.py`, `resolve_bot_id` | Sin `--bot` ni `CONSIGLIERI_BOT_ID`, el bot 0; alias `main` y `alfred` | Sin alias. `send`, `schedule`, `event` y `usage-alert` exigen un bot; `skills` y `ext`, el turno de un bot |
 | 14 | `cli.py`, `chat` | Sin `--bot` hablaba con el agente principal en el home | `--bot` obligatorio |
 | 15 | `cli.py`, `screenshot` | Guardaba en `~/.alfred/outbox` | En el `outbox/` del bot |
 | 16 | `cli.py`, `init`, `browser-setup`, `service install` | Llamaban a `bootstrap` | Llaman a `home.prepare` |
@@ -48,7 +48,7 @@ tools yet». Ambos corregidos.
 
 ## 2. Qué se conserva: el home como estado del panel
 
-`~/.alfred` (o `ALFRED_HOME`) sigue existiendo, pero no tiene agente. Es solo estado del sistema y está
+`~/.alfred` (o `CONSIGLIERI_HOME`) sigue existiendo, pero no tiene agente. Es solo estado del sistema y está
 siempre fuera del alcance de los bots: `Read` y `Edit` denegados en todo el home, reglas de shell sobre sus
 partes privadas y `denyRead`/`denyWrite` en el sandbox, con o sin acceso entre agentes.
 
@@ -168,7 +168,7 @@ claude -p --output-format json --tools "" --no-session-persistence --setting-sou
   proyecto. Las fuentes `project,local` dejan fuera `~/.claude/settings.json` y el `CLAUDE.md` de usuario.
   No se usa `--bare` porque exige `ANTHROPIC_API_KEY` y no sirve con la sesión de suscripción.
 - El entorno no lleva las variables de una sesión padre de Claude Code, ni `TELEGRAM_BOT_TOKEN`, ni
-  ninguna `ALFRED_*`.
+  ninguna `CONSIGLIERI_*`.
 - El prompt de sistema es fijo. Pide convertir la descripción en **rol más personalidad**, con la
   estructura de la plantilla (el ejemplo lleva un rol de muestra) y como mucho unos 2.500 caracteres
   (antes 1.500). Ya no prohíbe la función. Sigue prohibiendo, sin cambios, otorgar, ampliar o mencionar
@@ -184,12 +184,12 @@ claude -p --output-format json --tools "" --no-session-persistence --setting-sou
   guarda sin Accept o sin el texto editado.
 - **Coste:**
   - Una llamada por intento, cuente o falle.
-  - Tope de `ALFRED_SOUL_ATTEMPTS` por usuario y hora (5 por defecto). Se guarda en memoria, así que un
+  - Tope de `CONSIGLIERI_SOUL_ATTEMPTS` por usuario y hora (5 por defecto). Se guarda en memoria, así que un
     reinicio pone la cuenta a cero.
   - Si el monitor de uso está activo y su última lectura de sesión o semanal es de al menos el 90 %, avisa
     («Little plan usage left…»).
-  - Modelo y esfuerzo configurables: `ALFRED_SOUL_MODEL` (por defecto `haiku`) y `ALFRED_SOUL_EFFORT`
-    (por defecto `low`). Tiempo máximo: `ALFRED_SOUL_TIMEOUT`, 120 s por defecto.
+  - Modelo y esfuerzo configurables: `CONSIGLIERI_SOUL_MODEL` (por defecto `haiku`) y `CONSIGLIERI_SOUL_EFFORT`
+    (por defecto `low`). Tiempo máximo: `CONSIGLIERI_SOUL_TIMEOUT`, 120 s por defecto.
 - **Errores** con mensaje claro: límite alcanzado, sin red, Claude Code sin sesión iniciada, binario no
   disponible, tiempo agotado y borrador inválido. Tras un error se vuelve a pedir la descripción.
 - **Log:** solo metadatos (usuario, bot, resultado, duración, caracteres de entrada y de salida); nunca el
@@ -274,11 +274,11 @@ Quedan solo como texto, a propósito:
    escribe desde el panel, y todos los bots de todos los usuarios la leen. ¿Una global, una por usuario
    (por ejemplo `~/.alfred-shared/<user id>/memory`) o una global más una por usuario?
 2. **Panel de auditoría con varios usuarios.** Ahora cada usuario ve solo la de sus bots. ¿Debe haber un
-   administrador (por ejemplo el primero de `ALFRED_ALLOWED_USERS`) que vea la auditoría global?
+   administrador (por ejemplo el primero de `CONSIGLIERI_ALLOWED_USERS`) que vea la auditoría global?
 3. **Personalidad base con varios usuarios.** Hoy es una sola y cualquier usuario permitido puede
    cambiarla, lo que afecta a los bots nuevos de los demás. ¿Global, por usuario o solo un administrador?
 4. **Monitor de uso.** Mide una sola cuenta de Claude, la de la máquina, compartida por todos los bots de
-   todos los usuarios. Sus avisos van a `ALFRED_USAGE_CHAT_ID`. ¿Basta así?
+   todos los usuarios. Sus avisos van a `CONSIGLIERI_USAGE_CHAT_ID`. ¿Basta así?
 5. **Recrear a Alfred como bot** (§6): si se hace, con qué preset, qué memoria se mueve y qué pasa
    después con lo que queda del antiguo agente en `~/.alfred`.
 6. **Tope de borradores en memoria:** ¿persistirlo en `state/` para que un reinicio no lo ponga a cero?
