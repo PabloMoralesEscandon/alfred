@@ -181,7 +181,7 @@ nothing else. Grant more when you create it or later with `/bot perm`:
 | `shared` | `off` | Write the shared memory. Reading it is always allowed; no preset turns this on. Every other agent reads what it writes |
 | `usage` | `on` | **Used only with your express permission**: on by default, like `schedule`, but the bot runs these commands only when you ask it to check the usage, give it a rule about usage, or say yes when it asks; otherwise it asks first (its manual and the `alfred:usage` skill say so; `usage off` removes the tool). Ask the usage monitor for a verdict (`alfred usage running_low`, `alfred usage check '<condition>'`, `alfred usage forecast`), read the plan usage (`alfred usage`), set usage alerts that wake it (`alfred usage-alert`, `usage-alert waste`), and put a usage condition on a scheduled item so it is not delivered when the limits are nearly used (`alfred schedule add --skip-if-low`, `--skip-if`, `--only-if`, `--only-if-waste`). The questions and the conditions on scheduled items work with `ALFRED_USAGE_MONITOR` off; the report and the alerts need it on, and the panel says so. See the `alfred:usage` skill and [docs/USAGE_MONITOR_RESEARCH.md](docs/USAGE_MONITOR_RESEARCH.md) |
 | `calendar` | `on` | Read your Google Calendar and add events to it, through the Google Calendar connector of your claude.ai account (connect it once in claude.ai → Settings → Connectors). On by default for every bot and preset; turn it off per bot with `/bot perm <bot> calendar off`. It works with `mcp` off, and `mcp on` alone does not give it. The bot adds an event only when you asked for it or said yes. See the `alfred:calendar` skill and [docs/CALENDAR.md](docs/CALENDAR.md) |
-| `creds` | `off` | Log in by itself with the credentials you grant it. They live in KeePassXC; its browser extension, loaded in the bot's own browser (`ALFRED_BROWSER=bot`), fills them in, only on each credential's sites, and the bot never sees them. You add them and grant each one to each bot on the machine (`alfred creds add`, `alfred creds grant <name> <bot>`), never through chat and never through a bot admin. In no preset. See [Credentials](#credentials) and [docs/CREDENTIALS.md](docs/CREDENTIALS.md) |
+| `creds` | `off` | Log in by itself with the credentials you grant it. They live in KeePassXC; its browser extension, loaded in the bot's own browser (`ALFRED_BROWSER=bot`), fills them in, only on each credential's sites, and the bot never sees them. You add them on the machine (`alfred creds add`, which asks for the password there) and grant each one to each bot from the panel (`/bot` → a bot → **Credentials**) or the machine (`alfred creds grant <name> <bot>`), never through a bot's chat and never through a bot admin. In no preset. See [Credentials](#credentials) and [docs/CREDENTIALS.md](docs/CREDENTIALS.md) |
 | `soul` | `off` | Edit its own `SOUL.md`: its role and mission as well as its tone, so what it does and how, never what it may do. No preset turns this on, and it never opens another bot's |
 | `allow`, `deny` | none | Extra Claude Code permission rules, separated by `;` |
 
@@ -307,15 +307,17 @@ way.
 brew install --cask keepassxc                       # or your system's package; quit any other KeePassXC you run
 venv/bin/alfred creds setup                          # the store, in ~/.alfred/state/credentials
 venv/bin/alfred creds add tum --url moodle.tum.de --url login.tum.de --username ge12abc --totp
-venv/bin/alfred creds grant tum @uni_bot             # and /bot perm uni_bot creds on
+venv/bin/alfred creds grant tum @uni_bot             # or from the panel; and /bot perm uni_bot creds on
 venv/bin/alfred creds list
 venv/bin/alfred creds revoke tum @uni_bot
 ```
 
 `add` asks for the password (and the TOTP key, from the site's QR code) at the terminal, without echo; there is no
 other way in. Each credential is its own KeePassXC database, and a bot's browser only gets answers from the ones
-granted to it. In Telegram, `/bot` → **My bots** → a bot → **Credentials** lists what a bot has and withdraws any of
-them (granting is only done on the machine). KeePassXC runs while the bots work; Consiglieri starts it when needed. See
+granted to it. In Telegram, `/bot` → **My bots** → a bot → **Credentials** lists what a bot has, grants it any other
+credential and withdraws any of them, each after a confirmation, with an audit line and a notice in the bot's chat.
+The store is shared by the whole machine: with more than one panel user, only those listed in
+`ALFRED_CREDENTIALS_GRANTERS` (numeric Telegram ids) may grant from Telegram (`none` turns it off for everyone). KeePassXC runs while the bots work; Consiglieri starts it when needed. See
 [docs/CREDENTIALS.md](docs/CREDENTIALS.md) for how it works, what it protects and what it does not.
 
 Whichever browser:

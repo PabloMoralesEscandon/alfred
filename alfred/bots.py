@@ -93,7 +93,7 @@ PERMISSIONS = (
                     "the report and the alerts need ALFRED_USAGE_MONITOR on"),
     ("calendar", "on", "read and create events in your Google Calendar (the claude.ai connector), even with mcp off"),
     ("creds", "off", "log in with the credentials you grant it: KeePassXC fills them into its own browser, only on their "
-                     "sites, and it never sees them; you grant each one on the machine (alfred creds grant), never a bot admin"),
+                     "sites, and it never sees them; you grant each one (/bot → Credentials, or alfred creds grant), never a bot admin"),
     ("shared", "off", "write the shared memory every agent reads (reading it is always allowed)"),
     ("soul", "off", "edit its own SOUL.md: its role and mission as well as its tone, so what it does; never what it may do"),
     ("allow", "", "extra Claude Code allow rules, separated by ;"),

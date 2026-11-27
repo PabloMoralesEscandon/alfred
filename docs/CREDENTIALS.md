@@ -79,7 +79,7 @@ venv/bin/pip install -e '.[browser]' && venv/bin/alfred browser install
 echo ALFRED_BROWSER=bot >> ~/.alfred/.env      # todos los bots; o solo uno: /bot set <bot> browser bot
 venv/bin/alfred creds setup
 venv/bin/alfred creds add tum --url moodle.tum.de --url login.tum.de --username ge12abc --totp
-venv/bin/alfred creds grant tum @uni_bot            # y /bot perm uni_bot creds on
+venv/bin/alfred creds grant tum @uni_bot            # o desde el panel; y /bot perm uni_bot creds on
 venv/bin/alfred creds list | revoke | remove | status | start | stop
 ```
 
@@ -89,9 +89,12 @@ venv/bin/alfred creds list | revoke | remove | status | start | stop
 - Para un SSO, todas las URLs del recorrido: el sitio y el proveedor de identidad.
 - `grant` y `revoke` dejan una línea en la auditoría (`/bot audit`) y un aviso en el chat del bot, y dicen qué le falta
   al bot (el permiso `creds`, el de navegador o `ALFRED_BROWSER=bot`).
-- Desde el panel de Telegram (`/bot` → **My bots** → un bot) también se puede elegir el navegador (**Browser**) y ver o
-  retirar sus credenciales (**Credentials**, con confirmación, auditoría y aviso); concederlas solo se hace en la
-  máquina.
+- Desde el panel de Telegram (`/bot` → **My bots** → un bot) también se puede elegir el navegador (**Browser**) y ver,
+  conceder o retirar sus credenciales (**Credentials**, cada cambio con confirmación, auditoría y aviso). Añadir una
+  credencial (la contraseña) sigue siendo solo en la máquina.
+- El almacén es de toda la máquina, no de cada usuario del panel. Con un solo usuario del panel, ese puede conceder
+  desde Telegram; con varios, solo los ids de `ALFRED_CREDENTIALS_GRANTERS` (`none`: nadie). Sin esto, otro usuario
+  del panel podría darle a su bot las credenciales del dueño.
 
 El bot: `alfred creds list` (sus credenciales: nombre, usuario, sitios, si hay TOTP; nunca el secreto) y su navegador.
 La skill `web-logins` le dice qué hacer: cargar la página de inicio de sesión, comprobar en la instantánea que el
@@ -128,6 +131,8 @@ algo falla, pasárselo al usuario (con `alfred browser show` para que tenga vent
 | Un bot usa las credenciales de otro | KeePassXC no le responde: su identidad no está en esas bases (probado). Su orden `alfred browser` no alcanza el navegador del otro |
 | Usar mal la credencial en el sitio bueno | No lo impide nada, igual que con una sesión abierta. Mitigan: credenciales de mínimo alcance, la skill (solo para la tarea del usuario) y la auditoría |
 | Retirar una credencial | Efecto en la siguiente carga de página. Una sesión ya abierta sigue hasta que caduque o se cierre |
+| Alguien con tu cuenta de Telegram | Puede conceder tus credenciales a tus bots (no ver las contraseñas ni añadir otras). Lo verías en `/bot audit` y en el aviso del chat del bot. Si no lo quieres, `ALFRED_CREDENTIALS_GRANTERS=none` deja conceder solo en la máquina |
+| Otro usuario del panel | No ve ni toca tus bots. Solo concede desde Telegram si está en `ALFRED_CREDENTIALS_GRANTERS` |
 
 **Lo que no protege**, con un bot de **shell abierta** (`shell full` o `bypassPermissions`), que corre como el usuario:
 
