@@ -13,16 +13,16 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from unittest import mock
 
-from alfred import cli, home, usage_alerts, usage_monitor
-from alfred.bots import BotRecord, BotRegistry
-from alfred.scheduler import KIND_EVENT, SchedulerStore
-from alfred.usage_alerts import AlertStore, ConditionError, parse
-from alfred.usage_monitor import (ClaudeUsageSource, MonitorSettings, Reading, SpareWeeklyRule, UsageHistory,
+from consiglieri import cli, home, usage_alerts, usage_monitor
+from consiglieri.bots import BotRecord, BotRegistry
+from consiglieri.scheduler import KIND_EVENT, SchedulerStore
+from consiglieri.usage_alerts import AlertStore, ConditionError, parse
+from consiglieri.usage_monitor import (ClaudeUsageSource, MonitorSettings, Reading, SpareWeeklyRule, UsageHistory,
                                   UsageMonitor, UsageSource, Window)
 from fakes import Sandbox
 
 try:
-    from alfred.telegram_bot import BotPool
+    from consiglieri.telegram_bot import BotPool
     from test_panel import OWNER, TestPool, token_for
 except ImportError:  # pragma: no cover
     BotPool = None  # type: ignore

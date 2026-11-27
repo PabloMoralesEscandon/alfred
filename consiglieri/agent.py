@@ -27,7 +27,7 @@ from .backends import (
 )
 from .config import Config
 
-log = logging.getLogger("alfred.agent")
+log = logging.getLogger("consiglieri.agent")
 
 Snapshot = Tuple[Set[str], Dict[str, str], Dict[str, str]]  # local skill names, memory, extensions
 

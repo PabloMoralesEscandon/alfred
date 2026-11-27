@@ -10,10 +10,10 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, List
 from unittest import mock
 
-from alfred import bots, home, usage_monitor
-from alfred.bots import BotRecord
-from alfred.config import Config
-from alfred.usage_monitor import (
+from consiglieri import bots, home, usage_monitor
+from consiglieri.bots import BotRecord
+from consiglieri.config import Config
+from consiglieri.usage_monitor import (
     Alert,
     ClaudeUsageSource,
     MonitorSettings,
@@ -28,7 +28,7 @@ from alfred.usage_monitor import (
 from fakes import Sandbox
 
 try:
-    from alfred.telegram_bot import BotPool
+    from consiglieri.telegram_bot import BotPool
     from test_panel import OWNER, TestPool, token_for
 except ImportError:  # pragma: no cover
     BotPool = None  # type: ignore
@@ -62,7 +62,7 @@ class SkeletonTestCase(unittest.TestCase):
         # A stand-in claude that would answer /usage, so any call to it shows up in calls().
         self.sandbox.fake_cli("claude", {"fresh": [{"type": "result", "is_error": False, "result": REPORT}]})
         self.logs = Captured()
-        logger = logging.getLogger("alfred.usage_monitor")
+        logger = logging.getLogger("consiglieri.usage_monitor")
         logger.addHandler(self.logs)
         previous = logger.level
         logger.setLevel(logging.DEBUG)

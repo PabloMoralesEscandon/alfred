@@ -8,8 +8,8 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from unittest import mock
 
-from alfred import cli, service
-from alfred.config import REPO_ROOT
+from consiglieri import cli, service
+from consiglieri.config import REPO_ROOT
 from fakes import Sandbox, claude_lines
 
 
@@ -36,16 +36,16 @@ class ServiceTests(unittest.TestCase):
     def test_launchd_plist_restarts_forever_and_logs_to_the_home(self) -> None:
         plist = plistlib.loads(service.launchd_plist(self.config))
         self.assertEqual(plist["Label"], "com.alfred.bot")
-        self.assertEqual(plist["ProgramArguments"], [sys.executable, "-m", "alfred", "run"])
+        self.assertEqual(plist["ProgramArguments"], [sys.executable, "-m", "consiglieri", "run"])
         self.assertIs(plist["KeepAlive"], True)
         self.assertIs(plist["RunAtLoad"], True)
-        self.assertEqual(plist["StandardErrorPath"], str(self.config.state_dir / "alfred.log"))
+        self.assertEqual(plist["StandardErrorPath"], str(self.config.state_dir / "consiglieri.log"))
         self.assertEqual(plist["EnvironmentVariables"]["ALFRED_HOME"], str(self.config.home))
         self.assertNotIn("TELEGRAM_BOT_TOKEN", plist["EnvironmentVariables"])  # secrets stay in .env
 
     def test_systemd_unit(self) -> None:
         unit = service.systemd_unit(self.config)
-        self.assertIn('ExecStart="%s" "-m" "alfred" "run"' % sys.executable, unit)
+        self.assertIn('ExecStart="%s" "-m" "consiglieri" "run"' % sys.executable, unit)
         self.assertIn("Restart=always", unit)
         self.assertIn('Environment="ALFRED_HOME=%s"' % self.config.home, unit)
         self.assertIn("WantedBy=default.target", unit)

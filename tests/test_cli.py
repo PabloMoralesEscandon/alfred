@@ -7,8 +7,8 @@ import unittest
 from contextlib import redirect_stdout
 from unittest import mock
 
-from alfred import cli
-from alfred.text import split_message
+from consiglieri import cli
+from consiglieri.text import split_message
 from fakes import Sandbox, claude_lines
 
 
@@ -63,17 +63,17 @@ class CliTests(unittest.TestCase):
         self.assertIn("ALFRED_CHROME_PROFILE", refused["error"])
 
         os.environ["ALFRED_CHROME_PROFILE"] = "Alfred"
-        with mock.patch("alfred.cli.subprocess.Popen") as popen, mock.patch("alfred.cli.sys.platform", "darwin"):
+        with mock.patch("consiglieri.cli.subprocess.Popen") as popen, mock.patch("consiglieri.cli.sys.platform", "darwin"):
             code, opened = self.run_json("chrome")
         self.assertEqual((code, opened["profile"]), (0, "Alfred"))
         self.assertEqual(popen.call_args[0][0], ["open", "-na", "Google Chrome", "--args", "--profile-directory=Alfred"])
 
-        with mock.patch("alfred.cli.sys.platform", "linux"):
+        with mock.patch("consiglieri.cli.sys.platform", "linux"):
             self.sandbox.environ.update(ALFRED_CHROME_PROFILE="Alfred", ALFRED_CHROME_APP="chromium")
             self.assertEqual(cli.chrome_command(self.sandbox.config), ["chromium", "--profile-directory=Alfred"])
 
     def test_event_is_queued_for_the_chat_and_due_at_once(self) -> None:
-        from alfred.scheduler import SchedulerStore
+        from consiglieri.scheduler import SchedulerStore
 
         code, queued = self.run_json("event", "The", "agent in mus-solver", "finished")
         self.assertEqual((code, queued["ok"]), (0, True))

@@ -4,8 +4,8 @@ import asyncio
 import os
 import unittest
 
-from alfred.backends import BackendError, create_backend
-from alfred.backends.claude import describe_tool_use
+from consiglieri.backends import BackendError, create_backend
+from consiglieri.backends.claude import describe_tool_use
 from fakes import CLAUDE_SESSION_GONE, Sandbox, claude_lines
 
 

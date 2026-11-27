@@ -10,7 +10,7 @@ import sys
 import unittest
 from typing import Any, Dict, List
 
-from alfred import soul, soul_writer, usage_monitor
+from consiglieri import soul, soul_writer, usage_monitor
 from fakes import Sandbox
 
 try:
@@ -163,7 +163,7 @@ class WriterTests(unittest.TestCase):
 
     def test_the_log_has_metadata_only(self) -> None:
         self.sandbox.fake_cli("claude", {"fresh": result(DRAFT)})
-        with self.assertLogs("alfred.soul", level="INFO") as logs:
+        with self.assertLogs("consiglieri.soul", level="INFO") as logs:
             self.write("my very private description about my ex")
         joined = "\n".join(logs.output)
         self.assertIn("by user=%d" % OWNER, joined)

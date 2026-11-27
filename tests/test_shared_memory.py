@@ -6,9 +6,9 @@ import stat
 import unittest
 from pathlib import Path
 
-from alfred import shared_memory
-from alfred.config import Config
-from alfred.shared_memory import SharedMemoryError
+from consiglieri import shared_memory
+from consiglieri.config import Config
+from consiglieri.shared_memory import SharedMemoryError
 from fakes import Sandbox
 
 

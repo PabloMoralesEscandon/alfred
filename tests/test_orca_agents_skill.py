@@ -10,7 +10,7 @@ import sys
 import unittest
 from typing import Any, Dict, List, Optional
 
-from alfred import extensions, home
+from consiglieri import extensions, home
 from fakes import Sandbox
 
 # Replays one canned `orca worktree ps --json` reply per call; the last one repeats.

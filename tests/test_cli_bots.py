@@ -10,9 +10,9 @@ from contextlib import redirect_stdout
 from typing import Any, Dict, List
 from unittest import mock
 
-from alfred import cli, home
-from alfred.bots import BotRecord, BotRegistry
-from alfred.scheduler import SchedulerStore
+from consiglieri import cli, home
+from consiglieri.bots import BotRecord, BotRegistry
+from consiglieri.scheduler import SchedulerStore
 from fakes import Sandbox
 
 RESEARCH = 5000000001
@@ -64,7 +64,7 @@ class BotCliTests(unittest.TestCase):
         self.addCleanup(patcher.stop)
 
     def as_bot(self, bot_id: int, thread: str = "") -> None:
-        from alfred.bots import bot_key
+        from consiglieri.bots import bot_key
 
         environ = dict(self.sandbox.environ, ALFRED_BOT_ID=str(bot_id), ALFRED_CHAT_ID="99", ALFRED_USER_ID="99",
                        ALFRED_BOT_KEY=bot_key(self.sandbox.config, bot_id, create=True),

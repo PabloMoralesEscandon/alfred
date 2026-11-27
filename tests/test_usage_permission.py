@@ -11,12 +11,12 @@ from contextlib import redirect_stderr, redirect_stdout
 from typing import Any, Dict, List, Tuple
 from unittest import mock
 
-from alfred import bots, cli, home, presets
-from alfred.bots import BotRecord, BotRegistry
+from consiglieri import bots, cli, home, presets
+from consiglieri.bots import BotRecord, BotRegistry
 from fakes import Sandbox
 
 try:
-    from alfred.telegram_bot import BotPool  # noqa: F401  (test_panel needs it to import)
+    from consiglieri.telegram_bot import BotPool  # noqa: F401  (test_panel needs it to import)
     from test_panel import OWNER, RESEARCH, PanelHarness
 except ImportError:  # pragma: no cover
     PanelHarness = unittest.TestCase  # type: ignore

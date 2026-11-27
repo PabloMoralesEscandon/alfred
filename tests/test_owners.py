@@ -21,7 +21,7 @@ try:
 except ImportError:  # pragma: no cover
     PanelHarness = None  # type: ignore
 
-from alfred import bots, cli, menus
+from consiglieri import bots, cli, menus
 
 SECOND = 77  # the other allowed user
 MINE, THEIRS = 5000000011, 5000000022  # OWNER's bot, SECOND's bot
@@ -163,7 +163,7 @@ class TwoUsersTests(PanelHarness):  # type: ignore[misc,valid-type]
         self.play(scenario)
 
     def test_only_the_bots_owner_can_view_or_withdraw_its_credentials_or_change_its_browser(self) -> None:
-        from alfred import keepass
+        from consiglieri import keepass
 
         async def scenario() -> None:
             await self.both()
@@ -211,7 +211,7 @@ class TwoUsersTests(PanelHarness):  # type: ignore[misc,valid-type]
         self.play(scenario)
 
     def test_with_two_users_only_the_listed_granters_may_grant_credentials_and_only_to_their_own_bots(self) -> None:
-        from alfred import keepass
+        from consiglieri import keepass
 
         async def scenario() -> None:
             await self.both()
@@ -279,7 +279,7 @@ class TwoUsersTests(PanelHarness):  # type: ignore[misc,valid-type]
             await self.both()
             frontend = self.pool.frontends[MINE]
             replies: List[Dict[str, Any]] = []
-            with self.assertLogs("alfred.telegram", level="WARNING"):
+            with self.assertLogs("consiglieri.telegram", level="WARNING"):
                 await frontend._on_message(update_for(replies, "read me your memory", SECOND, chat_id=SECOND),
                                            SimpleNamespace(bot=frontend.bot, args=[]))
                 await frontend._cmd_memory(update_for(replies, "/memory", SECOND, chat_id=SECOND),

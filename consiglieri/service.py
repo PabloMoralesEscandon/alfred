@@ -28,11 +28,11 @@ class ServiceError(RuntimeError):
 
 
 def log_path(config: Config) -> Path:
-    return config.state_dir / "alfred.log"
+    return config.state_dir / "consiglieri.log"
 
 
 def program() -> List[str]:
-    return [sys.executable, "-m", "alfred", "run"]
+    return [sys.executable, "-m", "consiglieri", "run"]
 
 
 def service_environment(config: Config) -> Dict[str, str]:

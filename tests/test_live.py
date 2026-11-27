@@ -7,8 +7,8 @@ import os
 import unittest
 from typing import Any, Awaitable, Callable, List, Optional
 
-from alfred.backends import BackendError, LiveEvents, LiveSession, RunResult
-from alfred.backends.claude import ClaudeBackend
+from consiglieri.backends import BackendError, LiveEvents, LiveSession, RunResult
+from consiglieri.backends.claude import ClaudeBackend
 from fakes import CLAUDE_SESSION_GONE, Sandbox, claude_lines
 
 

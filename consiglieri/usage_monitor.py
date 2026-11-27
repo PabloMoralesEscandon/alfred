@@ -46,7 +46,7 @@ try:  # pragma: no cover - always there on macOS and Linux
 except ImportError:  # pragma: no cover
     fcntl = None  # type: ignore
 
-log = logging.getLogger("alfred.usage_monitor")
+log = logging.getLogger("consiglieri.usage_monitor")
 
 ENABLE_SETTING = "ALFRED_USAGE_MONITOR"
 

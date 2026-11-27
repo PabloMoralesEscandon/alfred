@@ -7,9 +7,9 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from alfred import usage_forecast as uf
-from alfred.usage_forecast import HoursError, estimate_share, forecast, parse_hours, projected
-from alfred.usage_monitor import Reading, Window
+from consiglieri import usage_forecast as uf
+from consiglieri.usage_forecast import HoursError, estimate_share, forecast, parse_hours, projected
+from consiglieri.usage_monitor import Reading, Window
 
 NOW = datetime(2026, 11, 12, 10, 0, tzinfo=timezone.utc)  # a Thursday
 

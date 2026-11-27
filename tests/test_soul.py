@@ -7,8 +7,8 @@ import unittest
 from types import SimpleNamespace
 from typing import Any, Dict, List
 
-from alfred import bots, presets, soul
-from alfred.agent import Agent
+from consiglieri import bots, presets, soul
+from consiglieri.agent import Agent
 from fakes import Sandbox, claude_lines
 
 try:
@@ -66,7 +66,7 @@ class SoulFileTests(unittest.TestCase):
         record, config = self.sandbox.add_bot(bot_id=545454, username="old_bot", name="Old",
                                               settings={"task": "Summarize new papers on protein folding."})
         soul.write(config.workspace, "# Personality\n\n## Tone\nCalm.")
-        from alfred import bots as bots_module
+        from consiglieri import bots as bots_module
 
         bots_module.prepare_workspace(config)
         self.assertEqual(soul.read(config.workspace), "# Personality\n\n## Tone\nCalm.\n")  # untouched
@@ -124,7 +124,7 @@ class SoulFileTests(unittest.TestCase):
         self.assertIn("edit its own SOUL.md (role, mission and personality)", bots.permission_summary(record, for_owner=True))
         self.assertIn("own role and personality edits", presets.name_of(record.permissions))  # Custom, from Power
         # The warning says it now reaches its mission, not only its tone.
-        from alfred import menus
+        from consiglieri import menus
 
         warning = " ".join(menus.permission_warnings(record))
         self.assertIn("includes its mission and scope, not only its tone", warning)

@@ -5,7 +5,7 @@ from __future__ import annotations
 import unittest
 from unittest import mock
 
-from alfred import bots, presets
+from consiglieri import bots, presets
 
 
 class PresetDataTests(unittest.TestCase):

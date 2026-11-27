@@ -18,11 +18,11 @@ from datetime import timedelta
 from typing import Any, Dict, Optional, Tuple
 from unittest import mock
 
-from alfred import cli, home, scheduler, usage_gate
-from alfred.bots import BotRecord, BotRegistry
-from alfred.scheduler import SchedulerStore
-from alfred.usage_gate import Decision, Gate, GateError
-from alfred.usage_monitor import Reading
+from consiglieri import cli, home, scheduler, usage_gate
+from consiglieri.bots import BotRecord, BotRegistry
+from consiglieri.scheduler import SchedulerStore
+from consiglieri.usage_gate import Decision, Gate, GateError
+from consiglieri.usage_monitor import Reading
 from fakes import Sandbox
 from test_usage_alerts import FixedSource
 from test_usage_questions import NOW, reading

@@ -4,9 +4,9 @@ import asyncio
 import json
 import unittest
 
-from alfred import bots, extensions, home, shared_memory
-from alfred.agent import Agent, Listener, NoAgent, SessionStore
-from alfred.backends import BackendError
+from consiglieri import bots, extensions, home, shared_memory
+from consiglieri.agent import Agent, Listener, NoAgent, SessionStore
+from consiglieri.backends import BackendError
 from fakes import Sandbox, claude_lines
 
 CODEX_REPLY = [

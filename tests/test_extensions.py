@@ -10,9 +10,9 @@ import sys
 import unittest
 from pathlib import Path
 
-from alfred import extensions, home
-from alfred.agent import Agent, Listener
-from alfred.backends.claude import ClaudeBackend
+from consiglieri import extensions, home
+from consiglieri.agent import Agent, Listener
+from consiglieri.backends.claude import ClaudeBackend
 from fakes import Sandbox, claude_lines
 
 SKILL = "---\nname: forecast\ndescription: Weather forecast for a city. Use when the user asks about the weather.\n---\nRun `weather-now <city>`.\n"
@@ -193,7 +193,7 @@ class ExtensionTests(unittest.TestCase):
 
         def alfred(*argv: str):
             completed = subprocess.run(
-                [sys.executable, "-m", "alfred.cli", *argv], env=env, stdout=subprocess.PIPE, text=True, timeout=60
+                [sys.executable, "-m", "consiglieri.cli", *argv], env=env, stdout=subprocess.PIPE, text=True, timeout=60
             )
             return completed.returncode, json.loads(completed.stdout)
 

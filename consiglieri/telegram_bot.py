@@ -46,7 +46,7 @@ from .config import Config
 from .scheduler import KIND_EVENT, KIND_TASK, Item, Postpone, SchedulerStore, Skip, parse_time, run_scheduler, utc_now
 from .text import split_message
 
-log = logging.getLogger("alfred.telegram")
+log = logging.getLogger("consiglieri.telegram")
 
 # The commands of a bot (each one has an agent), in the order /help and the menu show them.
 # To add one: add a line here and a `_cmd_<name>` method on TelegramBot.

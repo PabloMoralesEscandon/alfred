@@ -4,7 +4,7 @@ import os
 import subprocess
 import unittest
 
-from alfred import home
+from consiglieri import home
 from fakes import Sandbox
 
 

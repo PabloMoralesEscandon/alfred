@@ -22,7 +22,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from .base import STREAM_LIMIT, BackendError, RunResult
 
-log = logging.getLogger("alfred.live")
+log = logging.getLogger("consiglieri.live")
 
 KILL_GRACE_SECONDS = 5.0
 

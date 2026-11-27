@@ -15,12 +15,12 @@ import os
 from typing import Any, Awaitable, Callable, List, Optional
 
 try:
-    from alfred.telegram_bot import COMMANDS, TelegramBot
+    from consiglieri.telegram_bot import COMMANDS, TelegramBot
 except ImportError:  # pragma: no cover
     TelegramBot = None  # type: ignore
     COMMANDS = []
 
-from alfred import home, scheduler
+from consiglieri import home, scheduler
 from fakes import Sandbox, claude_lines
 
 
@@ -234,7 +234,7 @@ class TelegramBotTests(unittest.TestCase):
         stranger = dict(user_id=5, username="mallory")
 
         async def scenario() -> None:
-            with self.assertLogs("alfred.telegram", level="WARNING"):
+            with self.assertLogs("consiglieri.telegram", level="WARNING"):
                 await self.say("hello", **stranger)
                 await self.app._cmd_skills(make_update(self.bot, "/skills", **stranger), self.context())
                 await self.app._cmd_new(make_update(self.bot, "/new", **stranger), self.context())

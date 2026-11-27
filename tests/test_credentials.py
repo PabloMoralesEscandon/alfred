@@ -17,11 +17,11 @@ from pathlib import Path
 from typing import Any, Dict, List
 from unittest import mock
 
-from alfred import bot_admin, bot_browser, bots, browser_cli, creds_cli, home, keepass, menus, presets
-from alfred.bot_browser import BotBrowser, BrowserError
-from alfred.bots import BotRecord, BotRegistry
-from alfred.cli import CommandError, main
-from alfred.keepass import CredentialError, KeePass
+from consiglieri import bot_admin, bot_browser, bots, browser_cli, creds_cli, home, keepass, menus, presets
+from consiglieri.bot_browser import BotBrowser, BrowserError
+from consiglieri.bots import BotRecord, BotRegistry
+from consiglieri.cli import CommandError, main
+from consiglieri.keepass import CredentialError, KeePass
 from fakes import Sandbox
 
 HAS_CLI = bool(keepass._find([str(keepass.MAC_APP / "keepassxc-cli"), "keepassxc-cli"]))

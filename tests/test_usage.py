@@ -4,7 +4,7 @@ import asyncio
 import os
 import unittest
 
-from alfred import usage
+from consiglieri import usage
 from fakes import Sandbox
 
 

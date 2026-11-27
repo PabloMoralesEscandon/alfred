@@ -13,10 +13,10 @@ from contextlib import redirect_stdout
 from typing import Any, Dict
 from unittest import mock
 
-from alfred import bot_admin, bots, cli, home, presets
-from alfred.scheduler import SchedulerStore
-from alfred.bot_admin import SpecError
-from alfred.bots import BotRecord, BotRegistry
+from consiglieri import bot_admin, bots, cli, home, presets
+from consiglieri.scheduler import SchedulerStore
+from consiglieri.bot_admin import SpecError
+from consiglieri.bots import BotRecord, BotRegistry
 from fakes import Sandbox
 
 try:
@@ -288,7 +288,7 @@ class AdminPermissionTests(unittest.TestCase):
         self.assertIn("create and set up bots", bots.permission_summary(plain).split("cannot", 1)[1])
 
     def test_only_a_bot_admin_s_manual_points_to_the_skill(self) -> None:
-        from alfred import extensions
+        from consiglieri import extensions
 
         admin, config = self.sandbox.add_bot(permissions={"admin": "on"})
         self.assertIn("alfred:bot-admin", (config.workspace / "CLAUDE.md").read_text())

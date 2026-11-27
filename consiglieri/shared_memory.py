@@ -27,7 +27,7 @@ from typing import List, Optional, Tuple
 from .config import Config
 from .extensions import SECRET_PATTERNS
 
-log = logging.getLogger("alfred.shared")
+log = logging.getLogger("consiglieri.shared")
 
 INDEX_NAME = "MEMORY.md"
 COPY_NAME = "SHARED_MEMORY.md"  # the copy in each agent's own directory, imported by its manual

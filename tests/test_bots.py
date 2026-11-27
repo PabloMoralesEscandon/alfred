@@ -11,9 +11,9 @@ import unittest
 from pathlib import Path
 from typing import Any, Dict, List
 
-from alfred import bots, extensions, home
-from alfred.agent import Agent, Chat, Listener
-from alfred.bots import BotError, BotRecord, BotRegistry
+from consiglieri import bots, extensions, home
+from consiglieri.agent import Agent, Chat, Listener
+from consiglieri.bots import BotError, BotRecord, BotRegistry
 from fakes import Sandbox, claude_lines
 
 TOKEN = "5000000001:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
@@ -371,7 +371,7 @@ class BlacklistTests(BotsTestCase):
         return "%s(//%s%s)" % (tool, str(path).lstrip("/"), suffix)
 
     def levels(self) -> Dict[str, Dict[str, str]]:
-        from alfred import presets
+        from consiglieri import presets
 
         levels = {name: presets.apply(name, {}) for name in presets.keys()}  # Basic, Assistant, Power, Full access
         levels["full access"] = {name: "on" for name in bots.SWITCHES if name != "sandbox"}
@@ -434,7 +434,7 @@ class BlacklistTests(BotsTestCase):
             self.assertEqual(filesystem.get("allowWrite", []), [str(shared)] if writable else [], level)
 
     def test_the_shared_memory_is_readable_at_every_level_and_written_only_with_the_permission(self) -> None:
-        from alfred import presets
+        from consiglieri import presets
 
         shared = self.config.shared_memory_dir
         for cross in (False, True):

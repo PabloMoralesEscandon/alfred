@@ -7,12 +7,12 @@ import unittest
 from pathlib import Path
 from typing import Any, Dict
 
-from alfred import bot_admin, bots, home, menus, presets
-from alfred.bots import BotRecord, BotRegistry
+from consiglieri import bot_admin, bots, home, menus, presets
+from consiglieri.bots import BotRecord, BotRegistry
 from fakes import Sandbox
 
 try:
-    from alfred.telegram_bot import BotPool  # noqa: F401  (test_panel needs it to import)
+    from consiglieri.telegram_bot import BotPool  # noqa: F401  (test_panel needs it to import)
     from test_panel import OWNER, RESEARCH, PanelHarness
 except ImportError:  # pragma: no cover
     PanelHarness = unittest.TestCase  # type: ignore
@@ -20,7 +20,7 @@ except ImportError:  # pragma: no cover
 
 BOT = 5000000001
 CALENDAR = "mcp__claude_ai_Google_Calendar__*"
-SKILL = Path(__file__).resolve().parent.parent / "alfred" / "plugin" / "skills" / "calendar" / "SKILL.md"
+SKILL = Path(__file__).resolve().parent.parent / "consiglieri" / "plugin" / "skills" / "calendar" / "SKILL.md"
 
 
 class PermissionTests(unittest.TestCase):

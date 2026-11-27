@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple, Union
 
-log = logging.getLogger("alfred.scheduler")
+log = logging.getLogger("consiglieri.scheduler")
 
 STATUS_SCHEDULED = "scheduled"
 STATUS_DELIVERING = "delivering"

@@ -20,7 +20,7 @@ from typing import Any, Dict, Optional
 
 from . import usage_alerts, usage_forecast
 
-log = logging.getLogger("alfred.usage_gate")
+log = logging.getLogger("consiglieri.usage_gate")
 
 RUN = "run"
 SKIP = "skip"

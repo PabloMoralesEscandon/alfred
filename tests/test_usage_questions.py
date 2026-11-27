@@ -19,11 +19,11 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from unittest import mock
 
-from alfred import bots, cli, extensions, home, usage_alerts
-from alfred.bots import BotRecord, BotRegistry
-from alfred.scheduler import KIND_EVENT, SchedulerStore
-from alfred.usage_alerts import AlertStore, ConditionError, parse
-from alfred.usage_monitor import (Evaluation, MonitorSettings, Reading, UsageHistory, UsageMonitor, Window,
+from consiglieri import bots, cli, extensions, home, usage_alerts
+from consiglieri.bots import BotRecord, BotRegistry
+from consiglieri.scheduler import KIND_EVENT, SchedulerStore
+from consiglieri.usage_alerts import AlertStore, ConditionError, parse
+from consiglieri.usage_monitor import (Evaluation, MonitorSettings, Reading, UsageHistory, UsageMonitor, Window,
                                   read_on_demand)
 from fakes import Sandbox
 from test_usage_alerts import FixedSource
@@ -294,7 +294,7 @@ class ForecastConditionTests(unittest.TestCase):
 
 
 def usage_forecast_hours(text: str) -> Any:
-    from alfred.usage_forecast import parse_hours
+    from consiglieri.usage_forecast import parse_hours
 
     return parse_hours(text)
 

@@ -13,7 +13,7 @@ try:
 except ImportError:  # pragma: no cover
     PanelHarness = None  # type: ignore
 
-from alfred import bots, keepass, menus, presets, scheduler
+from consiglieri import bots, keepass, menus, presets, scheduler
 
 HAS_CLI = bool(keepass._find([str(keepass.MAC_APP / "keepassxc-cli"), "keepassxc-cli"]))
 TOTP_SEED = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"  # RFC 6238 SHA1 test key
@@ -474,7 +474,7 @@ class MenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
 
     def test_menu_the_shared_memory_lists_adds_shows_and_removes(self) -> None:
         async def scenario() -> None:
-            from alfred import shared_memory
+            from consiglieri import shared_memory
 
             await self.open()
             await self.tap("Shared memory")
@@ -525,7 +525,7 @@ class MenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
 
     def test_menu_cross_agent_access_needs_a_warning_is_audited_and_stands_out(self) -> None:
         async def scenario() -> None:
-            from alfred import bots
+            from consiglieri import bots
 
             # Never offered at creation, whatever the preset.
             await self.walk_to_summary()
@@ -621,7 +621,7 @@ class MenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
     def test_menu_a_bots_reminders_are_listed_and_cancelled(self) -> None:
         from datetime import timedelta
 
-        from alfred import scheduler
+        from consiglieri import scheduler
 
         async def scenario() -> None:
             await self.create(RESEARCH, "alfredpanel_research_bot", "Research", "/bot new Research")
@@ -647,7 +647,7 @@ class MenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
     def test_menu_the_old_main_bots_reminders_are_kept_listed_and_can_be_cancelled(self) -> None:
         from datetime import timedelta
 
-        from alfred import scheduler
+        from consiglieri import scheduler
 
         async def scenario() -> None:
             soon = scheduler.utc_now() + timedelta(hours=2)
@@ -667,7 +667,7 @@ class MenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
         self.play(scenario)
 
     def test_menu_usage_alerts_are_listed_and_removed(self) -> None:
-        from alfred import usage_alerts
+        from consiglieri import usage_alerts
 
         async def scenario() -> None:
             await self.create(RESEARCH, "alfredpanel_research_bot", "Research", "/bot new Research -usage")
@@ -710,7 +710,7 @@ class MenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
         self.play(scenario)
 
     def test_menu_the_audit_and_removing_one_shared_fact(self) -> None:
-        from alfred import shared_memory
+        from consiglieri import shared_memory
 
         async def scenario() -> None:
             await self.create(RESEARCH, "alfredpanel_research_bot", "Research", "/bot new Research")

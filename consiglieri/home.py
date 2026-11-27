@@ -167,7 +167,7 @@ def _write_launcher(config: Config) -> None:
         "#!/bin/sh\n"
         "# Managed by Consiglieri. Rewritten on every start.\n"
         "export ALFRED_HOME=%s\n"
-        'PYTHONPATH=%s${PYTHONPATH:+:$PYTHONPATH} exec %s -m alfred "$@"\n'
+        'PYTHONPATH=%s${PYTHONPATH:+:$PYTHONPATH} exec %s -m consiglieri "$@"\n'
         % (shlex.quote(str(config.home)), shlex.quote(str(REPO_ROOT)), shlex.quote(sys.executable))
     )
     _write_if_changed(launcher, script)

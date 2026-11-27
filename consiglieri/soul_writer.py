@@ -33,7 +33,7 @@ from . import soul
 from .backends.claude import INHERITED_SESSION_VARS
 from .config import Config
 
-log = logging.getLogger("alfred.soul")
+log = logging.getLogger("consiglieri.soul")
 
 DEFAULT_MODEL = "haiku"
 DEFAULT_EFFORT = "low"

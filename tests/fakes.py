@@ -10,7 +10,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from alfred.config import Config
+from consiglieri.config import Config
 
 FAKE_CLI = """#!{python}
 import json, os, subprocess, sys, threading, time
@@ -100,7 +100,7 @@ class Sandbox:
                 permissions: Optional[Dict[str, str]] = None, settings: Optional[Dict[str, str]] = None,
                 token: Optional[str] = None, chat_ids: Tuple[int, ...] = (7,)) -> Tuple[Any, Config]:
         """Register a bot (there is no main agent: every agent is one) and return (its record, its config)."""
-        from alfred import bots, home
+        from consiglieri import bots, home
 
         home.prepare(self.config)
         registry = bots.BotRegistry(self.config)

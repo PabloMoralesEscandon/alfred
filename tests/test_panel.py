@@ -15,15 +15,15 @@ from typing import Any, Dict, List, Optional
 from unittest import mock
 
 try:
-    from alfred.telegram_bot import PANEL_COMMANDS, BotPool, ControlPanel
+    from consiglieri.telegram_bot import PANEL_COMMANDS, BotPool, ControlPanel
 except ImportError:  # pragma: no cover
     BotPool = None  # type: ignore
     PANEL_COMMANDS = []
 
-from alfred import bots, home, scheduler, shared_memory, usage_gate
-from alfred.agent import Chat
-from alfred.bots import BotRecord
-from alfred.scheduler import Postpone, Skip
+from consiglieri import bots, home, scheduler, shared_memory, usage_gate
+from consiglieri.agent import Chat
+from consiglieri.bots import BotRecord
+from consiglieri.scheduler import Postpone, Skip
 from fakes import Sandbox, claude_lines
 
 OWNER = 99
@@ -344,8 +344,8 @@ class PanelTests(PanelHarness):
         self.play(scenario)
 
     def test_nothing_ever_opens_a_claude_session_for_the_panels_own_chat(self) -> None:
-        from alfred.agent import Agent, NoAgent
-        from alfred.telegram_bot import TelegramBot
+        from consiglieri.agent import Agent, NoAgent
+        from consiglieri.telegram_bot import TelegramBot
 
         async def scenario() -> None:
             # Messages, commands and the old main bot's scheduled items, in the panel's own chat.
@@ -729,7 +729,7 @@ class PanelTests(PanelHarness):
         self.play(scenario)
 
     def test_browser_setting_and_no_telegram_credential_grant(self) -> None:
-        from alfred import keepass
+        from consiglieri import keepass
 
         async def scenario() -> None:
             await self.create(RESEARCH, "research_bot", "Research", "/bot new Research +browser")

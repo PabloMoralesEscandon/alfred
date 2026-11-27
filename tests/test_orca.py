@@ -8,8 +8,8 @@ import unittest
 from contextlib import redirect_stdout
 from unittest import mock
 
-from alfred import cli, home, orca
-from alfred.agent import Agent
+from consiglieri import cli, home, orca
+from consiglieri.agent import Agent
 from fakes import Sandbox, claude_lines, install_fake_orca
 
 
