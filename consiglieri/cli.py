@@ -1053,6 +1053,29 @@ def cmd_usage_forecast(config: Config, args: argparse.Namespace) -> int:
     return _usage_question(config, args, condition, answer)
 
 
+def cmd_migrate(config: Config, args: argparse.Namespace) -> int:
+    """Move an install from before the rename to the new names (docs/RENAME_PLAN.md, phase 4)."""
+    from .migrate import Migration, MigrationError
+
+    try:
+        migration = Migration(config, source=Path(args.source) if args.source else None,
+                              target=Path(args.target) if args.target else None)
+        done = migration.run(dry_run=args.dry_run)
+    except (MigrationError, OSError) as exc:
+        print("consiglieri: %s" % exc, file=sys.stderr)
+        return 1
+    print(("Would do (nothing has changed):" if args.dry_run else "Done:"))
+    for line in done:
+        print("- %s" % line)
+    if not args.dry_run:
+        from .migrate import NEXT_STEPS
+
+        print("Next:")
+        for line in NEXT_STEPS:
+            print("  %s" % line)
+    return 0
+
+
 def cmd_service(config: Config, args: argparse.Namespace) -> int:
     """Run the bot as a background service that starts at login and restarts if it dies."""
     from . import service
@@ -1153,6 +1176,13 @@ def build_parser() -> argparse.ArgumentParser:
     service.add_argument("action", choices=("install", "uninstall", "status", "restart", "logs"))
     service.add_argument("-n", "--lines", type=int, default=40, help="log lines to show")
     service.set_defaults(run=cmd_service)
+
+    migrate = commands.add_parser(
+        "migrate", help="move an install from before the rename to the new names (stop the service first)")
+    migrate.add_argument("--dry-run", action="store_true", help="only say what it would do")
+    migrate.add_argument("--from", dest="source", help="the old home (default: ~/.alfred)")  # rename-compat
+    migrate.add_argument("--to", dest="target", help="the new home (default: ~/.consiglieri)")
+    migrate.set_defaults(run=cmd_migrate)
 
     usage_parser = commands.add_parser(
         "usage", help="show the Claude plan usage, or answer a question about it (check, running_low, forecast)",
