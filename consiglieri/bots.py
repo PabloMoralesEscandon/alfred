@@ -1277,6 +1277,8 @@ def username_prefix(manager_username: str) -> str:
     base = manager_username.strip().lstrip("@").lower()
     if base.endswith("bot"):
         base = base[: -len("bot")]
+    # rename-compat: a panel made under the old name proposes the new one to its new bots (alfred_x_bot -> consiglieri_x_)
+    base = re.sub(r"^%s(?=_|$)" % LEGACY_COMMAND, COMMAND, base)
     return re.sub(r"_+", "_", base).strip("_")
 
 

@@ -214,14 +214,24 @@ class BothCommandNamesTests(unittest.TestCase):
         with self.assertRaises(bots.BotError):
             bots.clean_permission(self.sandbox.config, "shell", "consigliere")
 
-    def test_both_launchers_run_the_new_command(self) -> None:
+    def test_the_old_launcher_is_kept_but_never_created(self) -> None:
+        bin_dir = self.sandbox.home / "bin"
         home.prepare(self.sandbox.config)
-        new = (self.sandbox.home / "bin" / "consiglieri").read_text(encoding="utf-8")
-        old = (self.sandbox.home / "bin" / "alfred").read_text(encoding="utf-8")
-        self.assertEqual(new, old)
+        self.assertFalse((bin_dir / "alfred").exists())  # a new home has only the new command
+        new = (bin_dir / "consiglieri").read_text(encoding="utf-8")
         self.assertIn("-m consiglieri", new)
         self.assertIn("export CONSIGLIERI_HOME=", new)
-        self.assertTrue(os.access(self.sandbox.home / "bin" / "alfred", os.X_OK))
+        # A home from before the rename: its old launcher is rewritten as the same script.
+        (bin_dir / "alfred").write_text("#!/bin/sh\nexport ALFRED_HOME=x\nexec python -m alfred \"$@\"\n")
+        home.prepare(self.sandbox.config)
+        self.assertEqual((bin_dir / "alfred").read_text(encoding="utf-8"), new)
+        self.assertTrue(os.access(bin_dir / "alfred", os.X_OK))
+
+    def test_new_bots_of_an_old_panel_get_the_new_name(self) -> None:
+        self.assertEqual(bots.username_prefix("alfred_rnfl_bot"), "consiglieri_rnfl")
+        self.assertEqual(bots.username_prefix("@Alfred_bot"), "consiglieri")
+        self.assertEqual(bots.username_prefix("alfredo_bot"), "alfredo")  # someone's name, not the old one
+        self.assertEqual(bots.suggest_username("Research", "alfred_rnfl_bot"), "consiglieri_rnfl_research_bot")
 
     def test_an_extension_shadows_neither_name(self) -> None:
         _, config = self.sandbox.add_bot()

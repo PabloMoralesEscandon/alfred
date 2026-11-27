@@ -62,6 +62,9 @@ class MigrateTests(unittest.TestCase):
         self.write(old / "state" / "scheduler.sqlite3", "not text: %s" % old)
         self.write(old / "bin" / "alfred", "#!/bin/sh\nexport ALFRED_HOME=%s\nexec python -m alfred \"$@\"\n" % old, 0o755)
         self.write(bots / str(BOT) / "memory" / "MEMORY.md", "# Memory\n")
+        self.old_user = self.write(bots / str(BOT) / "extensions" / "weather" / "bin" / "forecast",
+                                   "#!/bin/sh\nalfred send \"$(curl -s wttr.in)\"\n", 0o755)
+        self.write(bots / str(BOT) / ".claude" / "skills" / "mine" / "SKILL.md", "Use consiglieri send.\n")
         self.write(shared / "memory" / "MEMORY.md", "# Shared\n")
         self.write(self.user / ".alfred-test" / ".env", "ALFRED_HOME=%s/.alfred-test\n" % self.user)
         for folder in (old, bots / str(BOT), self.user / ".alfred-test", self.user / ".alfred-test-bots" / "7"):
@@ -119,6 +122,9 @@ class MigrateTests(unittest.TestCase):
         self.assertIn("ALFRED_ALLOWED_USERS, ALFRED_TIMEOUT", text)
         self.assertNotIn("secret", text)
         self.assertNotIn(".alfred-test", text)
+        self.assertIn("note: %s still calls the old command" % (self.user / ".consiglieri-bots" / str(BOT) /
+                                                                "extensions" / "weather" / "bin" / "forecast"), text)
+        self.assertNotIn("SKILL.md", text)
 
     # -- the real thing --
 
@@ -159,11 +165,18 @@ class MigrateTests(unittest.TestCase):
         self.assertEqual(stat.S_IMODE((self.new / ".env").stat().st_mode), env_mode)
         self.assertEqual(self.repo_env.read_text(), "CONSIGLIERI_HOME=%s\nCONSIGLIERI_ENV_FILE_UNUSED=1\n" % self.new)
         self.assertEqual(Config.load({"CONSIGLIERI_ENV_FILE": str(self.repo_env)}).home, self.new)
-        # The launchers, both names, for the new home.
-        for name in ("consiglieri", "alfred"):
-            launcher = (self.new / "bin" / name).read_text(encoding="utf-8")
-            self.assertIn("export CONSIGLIERI_HOME=%s" % self.new, launcher)
-            self.assertIn("-m consiglieri", launcher)
+        # The launcher for the new home; the old command is gone and is not written again.
+        launcher = (self.new / "bin" / "consiglieri").read_text(encoding="utf-8")
+        self.assertIn("export CONSIGLIERI_HOME=%s" % self.new, launcher)
+        self.assertIn("-m consiglieri", launcher)
+        self.assertFalse((self.new / "bin" / "alfred").exists())
+        from consiglieri import home
+        home.prepare(Config(home=self.new, env_files=[], environ={"CLAUDE_CONFIG_DIR": str(self.claude)}))
+        self.assertFalse((self.new / "bin" / "alfred").exists())
+        # What a bot wrote that calls the old command is listed, not changed.
+        self.assertTrue(any("still calls the old command" in line for line in done))
+        moved_script = self.user / ".consiglieri-bots" / str(BOT) / "extensions" / "weather" / "bin" / "forecast"
+        self.assertIn("alfred send", moved_script.read_text(encoding="utf-8"))
         self.assertFalse(list(self.user.rglob("*.migrating")))
 
     def test_another_home(self) -> None:

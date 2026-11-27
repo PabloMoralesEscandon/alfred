@@ -9,7 +9,8 @@ This whole module is about the old names on purpose (rename-compat). It never ru
    every bot resumes its conversations and keeps Claude Code's own memory;
 3. rewrites the old absolute paths in the panel's state (bots' settings, KeePassXC's settings, ...) and in
    the `.env` files, and renames their `ALFRED_*` settings to `CONSIGLIERI_*`;
-4. rewrites the launchers in the new home's `bin/`.
+4. rewrites the launcher in the new home's `bin/`, removes the old command's one, and lists what the bots
+   wrote for themselves (extensions, skills) that still calls the old command, without changing it.
 
 It refuses, before touching anything, while a service (old or new name) is installed, while Consiglieri,
 its KeePassXC or a bot's browser runs, when a destination already exists, or in a bot's turn. It leaves no
@@ -34,6 +35,7 @@ NEW_NAME = "consiglieri"
 TEXT_SUFFIXES = (".json", ".ini")  # the state files that can hold an absolute path
 MAX_TEXT_BYTES = 1 << 20
 SKIPPED_STATE = ("browsers",)  # Chromium profiles: big, and their paths are rewritten when a browser starts
+OLD_COMMAND_USE = re.compile(r"(^|[\s/`\"'(])%s( [a-z]|:[a-z])" % OLD_NAME, re.M)  # `alfred send`, `alfred:browser`
 RUNNING = re.compile(r"(-m (alfred|consiglieri)|(^|/)(alfred|consiglieri)) run\b")  # rename-compat
 
 
@@ -281,10 +283,36 @@ class Migration:
         def launchers() -> None:
             from . import home
 
+            old_launcher = self.target / "bin" / OLD_NAME
+            if old_launcher.exists() or old_launcher.is_symlink():
+                old_launcher.unlink()  # the old command goes with the old home; a migrated home never gets it back
             home._write_launcher(Config(home=self.target, env_files=[], environ=dict(self.config.environ)))
 
-        steps.append(Step("rewrite the launchers in %s" % (self.target / "bin"), launchers))
+        steps.append(Step("rewrite %s and remove the old command's launcher" % (self.target / "bin" / NEW_NAME),
+                          launchers))
+        for path in self.old_command_users():
+            steps.append(Step("note: %s still calls the old command; change it to consiglieri (not changed here)"
+                              % moved(path), lambda: None))
         return steps
+
+    def old_command_users(self) -> List[Path]:
+        """What the bots wrote for themselves (extensions, their own skills) that runs the old command: after the
+        migration that command is gone, so these are listed for the user. Nothing here is rewritten."""
+        bots = self.source.parent / (self.source.name + "-bots")
+        found: List[Path] = []
+        for bot in sorted(bots.iterdir()) if bots.is_dir() else []:
+            for part in ("extensions", ".claude/skills"):
+                folder = bot / part
+                for path in sorted(folder.rglob("*")) if folder.is_dir() else []:
+                    if not path.is_file() or path.is_symlink() or path.stat().st_size > MAX_TEXT_BYTES:
+                        continue
+                    try:
+                        text = path.read_text(encoding="utf-8")
+                    except (OSError, UnicodeDecodeError):
+                        continue
+                    if OLD_COMMAND_USE.search(text):
+                        found.append(path)
+        return found
 
     def run(self, dry_run: bool = False) -> List[str]:
         steps = self.steps()

@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from .config import COMMAND_NAMES, REPO_ROOT, Config
+from .config import COMMAND_NAMES, LEGACY_COMMAND, REPO_ROOT, Config
 
 TEMPLATES = Path(__file__).resolve().parent / "templates"
 
@@ -161,7 +161,8 @@ def _write_if_changed(path: Path, content: str) -> None:
 
 def _write_launcher(config: Config) -> None:
     """`bin/consiglieri` runs this checkout's CLI with the interpreter that started the panel. Every bot has it on
-    PATH. While the old name lasts, `bin/consiglieri` is the same script: the bots' rules are written for both names."""
+    PATH. A home from before the rename also has the old command's launcher there (rename-compat): it is kept as
+    the same script until `consiglieri migrate` removes it, and never created; the rules cover both names anyway."""
     script = (
         "#!/bin/sh\n"
         "# Managed by Consiglieri. Rewritten on every start.\n"
@@ -171,6 +172,8 @@ def _write_launcher(config: Config) -> None:
     )
     for name in COMMAND_NAMES:
         launcher = config.home / "bin" / name
+        if name == LEGACY_COMMAND and not launcher.exists():  # rename-compat
+            continue
         launcher.parent.mkdir(parents=True, exist_ok=True)
         _write_if_changed(launcher, script)
         launcher.chmod(launcher.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
