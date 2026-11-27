@@ -6,7 +6,7 @@ methods, whenever a turn ends, including turns the agent started by itself.
 
 One process serves several bots. `BotPool` runs the control panel (the main bot,
 TELEGRAM_BOT_TOKEN), which has no agent and no Claude session, and every bot its
-users created (see `alfred/bots.py`), each as its own python-telegram-bot
+users created (see `consiglieri/bots.py`), each as its own python-telegram-bot
 `Application` with its own `TelegramBot` front end and its own `Agent`, all in one
 event loop with one scheduler. The panel's Python code does all the managing:
 creating, configuring and destroying bots, the scheduler and its deliveries, the
@@ -105,7 +105,7 @@ Text shortcuts:
 Settings: %s.
 Permissions: %s.
 Options for /bot new: +web +browser +shell +edit +mcp +contact +bots +admin +calendar +bypass, -schedule, -usage, -sandbox, and setting=value or permission=value (for example model=sonnet folders=~/notes).
-A new bot starts with the least: its own directory, the alfred command, reminders and the plan usage tool (used only with your express permission), nothing else.
+A new bot starts with the least: its own directory, the consiglieri command, reminders and the plan usage tool (used only with your express permission), nothing else.
 At every level, even full access, a bot can't read the memory of your other bots or use their tools. Only cross-agent access lifts that, and only you can grant it here.
 <bot> is its @username, its name or its id.""" % (", ".join(presets.keys()), ", ".join(bots.SETTING_NAMES), ", ".join(bots.PERMISSION_NAMES))
 
@@ -610,7 +610,7 @@ class ControlPanel:
         if not self._authorized(update):
             return
         if self.pool is None:
-            await update.effective_message.reply_text("Not running under `alfred run`.")
+            await update.effective_message.reply_text("Not running under `consiglieri run`.")
             return
         records = self.pool.registry.list(owner_id=update.effective_user.id)
         running = sum(1 for record in records if self.pool.is_running(record.bot_id))
@@ -627,7 +627,7 @@ class ControlPanel:
         if not self._authorized(update):
             return
         if self.pool is None:
-            await update.effective_message.reply_text("Bots are managed by `alfred run`, which is not what is running.")
+            await update.effective_message.reply_text("Bots are managed by `consiglieri run`, which is not what is running.")
             return
         records = self.pool.registry.list(owner_id=update.effective_user.id)  # only yours
         if not records:
@@ -648,7 +648,7 @@ class ControlPanel:
             return
         reply = update.effective_message.reply_text
         if self.pool is None:
-            await reply("Bots are managed by `alfred run`, which is not what is running.")
+            await reply("Bots are managed by `consiglieri run`, which is not what is running.")
             return
         words = command_text(update.effective_message).split(None, 1)
         action = words[0].lower() if words else ""
@@ -1045,7 +1045,7 @@ class BotPool:
         for record in self.registry.list():
             if record.enabled:
                 await self.launch(record)
-        # Polled often because `alfred event` relies on it to wake the agent promptly.
+        # Polled often because `consiglieri event` relies on it to wake the agent promptly.
         self._scheduler = asyncio.ensure_future(run_scheduler(self.store, self.deliver, poll_seconds=2.0))
         # Off unless CONSIGLIERI_USAGE_MONITOR is set. When on, it checks the bots' usage alerts with one reading per cycle.
         self.usage_monitor = usage_monitor.start(self.config, scheduler=self.store)

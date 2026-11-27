@@ -14,7 +14,7 @@ The pieces, and what each does today (see docs/USAGE_MONITOR_RESEARCH.md, sectio
   Its loop checks the agents' usage alerts (`usage_alerts.py`) with one reading per cycle.
 - `Evaluation`: what a condition sees for one reading: the plain values, the weekly forecast
   (`usage_forecast.py`) for some active hours, the projected percents and the window share in use.
-- `read_on_demand()`: the reading behind `alfred usage check`, `running_low` and `forecast`: the last one
+- `read_on_demand()`: the reading behind `consiglieri usage check`, `running_low` and `forecast`: the last one
   in the history if it is recent enough, otherwise a new `/usage`, one process at a time.
 
 The monitor is off unless `CONSIGLIERI_USAGE_MONITOR` is set. When it is off, `start()`
@@ -445,7 +445,7 @@ def permission_note(config: Config, record: Any) -> str:
         return ""
     return (
         "ℹ️ Plan usage is on for %s, but the usage monitor is off (%s=0): it can ask on-demand questions "
-        "(alfred usage check, running_low, forecast), but it can't read the usage report or set alerts until "
+        "(consiglieri usage check, running_low, forecast), but it can't read the usage report or set alerts until "
         "you put %s=1 in .env and restart Consiglieri." % (record.handle, ENABLE_SETTING, ENABLE_SETTING)
     )
 

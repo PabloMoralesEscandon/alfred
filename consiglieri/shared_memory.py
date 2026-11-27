@@ -1,6 +1,6 @@
 """The shared memory: general facts every bot on this machine reads.
 
-It lives in `config.shared_memory_dir` (`~/.alfred-shared/memory` by default), with the same shape as an
+It lives in `config.shared_memory_dir` (`~/.consiglieri-shared/memory` by default), with the same shape as an
 agent's own memory: `MEMORY.md`, one line per topic, and one Markdown file per topic at `<folder>/<name>.md`.
 That folder is outside Consiglieri's home and outside the bots' directories on purpose: the blacklist denies
 both to every bot, and a deny rule wins over any allow rule in Claude Code.

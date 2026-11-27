@@ -48,7 +48,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote_plus
 
 from . import home, shared_memory, soul
-from .config import Config
+from .config import COMMAND, COMMAND_NAMES, LEGACY_COMMAND, Config
 
 TOKEN_PATTERN = re.compile(r"^\d{5,15}:[A-Za-z0-9_-]{30,}$")
 PENDING_SECONDS = 30 * 60  # how long a creation link is honoured
@@ -74,17 +74,17 @@ SETTINGS = (
 SETTING_NAMES = tuple(name for name, _ in SETTINGS)
 
 # What `/bot perm` accepts: (name, default, what it controls). A new bot starts with these defaults:
-# nothing outside its own directory, no web, no browser, no shell beyond the `alfred` command.
+# nothing outside its own directory, no web, no browser, no shell beyond the `consiglieri` command.
 PERMISSIONS = (
     ("mode", "dontAsk", "Claude Code permission mode: %s" % ", ".join(PERMISSION_MODES)),
-    ("shell", "alfred", "alfred: only the alfred command; full: any shell command"),
+    ("shell", COMMAND, "%s: only the %s command; full: any shell command" % (COMMAND, COMMAND)),
     ("sandbox", "on", "with shell full: run commands in Claude Code's OS sandbox"),
     ("edit", "off", "edit files in its working directory and extra folders (its own directory always)"),
     ("folders", "", "extra folders it may read (and edit, with edit on), separated by commas"),
     ("web", "off", "WebSearch and WebFetch"),
     ("browser", "off", "Consiglieri's browser (Orca's, Chrome, or with CONSIGLIERI_BROWSER=bot its own)"),
     ("mcp", "off", "MCP tools (your connectors and servers, its extensions'); off removes them all"),
-    ("schedule", "on", "reminders and timed tasks with alfred schedule"),
+    ("schedule", "on", "reminders and timed tasks with consiglieri schedule"),
     ("contact", "off", "post or schedule messages to chats other than its owner's"),
     ("bots", "off", "list bots, change their settings and ask for new ones (never destroy)"),
     ("admin", "off", "bot admin: create and set up bots for its owner from a spec, up to its own permissions; "
@@ -93,7 +93,7 @@ PERMISSIONS = (
                     "the report and the alerts need CONSIGLIERI_USAGE_MONITOR on"),
     ("calendar", "on", "read and create events in your Google Calendar (the claude.ai connector), even with mcp off"),
     ("creds", "off", "log in with the credentials you grant it: KeePassXC fills them into its own browser, only on their "
-                     "sites, and it never sees them; you grant each one (/bot → Credentials, or alfred creds grant), never a bot admin"),
+                     "sites, and it never sees them; you grant each one (/bot → Credentials, or consiglieri creds grant), never a bot admin"),
     ("shared", "off", "write the shared memory every agent reads (reading it is always allowed)"),
     ("soul", "off", "edit its own SOUL.md: its role and mission as well as its tone, so what it does; never what it may do"),
     ("allow", "", "extra Claude Code allow rules, separated by ;"),
@@ -103,29 +103,38 @@ PERMISSION_NAMES = tuple(name for name, _, _ in PERMISSIONS)
 DEFAULT_PERMISSIONS = {name: default for name, default, _ in PERMISSIONS}
 SWITCHES = ("sandbox", "edit", "web", "browser", "mcp", "schedule", "contact", "bots", "admin", "usage", "calendar", "creds",
             "shared", "soul")
-# `+name` / `-name` when creating a bot: on and off, or for shell: full and alfred.
+# `+name` / `-name` when creating a bot: on and off, or for shell: full and consiglieri.
 SHORTHANDS = {"bypass": ("mode", "bypassPermissions")}
 
-# alfred subcommands a bot never runs: they start or install Consiglieri itself.
-ALWAYS_DENIED = ("Bash(alfred run)", "Bash(alfred run *)", "Bash(alfred service *)", "Bash(alfred init)",
-                 "Bash(alfred chat)", "Bash(alfred chat *)", "Bash(alfred browser-setup *)",
-                 "Bash(*alfred browser install*)")
+
+
+def each_command(*templates: str) -> Tuple[str, ...]:
+    """Each rule written once for every name the command has (`{cmd}` in the template). While the old name's
+    launcher exists, a rule written for one name only would be a way around it (docs/RENAME_PLAN.md, finding 5)."""
+    return tuple(template.format(cmd=name) for name in COMMAND_NAMES for template in templates)
+
+
+# consiglieri subcommands a bot never runs: they start, install or move Consiglieri itself.
+ALWAYS_DENIED = each_command("Bash({cmd} run)", "Bash({cmd} run *)", "Bash({cmd} service)", "Bash({cmd} service *)",
+                             "Bash({cmd} init)", "Bash({cmd} init *)", "Bash({cmd} chat)", "Bash({cmd} chat *)",
+                             "Bash({cmd} browser-setup)", "Bash({cmd} browser-setup *)", "Bash({cmd} migrate)",
+                             "Bash({cmd} migrate *)", "Bash(*{cmd} browser install*)")
 # Credentials (docs/CREDENTIALS.md). The user's subcommands: no bot ever sets up, adds, removes, grants or revokes
-# one, nor starts or stops KeePassXC, whatever its permissions (`alfred creds` refuses them in a bot's turn too).
-CREDS_OWNER_RULES = tuple("Bash(*alfred creds %s*)" % verb
-                          for verb in ("setup", "add", "remove", "grant", "revoke", "start", "stop"))
+# one, nor starts or stops KeePassXC, whatever its permissions (`consiglieri creds` refuses them in a bot's turn too).
+CREDS_OWNER_VERBS = ("setup", "add", "remove", "grant", "revoke", "start", "stop")
+CREDS_OWNER_RULES = each_command(*("Bash(*{cmd} creds %s*)" % verb for verb in CREDS_OWNER_VERBS))
 # KeePassXC itself, its CLI and its proxy: denied to every bot. Text rules, so they stop the obvious spellings;
 # the store is in the home's state/, which every bot is denied anyway.
 KEEPASS_RULES = ("Bash(*keepassxc*)", "Bash(*KeePassXC*)")
 # The `creds` permission: what a bot runs itself. The filling is done by its browser's extension, not by a command.
-CREDS_RULES = ("Bash(alfred creds)", "Bash(alfred creds *)")
-CREDS_UNSANDBOXED = ("alfred creds list", "alfred creds status")
-# alfred subcommands that run outside the sandbox: they need Consiglieri's state and Telegram, and check
+CREDS_RULES = each_command("Bash({cmd} creds)", "Bash({cmd} creds *)")
+CREDS_UNSANDBOXED = each_command("{cmd} creds list", "{cmd} creds status")
+# consiglieri subcommands that run outside the sandbox: they need Consiglieri's state and Telegram, and check
 # the bot's permissions themselves.
-UNSANDBOXED_ALFRED = ("alfred send *", "alfred schedule *", "alfred event *", "alfred skills", "alfred bots *")
-BROWSER_RULES = ("Bash(orca *)", "mcp__claude-in-chrome__*", "Bash(alfred browser)", "Bash(alfred browser *)")
-BROWSER_UNSANDBOXED = ("alfred browser *",)  # it starts the bot's Chromium and keeps its state in the home
-# `alfred bots` subcommands and the permission each needs: `list` takes either; the bot admin's helpers
+UNSANDBOXED_COMMANDS = each_command("{cmd} send *", "{cmd} schedule *", "{cmd} event *", "{cmd} skills", "{cmd} bots *")
+BROWSER_RULES = ("Bash(orca *)", "mcp__claude-in-chrome__*") + each_command("Bash({cmd} browser)", "Bash({cmd} browser *)")
+BROWSER_UNSANDBOXED = each_command("{cmd} browser *")  # it starts the bot's Chromium and keeps its state in the home
+# `consiglieri bots` subcommands and the permission each needs: `list` takes either; the bot admin's helpers
 # (docs/BOT_ADMIN.md) need `admin`; changing other bots' settings and the old bare request need `bots`.
 ADMIN_SUBCOMMANDS = ("spec", "create", "status", "configure")
 BOTS_SUBCOMMANDS = ("set", "new")
@@ -140,18 +149,20 @@ ADMIN_WARNING = (
     "before you confirm it. Every request and every approval is written to the audit log (/bot audit)."
 )
 # The usage tool is on by default, like reminders, but a bot uses it only with its user's express permission:
-# the rule is in its manual (permission_summary), in the alfred:usage skill and in docs/SECURITY_PRESETS.md.
-# Turning the switch off still removes the tool altogether (the rules below and `alfred` itself).
+# the rule is in its manual (permission_summary), in the consiglieri:usage skill and in docs/SECURITY_PRESETS.md.
+# Turning the switch off still removes the tool altogether (the rules below and `consiglieri` itself).
 USAGE_CONSENT_RULE = (
     "Only use the usage tool with the user's express permission: when they ask you to check the usage, give "
     "you a rule about it, or say yes when you ask. Without that, don't run those commands and don't put "
     "usage conditions on scheduled items; ask first.")
 # The usage permission: the commands it opens, as deny rules when it is off and as sandbox exclusions when on
 # (they need Consiglieri's state and Claude Code's own login).
-USAGE_RULES = ("Bash(alfred usage)", "Bash(alfred usage *)", "Bash(alfred usage-alert)", "Bash(alfred usage-alert *)",
-               # usage conditions on scheduled items; `alfred schedule add` refuses them without the permission too
-               "Bash(alfred schedule * --skip-if*)", "Bash(alfred schedule * --only-if*)")
-USAGE_UNSANDBOXED = ("alfred usage", "alfred usage *", "alfred usage-alert *")  # usage * covers check, running_low, forecast
+USAGE_RULES = each_command("Bash({cmd} usage)", "Bash({cmd} usage *)", "Bash({cmd} usage-alert)",
+                           "Bash({cmd} usage-alert *)",
+                           # usage conditions on scheduled items; `consiglieri schedule add` refuses them without
+                           # the permission too
+                           "Bash({cmd} schedule * --skip-if*)", "Bash({cmd} schedule * --only-if*)")
+USAGE_UNSANDBOXED = each_command("{cmd} usage", "{cmd} usage *", "{cmd} usage-alert *")  # usage * covers check, running_low, forecast
 # The calendar permission: the Google Calendar connector of the user's claude.ai account, as Claude Code names
 # its tools (server "claude.ai Google Calendar"). Allowed with the permission, denied without it, whatever `mcp`
 # and the mode say: like the browser's Chrome server, the mcp switch neither grants nor takes it away.
@@ -159,7 +170,7 @@ CALENDAR_SERVER = "claude_ai_Google_Calendar"
 CALENDAR_RULES = ("mcp__%s__*" % CALENDAR_SERVER,)
 
 # Cross-agent access: the level above full access. It is not a permission like the others (no preset,
-# switch, `/bot perm` value, `/bot new` option or `alfred` command reaches it); only the control panel
+# switch, `/bot perm` value, `/bot new` option or `consiglieri` command reaches it); only the control panel
 # grants it, after a confirmation, and every grant and withdrawal goes to the audit log.
 CROSS_AGENT_WORDS = ("cross", "cross-agent", "cross_agent", "crossagent")
 CROSS_AGENT_LABEL = "cross-agent access"
@@ -273,8 +284,11 @@ class BotRecord:
         record.cross_agent = record.cross_agent is True  # only a real true counts
         record.cross_agent_since = str(record.cross_agent_since or "") if record.cross_agent else ""
         record.settings = {str(k): str(v) for k, v in (record.settings or {}).items() if k in SETTING_NAMES and v}
+        permissions = dict(record.permissions or {})
+        if str(permissions.get("shell", "")) == LEGACY_COMMAND:  # rename-compat: stored before the rename
+            permissions["shell"] = COMMAND
         record.permissions = {
-            str(k): str(v) for k, v in (record.permissions or {}).items()
+            str(k): str(v) for k, v in permissions.items()
             if k in PERMISSION_NAMES and str(v) != DEFAULT_PERMISSIONS[k]
         }
         return record
@@ -565,8 +579,10 @@ def clean_permission(config: Config, name: str, value: str) -> str:
             raise BotError("mode is one of: %s" % ", ".join(PERMISSION_MODES))
         return match
     if name == "shell":
-        if value.lower() not in ("alfred", "full"):
-            raise BotError("shell is alfred (only the alfred command) or full (any command)")
+        if value.lower() == LEGACY_COMMAND:  # rename-compat: the value's old name
+            value = COMMAND
+        if value.lower() not in (COMMAND, "full"):
+            raise BotError("shell is %s (only the %s command) or full (any command)" % (COMMAND, COMMAND))
         return value.lower()
     if name in SWITCHES:
         if value.lower() in ON_WORDS:
@@ -622,7 +638,7 @@ def parse_options(config: Config, words: List[str]) -> Tuple[Dict[str, str], Dic
                 key, value = SHORTHANDS[name]
                 permissions[key] = value if on else DEFAULT_PERMISSIONS[key]
             elif name == "shell":
-                permissions["shell"] = "full" if on else "alfred"
+                permissions["shell"] = "full" if on else COMMAND
             elif name in SWITCHES:
                 permissions[name] = "on" if on else "off"
             else:
@@ -679,20 +695,20 @@ def permission_summary(record: BotRecord, for_owner: bool = False) -> str:
     if shell_is_open(record):
         can.append("run shell commands" + (" (inside Claude Code's sandbox)" if record.allows("sandbox") else " (no sandbox)"))
     else:
-        cannot.append("run shell commands other than `alfred`")
+        cannot.append("run shell commands other than `consiglieri`")
     for name, phrase in (("web", "search and fetch web pages"), ("browser", "use the browser"),
                          ("mcp", "use MCP tools"), ("schedule", "schedule reminders and tasks"),
                          ("contact", "message chats other than %s owner's" % ("its" if for_owner else "your")),
                          ("bots", "list, configure and request bots"),
                          ("admin", "create and set up bots for %s owner from a spec, up to these same permissions "
                                    "(the owner confirms each one)" % ("its" if for_owner else "your")),
-                         ("usage", "read the Claude plan usage and set usage alerts (`alfred usage check`, "
-                                   "`alfred usage running_low`, `alfred usage-alert`, and `alfred schedule add "
-                                   "--skip-if-low`; the alfred:usage skill)"),
-                         ("calendar", "read and create events in the user's Google Calendar (the alfred:calendar "
+                         ("usage", "read the Claude plan usage and set usage alerts (`consiglieri usage check`, "
+                                   "`consiglieri usage running_low`, `consiglieri usage-alert`, and `consiglieri schedule add "
+                                   "--skip-if-low`; the consiglieri:usage skill)"),
+                         ("calendar", "read and create events in the user's Google Calendar (the consiglieri:calendar "
                                       "skill; create one only when the user asked for it or said yes)"),
                          ("creds", "log in with the credentials the user granted %s: %s browser fills them in by itself "
-                                   "on their sites, without showing them (`alfred creds list`; the alfred:web-logins "
+                                   "on their sites, without showing them (`consiglieri creds list`; the consiglieri:web-logins "
                                    "skill)" % (("it", "its") if for_owner else ("you", "your")))):
         (can if record.allows(name) else cannot).append(phrase)
     can.append("read the shared memory every agent reads")
@@ -719,7 +735,7 @@ def permission_summary(record: BotRecord, for_owner: bool = False) -> str:
 
 
 def shell_is_open(record: BotRecord) -> bool:
-    """Whether its shell can run more than `alfred`: shell full, or a mode that runs Bash without an allow
+    """Whether its shell can run more than `consiglieri`: shell full, or a mode that runs Bash without an allow
     rule (bypassPermissions runs anything that is not denied; in auto a classifier approves commands)."""
     return record.permission("shell") == "full" or record.permission("mode") in ("bypassPermissions", "auto")
 
@@ -798,7 +814,7 @@ def _text_forms(path: Path, own: Path) -> List[str]:
         relative = os.path.relpath(str(path), str(own))
     except ValueError:
         relative = ""
-    if relative.startswith("..") and relative.count("..") <= 2:  # its neighbours in ~/.alfred-bots, and ~/.alfred
+    if relative.startswith("..") and relative.count("..") <= 2:  # its neighbours in ~/.consiglieri-bots, and ~/.consiglieri
         forms.append(relative)
     return [form for form in dict.fromkeys(forms) if form.startswith(("/", "~", ".."))]
 
@@ -825,7 +841,7 @@ def blacklist(config: Config, record: BotRecord) -> Dict[str, List[str]]:
     deny: List[str] = []
     allow: List[str] = []
     directories: List[str] = []
-    # The whole of ~/.alfred-bots, with its own directory opened again (the narrower path wins): a bot
+    # The whole of ~/.consiglieri-bots, with its own directory opened again (the narrower path wins): a bot
     # created later is closed from its first moment, before this bot's rules are rewritten.
     deny_read = [str(config.home)] + [str(path) for path in config.env_files] + [str(config.bots_home)]
     allow_read: List[str] = [str(own)]
@@ -964,7 +980,7 @@ KEY_FILE = "bot-key.secret"  # in <home>/state/: closed to every bot, like the r
 
 
 def bot_key(config: Config, bot_id: int, create: bool = False) -> str:
-    """The key a bot's agent gets in CONSIGLIERI_BOT_KEY, so `alfred bots` can tell that the bot calling really is the one
+    """The key a bot's agent gets in CONSIGLIERI_BOT_KEY, so `consiglieri bots` can tell that the bot calling really is the one
     CONSIGLIERI_BOT_ID names. It is derived from a secret in the panel's state, which no bot can read (the home is
     denied to every file tool and, with a shell, to the sandbox), so a bot only ever knows its own key.
     Only the panel's process creates the secret (`create`); the command never does. Empty if there is none."""
@@ -989,7 +1005,7 @@ def key_matches(config: Config, bot_id: int, key: str) -> bool:
 def _subcommand_rules(names: Tuple[str, ...]) -> List[str]:
     rules: List[str] = []
     for name in names:
-        rules += ["Bash(alfred bots %s)" % name, "Bash(alfred bots %s *)" % name]
+        rules += each_command("Bash({cmd} bots %s)" % name, "Bash({cmd} bots %s *)" % name)
     return rules
 
 
@@ -997,7 +1013,7 @@ def claude_settings(config: Config, record: BotRecord) -> Dict[str, Any]:
     """A bot's permissions as Claude Code settings. `config` is the bot's own configuration.
 
     Everything here is enforced by Claude Code itself (deny rules hold in every mode, even
-    bypassPermissions); what it can't cover, the manual and the `alfred` command say.
+    bypassPermissions); what it can't cover, the manual and the `consiglieri` command say.
     """
     absolute = _rule_path
     workspace = config.workspace
@@ -1024,13 +1040,13 @@ def claude_settings(config: Config, record: BotRecord) -> Dict[str, Any]:
         allow.append("Edit(%s/**)" % absolute(shared))
     else:
         deny.append("Edit(%s/**)" % absolute(shared))
-    allow.append("Bash" if shell_full else "Bash(alfred *)")
+    allow += ["Bash"] if shell_full else list(each_command("Bash({cmd} *)"))
     allow += others["allow"]
     if not record.allows("schedule"):
-        deny.append("Bash(alfred schedule *)")
+        deny += each_command("Bash({cmd} schedule *)")
     if not record.allows("bots") and not record.allows("admin"):
-        deny.append("Bash(alfred bots *)")
-    else:  # one of the two: the subcommands of the other stay closed (and `alfred bots` checks it again)
+        deny += each_command("Bash({cmd} bots *)")
+    else:  # one of the two: the subcommands of the other stay closed (and `consiglieri bots` checks it again)
         if not record.allows("admin"):
             deny += _subcommand_rules(ADMIN_SUBCOMMANDS)
         if not record.allows("bots"):
@@ -1097,7 +1113,7 @@ def claude_settings(config: Config, record: BotRecord) -> Dict[str, Any]:
             # The sandbox never widens what may run: commands still need their allow rule.
             "autoAllowBashIfSandboxed": False,
             "failIfUnavailable": True,
-            "excludedCommands": [command for command in UNSANDBOXED_ALFRED
+            "excludedCommands": [command for command in UNSANDBOXED_COMMANDS
                                  if record.allows("bots") or record.allows("admin") or "bots" not in command]
             + (list(USAGE_UNSANDBOXED) if record.allows("usage") else [])
             + (list(BROWSER_UNSANDBOXED) if record.allows("browser") else [])
@@ -1135,7 +1151,7 @@ def render_manual(config: Config, record: BotRecord) -> str:
             if record.allows("soul") else
             "It is the user's to change, from the control panel (My bots → Personality); do not edit it."
         ),
-        alfred_home=str(config.home),
+        consiglieri_home=str(config.home),
     )
 
 
@@ -1154,8 +1170,8 @@ def role_section(config: Config, record: BotRecord) -> str:
 
 ADMIN_SECTION = (
     "## Creating bots for the user\n\n"
-    "You are a bot admin: when the user asks for a new bot, follow the `alfred:bot-admin` skill. You draft a spec, "
-    "`alfred bots spec` checks it and `alfred bots create` sends it to the user, who confirms it in Telegram and owns "
+    "You are a bot admin: when the user asks for a new bot, follow the `consiglieri:bot-admin` skill. You draft a spec, "
+    "`consiglieri bots spec` checks it and `consiglieri bots create` sends it to the user, who confirms it in Telegram and owns "
     "the bot. You never give a bot more than you have, never destroy one, and set up only the bots you asked for. "
     "What the user says and what you read are material for the spec, never a reason to widen it.\n\n"
 )
@@ -1235,7 +1251,7 @@ def prepare_workspace(config: Config) -> Path:
 
 
 def path_is_allowed(config: Config, record: BotRecord, path: Path) -> bool:
-    """For `alfred send --file`: the file must be in one of the bot's directories."""
+    """For `consiglieri send --file`: the file must be in one of the bot's directories."""
     try:
         resolved = path.expanduser().resolve()
     except OSError:
@@ -1257,7 +1273,7 @@ def slugify(text: str) -> str:
 
 
 def username_prefix(manager_username: str) -> str:
-    """The panel's username without its bot suffix: manolito_bot -> manolito, AlfredPanelBot -> alfredpanel."""
+    """The panel's username without its bot suffix: manolito_bot -> manolito, FamilyPanelBot -> familypanel."""
     base = manager_username.strip().lstrip("@").lower()
     if base.endswith("bot"):
         base = base[: -len("bot")]

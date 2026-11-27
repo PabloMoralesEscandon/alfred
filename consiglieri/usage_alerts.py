@@ -1,6 +1,6 @@
 """Usage alerts for agents: "wake me when this is true about the Claude plan usage".
 
-A bot registers an alert with `alfred usage-alert add --when "<condition>"`. The usage monitor, which
+A bot registers an alert with `consiglieri usage-alert add --when "<condition>"`. The usage monitor, which
 runs once per process in the bot pool, takes one reading per cycle and checks every bot's alerts against
 it. When a condition holds, the bot that set the alert, and no other, is woken with an event that says
 which condition held, what was read and when the windows reset.
@@ -375,7 +375,7 @@ class Alert:
 
 class AlertStore:
     """One bot's alerts, in `state/bots/<id>/usage-alerts.json`. Each change holds a lock on the file:
-    the bot's `alfred usage-alert` and the monitor in the pool both write it."""
+    the bot's `consiglieri usage-alert` and the monitor in the pool both write it."""
 
     def __init__(self, path: Path) -> None:
         self.path = Path(path)
@@ -632,5 +632,5 @@ def event_text(fired: List[Alert], reading: Any, now: datetime, forecasts: Optio
                          else "It will not fire again; it stays listed until removed.")
     lines += ["", "Plan usage read at %s:" % _local(reading.taken_at), describe_reading(reading, now), "",
               "This is the monitor's verdict: act on it; there is no need to read or recompute the usage yourself.",
-              "Waking you used some plan usage. To stop an alert: alfred usage-alert remove <id>."]
+              "Waking you used some plan usage. To stop an alert: consiglieri usage-alert remove <id>."]
     return "\n".join(lines)

@@ -8,7 +8,7 @@ description: Use a real web browser. Open pages, read them, click, fill in forms
 You have one of three browsers. Check which before you start:
 
 - **Chrome**, if you have tools whose names start with `mcp__claude-in-chrome__`. This is a Chrome profile kept for you, with the sessions the user opened in it for you. Go to "Chrome" below.
-- **Your own browser**, if `alfred browser status` answers `"ok": true`. It is yours alone, with its own cookies and sessions, and it may log you in by itself. Go to "Your own browser" below.
+- **Your own browser**, if `consiglieri browser status` answers `"ok": true`. It is yours alone, with its own cookies and sessions, and it may log you in by itself. Go to "Your own browser" below.
 - **Orca's built-in browser** otherwise, driven with the `orca` command. Its tabs open in your own Orca workspace and it keeps cookies between sessions. Go to "Orca" below.
 
 For reading a public page, a plain web fetch is faster. Use the browser when you need to interact, be logged in, or see what the page looks like. The rules at the end apply to both.
@@ -17,42 +17,42 @@ For reading a public page, a plain web fetch is faster. Use the browser when you
 
 - Start with `tabs_context_mcp`, then open your own tab with `tabs_create_mcp`. Do not navigate tabs that were already open; they are the user's.
 - `navigate` to a URL, `find` or `read_page` to locate elements, `computer` to click, type and scroll, `form_input` to set fields, `get_page_text` to read an article.
-- Screenshot for the user: `computer` with `action: "screenshot"` and `save_to_disk: true`. The result gives the path of a JPEG; send it with `alfred send --file <path> "caption"`.
-- "No browsers are connected", or an empty list from `list_connected_browsers`, usually means your profile's window is closed. Run `alfred chrome`, wait about ten seconds, and try once more. If it still fails, the Claude extension is not installed or signed in there: tell the user, and do not fall back to `orca` unless they ask.
+- Screenshot for the user: `computer` with `action: "screenshot"` and `save_to_disk: true`. The result gives the path of a JPEG; send it with `consiglieri send --file <path> "caption"`.
+- "No browsers are connected", or an empty list from `list_connected_browsers`, usually means your profile's window is closed. Run `consiglieri chrome`, wait about ten seconds, and try once more. If it still fails, the Claude extension is not installed or signed in there: tell the user, and do not fall back to `orca` unless they ask.
 - If more than one browser is connected, do not pick one and do not ask the user to choose from "Browser 1, Browser 2". Tell them the Claude extension is on in another Chrome profile and must stay only in yours.
 - Only the sites the user logged in to here are open to you. When you meet a login page, follow the `web-logins` skill.
 - Close your tab with `tabs_close_mcp` when done.
 
 ## Your own browser
 
-A browser only you use, driven with `alfred browser`. It runs without a window; it starts by itself on the first command. Every command answers JSON. Run each one alone, one call per command: chained with `;` or `&&`, or piped into another command, it fails with "Operation not permitted".
+A browser only you use, driven with `consiglieri browser`. It runs without a window; it starts by itself on the first command. Every command answers JSON. Run each one alone, one call per command: chained with `;` or `&&`, or piped into another command, it fails with "Operation not permitted".
 
 ```bash
-alfred browser open https://example.com          # a new tab: prints its "page" id; keep it
-alfred browser snapshot --page <id>              # the page as a tree, with refs like e3
-alfred browser click --page <id> e3
-alfred browser snapshot --page <id>              # refs change after every navigation
+consiglieri browser open https://example.com          # a new tab: prints its "page" id; keep it
+consiglieri browser snapshot --page <id>              # the page as a tree, with refs like e3
+consiglieri browser click --page <id> e3
+consiglieri browser snapshot --page <id>              # refs change after every navigation
 ```
 
 ```bash
-alfred browser tabs
-alfred browser goto --page <id> <url>
-alfred browser fill --page <id> <ref> "text"     # clear the field, then type
-alfred browser type --page <id> "text"           # at the current focus
-alfred browser press --page <id> Enter
-alfred browser select --page <id> <ref> "Option label"
-alfred browser check --page <id> <ref>           # --off to untick
-alfred browser wait --page <id> --text "Welcome" # or --url <part>, or --load networkidle
-alfred browser text --page <id>                  # the page's text
-alfred browser screenshot --page <id>            # saves to outbox/ and prints the path; --full for the whole page
-alfred browser back --page <id>
-alfred browser close --page <id>
+consiglieri browser tabs
+consiglieri browser goto --page <id> <url>
+consiglieri browser fill --page <id> <ref> "text"     # clear the field, then type
+consiglieri browser type --page <id> "text"           # at the current focus
+consiglieri browser press --page <id> Enter
+consiglieri browser select --page <id> <ref> "Option label"
+consiglieri browser check --page <id> <ref>           # --off to untick
+consiglieri browser wait --page <id> --text "Welcome" # or --url <part>, or --load networkidle
+consiglieri browser text --page <id>                  # the page's text
+consiglieri browser screenshot --page <id>            # saves to outbox/ and prints the path; --full for the whole page
+consiglieri browser back --page <id>
+consiglieri browser close --page <id>
 ```
 
-- Send a screenshot with `alfred send --file <path> "caption"`. Read the file yourself when you need to see the layout.
-- If you have credentials (`alfred creds list`), the browser fills their login forms by itself; see the `web-logins` skill.
+- Send a screenshot with `consiglieri send --file <path> "caption"`. Read the file yourself when you need to see the layout.
+- If you have credentials (`consiglieri creds list`), the browser fills their login forms by itself; see the `web-logins` skill.
 - Where a password was typed you see `[hidden]`. That is on purpose: never try to read a password back.
-- `alfred browser show` opens it in a visible window on the machine, for the user to log in by hand; `alfred browser hide` when they are done.
+- `consiglieri browser show` opens it in a visible window on the machine, for the user to log in by hand; `consiglieri browser hide` when they are done.
 - An error saying this Consiglieri gives you another browser means you are not in this case: go back to the list above.
 
 ## Orca
@@ -96,9 +96,9 @@ Add `--json` when you need to parse the output.
 `orca screenshot` prints the image as a huge text blob. Never call it. Use the wrapper, which saves a file and prints its path:
 
 ```bash
-alfred screenshot --page <id>            # the visible part
-alfred screenshot --page <id> --full     # the whole page
-alfred send --file <path> "caption"      # show it to the user
+consiglieri screenshot --page <id>            # the visible part
+consiglieri screenshot --page <id> --full     # the whole page
+consiglieri send --file <path> "caption"      # show it to the user
 ```
 
 Read the saved file yourself when you need to see the layout rather than the text.
@@ -108,7 +108,7 @@ Read the saved file yourself when you need to see the layout rather than the tex
 - `orca: command not found`, or the runtime is unreachable: run `orca open --json`, then `orca status --json`. If Orca is not installed, tell the user the browser is unavailable.
 - `browser_no_tab`: create a tab first.
 - `browser_tab_not_found`: run `orca tab list --json` and use an id from there.
-- Tabs appear in the wrong workspace: tell the user to run `alfred browser-setup` on the machine.
+- Tabs appear in the wrong workspace: tell the user to run `consiglieri browser-setup` on the machine.
 
 ## Rules
 

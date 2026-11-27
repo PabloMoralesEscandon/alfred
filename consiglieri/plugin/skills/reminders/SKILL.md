@@ -5,20 +5,20 @@ description: Schedule something for later in this Telegram chat. Covers reminder
 
 # Reminders and scheduled tasks
 
-Everything goes through `alfred schedule`, which prints JSON. The chat is taken from your environment, so you never pass a chat id.
+Everything goes through `consiglieri schedule`, which prints JSON. The chat is taken from your environment, so you never pass a chat id.
 
 ## Add
 
 ```bash
 # A fixed message, delivered as-is
-alfred schedule add --at 2026-06-08T09:00:00+02:00 --message "Call Sam"
-alfred schedule add --in 20m --message "Take the pizza out"
+consiglieri schedule add --at 2026-06-08T09:00:00+02:00 --message "Call Sam"
+consiglieri schedule add --in 20m --message "Take the pizza out"
 
 # A task: at that time you are woken up with this prompt and your reply is sent to the chat
-alfred schedule add --at 2026-06-08T08:00 --task "Check today's weather in Madrid and tell me if I need an umbrella"
+consiglieri schedule add --at 2026-06-08T08:00 --task "Check today's weather in Madrid and tell me if I need an umbrella"
 
 # Recurring: add --every to either kind
-alfred schedule add --at 2026-06-08T08:00 --every 1d --task "Morning briefing: calendar and unread mail"
+consiglieri schedule add --at 2026-06-08T08:00 --every 1d --task "Morning briefing: calendar and unread mail"
 ```
 
 - `--at` takes an ISO-8601 time. Without an offset it is read as the machine's local time, which is the time shown in the `<context>` line.
@@ -30,8 +30,8 @@ alfred schedule add --at 2026-06-08T08:00 --every 1d --task "Morning briefing: c
 A task is also how you leave a note for your future self. At that time you receive `[Scheduled task] <your note>` in this conversation, exactly as if a message had arrived, and you act on it. Only you see the note.
 
 ```bash
-alfred schedule add --in 30m --task "Note to self: check whether the export to ~/exports finished. Tell the user only if it failed."
-alfred schedule add --at 2026-06-12T07:30 --task "Note to self: the user flies at 11:40. Check the flight status and tell them the gate."
+consiglieri schedule add --in 30m --task "Note to self: check whether the export to ~/exports finished. Tell the user only if it failed."
+consiglieri schedule add --at 2026-06-12T07:30 --task "Note to self: the user flies at 11:40. Check the flight status and tell them the gate."
 ```
 
 - Use it on your own initiative whenever something needs a later look: a job that will take hours, an answer you are waiting for, a follow-up the user will expect.
@@ -42,24 +42,24 @@ alfred schedule add --at 2026-06-12T07:30 --task "Note to self: the user flies a
 ## Only when the plan limits allow
 
 Only with the user's express permission (they asked for it, gave you a usage rule, or said yes when you
-asked; see the `alfred:usage` skill), a reminder or task can carry a usage condition, checked just before each
+asked; see the `consiglieri:usage` skill), a reminder or task can carry a usage condition, checked just before each
 delivery. When it holds the item back, nothing is sent and you are not woken (a recurring item moves on to
 its next time):
 
 ```bash
-alfred schedule add --at 2026-06-08T17:00 --every 1d --task "Daily report" --skip-if-low        # not when the 5-hour window or the week is at 90%
-alfred schedule add --at 2026-06-08T18:00 --every 1d --task "Backlog" --only-if-waste --hours 9-20  # only when weekly quota would go unused
+consiglieri schedule add --at 2026-06-08T17:00 --every 1d --task "Daily report" --skip-if-low        # not when the 5-hour window or the week is at 90%
+consiglieri schedule add --at 2026-06-08T18:00 --every 1d --task "Backlog" --only-if-waste --hours 9-20  # only when weekly quota would go unused
 ```
 
 Use it for work that can wait; never for something the user needs at that time. The options are in the
-`alfred:usage` skill.
+`consiglieri:usage` skill.
 
 ## List and cancel
 
 ```bash
-alfred schedule list           # pending items for this chat
-alfred schedule list --all     # include sent, cancelled, failed, and skipped
-alfred schedule cancel <id>    # the id, or its first characters
+consiglieri schedule list           # pending items for this chat
+consiglieri schedule list --all     # include sent, cancelled, failed, and skipped
+consiglieri schedule cancel <id>    # the id, or its first characters
 ```
 
 ## Behaviour

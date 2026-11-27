@@ -1,8 +1,12 @@
-"""Keep `alfred run` alive: a per-user background service that starts at login and restarts on exit.
+"""Keep `consiglieri run` alive: a per-user background service that starts at login and restarts on exit.
 
 macOS uses a launchd LaunchAgent, Linux a systemd user unit. Both are
 per-user on purpose: Claude Code's login, the Orca app and Chrome all belong
 to the logged-in user, so a system-wide daemon could not reach them.
+
+Installs from before the rename run as `com.consiglieri.bot` / `consiglieri.service`. Until `install` replaces it,
+`uninstall`, `restart` and `status` act on whichever of the two is installed, and `install` always removes
+the old one first: two services with the same bot token would fight over Telegram's updates.
 """
 
 from __future__ import annotations
@@ -18,8 +22,11 @@ from typing import Dict, List, Optional, Tuple
 
 from .config import REPO_ROOT, Config
 
-LABEL = "com.alfred.bot"
-SYSTEMD_UNIT = "alfred.service"
+LABEL = "com.consiglieri.bot"
+SYSTEMD_UNIT = "consiglieri.service"
+LEGACY_LABEL = "com.alfred.bot"  # rename-compat
+LEGACY_SYSTEMD_UNIT = "alfred.service"  # rename-compat
+LEGACY_LOG = "alfred.log"  # rename-compat: where the old service writes, in state/
 RESTART_DELAY_SECONDS = 15
 
 
@@ -142,8 +149,34 @@ def launchd_restart(label: str = LABEL) -> None:
 # -- systemd (Linux) -----------------------------------------------------------
 
 
-def systemd_unit_path() -> Path:
-    return Path.home() / ".config" / "systemd" / "user" / SYSTEMD_UNIT
+def systemd_unit_path(unit: str = SYSTEMD_UNIT) -> Path:
+    return Path.home() / ".config" / "systemd" / "user" / unit
+
+
+def active_label() -> str:
+    """The launchd job to act on: the new one if it is installed, else an old one that is, else the new one."""
+    if not launchd_plist_path(LABEL).exists() and launchd_plist_path(LEGACY_LABEL).exists():
+        return LEGACY_LABEL
+    return LABEL
+
+
+def active_unit() -> str:
+    if not systemd_unit_path(SYSTEMD_UNIT).exists() and systemd_unit_path(LEGACY_SYSTEMD_UNIT).exists():
+        return LEGACY_SYSTEMD_UNIT
+    return SYSTEMD_UNIT
+
+
+def retire_legacy() -> bool:
+    """Stop and remove the service an install from before the rename left. Whether there was one."""
+    if platform() == "launchd":
+        return launchd_uninstall(LEGACY_LABEL)
+    path = systemd_unit_path(LEGACY_SYSTEMD_UNIT)
+    _systemctl("disable", "--now", LEGACY_SYSTEMD_UNIT)
+    existed = path.exists()
+    if existed:
+        path.unlink()
+        _systemctl("daemon-reload")
+    return existed
 
 
 def systemd_unit(config: Config) -> str:
@@ -193,7 +226,7 @@ def platform() -> str:
         return "launchd"
     if sys.platform.startswith("linux") and shutil.which("systemctl"):
         return "systemd"
-    raise ServiceError("no supported service manager here; run `alfred run` under your own supervisor")
+    raise ServiceError("no supported service manager here; run `consiglieri run` under your own supervisor")
 
 
 def install(config: Config) -> Tuple[Path, List[str]]:
@@ -202,6 +235,8 @@ def install(config: Config) -> Tuple[Path, List[str]]:
     if problems:
         raise ServiceError("not installing, the bot would not start:\n- " + "\n- ".join(problems))
     notes: List[str] = []
+    if retire_legacy():  # never two services with the same token
+        notes.append("Removed the service installed under the old name.")
     if platform() == "launchd":
         path = launchd_install(config)
         notes.append("It starts when you log in. For it to come back after a power cut, turn on automatic login.")
@@ -220,9 +255,10 @@ def install(config: Config) -> Tuple[Path, List[str]]:
 
 def uninstall() -> bool:
     if platform() == "launchd":
-        return launchd_uninstall()
-    path = systemd_unit_path()
-    _systemctl("disable", "--now", SYSTEMD_UNIT)
+        return launchd_uninstall(active_label())
+    unit = active_unit()
+    path = systemd_unit_path(unit)
+    _systemctl("disable", "--now", unit)
     existed = path.exists()
     if existed:
         path.unlink()
@@ -232,30 +268,39 @@ def uninstall() -> bool:
 
 def restart() -> None:
     if platform() == "launchd":
-        launchd_restart()
-    elif _systemctl("restart", SYSTEMD_UNIT).returncode != 0:
+        launchd_restart(active_label())
+    elif _systemctl("restart", active_unit()).returncode != 0:
         raise ServiceError("service is not installed")
 
 
 def status() -> str:
     if platform() == "launchd":
-        info = launchd_status()
+        label = active_label()
+        info = launchd_status(label)
         if info["installed"] == "no":
             return "not installed"
         if info["state"] == "running":
-            return "running (pid %s)" % info.get("pid")
+            return "running (pid %s)" % info.get("pid") + _legacy_note(label == LEGACY_LABEL)
         text = "installed, %s" % info["state"]
         if info.get("last_exit") not in (None, "(never exited)"):
             text += ", last exit code %s" % info["last_exit"]
-        return text
-    if not systemd_unit_path().exists():
+        return text + _legacy_note(label == LEGACY_LABEL)
+    unit = active_unit()
+    if not systemd_unit_path(unit).exists():
         return "not installed"
-    return _systemctl("is-active", SYSTEMD_UNIT).stdout.strip() or "unknown"
+    return (_systemctl("is-active", unit).stdout.strip() or "unknown") + _legacy_note(unit == LEGACY_SYSTEMD_UNIT)
+
+
+def _legacy_note(legacy: bool) -> str:
+    return " (installed under the old name; `consiglieri migrate`, then `consiglieri service install`)" if legacy else ""
 
 
 def tail_log(config: Config, lines: int = 40) -> str:
+    path = log_path(config)
+    if not path.exists() and (config.state_dir / LEGACY_LOG).exists():
+        path = config.state_dir / LEGACY_LOG  # rename-compat: the old service's log, until it is reinstalled
     try:
-        content = log_path(config).read_text(encoding="utf-8", errors="replace").splitlines()
+        content = path.read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError:
-        return "(no log yet at %s)" % log_path(config)
+        return "(no log yet at %s)" % path
     return "\n".join(content[-lines:])

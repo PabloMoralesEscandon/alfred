@@ -1,4 +1,4 @@
-"""`alfred browser`: a bot drives its own browser (alfred/bot_browser.py, docs/CREDENTIALS.md).
+"""`consiglieri browser`: a bot drives its own browser (consiglieri/bot_browser.py, docs/CREDENTIALS.md).
 
 In a bot's turn it is that bot's browser, checked against CONSIGLIERI_BOT_KEY; from a terminal, `--bot` says whose
 (the user opening it to log in by hand, for instance). Every command answers JSON. What comes back of a page is
@@ -45,7 +45,7 @@ def _target(config: Config, args: argparse.Namespace):
     browser = BotRegistry(config).config_for(record.bot_id).browser
     if browser != "bot":
         raise CommandError("%s uses %s, not a browser of its own (/bot set %s browser bot, or CONSIGLIERI_BROWSER=bot for "
-                           "every bot); see the alfred:browser skill"
+                           "every bot); see the consiglieri:browser skill"
                            % (record.handle, {"orca": "Orca's browser", "chrome": "the Chrome profile",
                                               "none": "no browser"}.get(browser, browser), record.username))
     return record
@@ -123,7 +123,7 @@ def cmd_install(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
     from .cli import CommandError
 
     if in_bot_turn():
-        raise CommandError("`alfred browser install` is for the user, on the machine")
+        raise CommandError("`consiglieri browser install` is for the user, on the machine")
     return {"ok": True, "done": install(config)}
 
 
@@ -147,7 +147,7 @@ def cmd_show(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
     """A visible window, for the user to log in by hand (over screen sharing, for instance). Tabs are reopened."""
     driver = Driver(config, args, headless=False)
     return {"ok": True, "headless": False,
-            "note": "the browser window is open on the machine; `alfred browser hide` when the user is done"}
+            "note": "the browser window is open on the machine; `consiglieri browser hide` when the user is done"}
 
 
 @_driven

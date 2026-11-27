@@ -1,7 +1,7 @@
 """Credentials for the bots, kept in KeePassXC (docs/CREDENTIALS.md).
 
 The secrets never reach a bot's agent. KeePassXC holds them, and its browser extension (KeePassXC-Browser),
-loaded in each bot's own browser (alfred/bot_browser.py), types them into login forms of the sites they
+loaded in each bot's own browser (consiglieri/bot_browser.py), types them into login forms of the sites they
 belong to. A bot only presses "Log in".
 
 Which bot gets which credential is KeePassXC's own mechanism: an extension connects to KeePassXC with an
@@ -13,7 +13,7 @@ identity (a name and a key), and KeePassXC answers it only from databases that h
                                        active database, because the extension checks that one first
         <name>.kdbx                    one credential: one entry (user, password, URLs, TOTP seed), and the
                                        identities of the bots it is granted to
-        identities.json                0600, each bot's identity {bot_id: {"id": "alfred-<id>", "key": ...}}
+        identities.json                0600, each bot's identity {bot_id: {"id": "consiglieri-<id>", "key": ...}}
         keepassxc.ini                  KeePassXC's settings for this instance (never the user's own)
 
 Granting is adding a bot's identity to a credential's database; revoking is taking it out. keepassxc-cli
@@ -54,7 +54,10 @@ from .config import Config
 NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{0,39}$")
 HUB = "hub"
 RESERVED = (HUB,)
-IDENTITY_PREFIX = "alfred-"  # a bot's identity name: alfred-<bot_id>
+IDENTITY_PREFIX = "consiglieri-"  # a bot's identity name: consiglieri-<bot_id>
+# rename-compat: identities made before the rename keep their name, stored in identities.json, in every
+# database the bot was granted and in its browser's extension; renaming them would undo every grant.
+LEGACY_IDENTITY_PREFIX = "alfred-"  # rename-compat
 BROWSER_KEY_PREFIX = "KPXC_BROWSER_"  # how KeePassXC stores an extension's identity in a database's metadata
 EXTRA_URL_PREFIX = "KP2A_URL_"  # more URLs for one entry, which the browser integration also matches
 MAC_APP = Path("/Applications/KeePassXC.app/Contents/MacOS")
@@ -149,7 +152,7 @@ def check_totp(uri: str) -> str:
     if not text:
         raise CredentialError("the TOTP key is empty")
     if not text.lower().startswith("otpauth://"):
-        text = "otpauth://totp/alfred?secret=%s&period=30&digits=6" % text.upper()
+        text = "otpauth://totp/consiglieri?secret=%s&period=30&digits=6" % text.upper()
     totp_parts(text)  # raises if it can't be used
     return text
 
@@ -277,7 +280,7 @@ class KeePass:
 
     def require_set_up(self) -> None:
         if not self.is_set_up():
-            raise CredentialError("credentials are not set up; run `alfred creds setup` on the machine")
+            raise CredentialError("credentials are not set up; run `consiglieri creds setup` on the machine")
 
     # -- keepassxc-cli --
 
@@ -491,9 +494,9 @@ class KeePass:
 
     def secrets_for(self, bot_id: int) -> List[str]:
         """The passwords and current TOTP codes of a bot's credentials: only so that whatever the bot reads from
-        its browser can be scrubbed of them (alfred/bot_browser.py)."""
+        its browser can be scrubbed of them (consiglieri/bot_browser.py)."""
         found: List[str] = []
-        ident = identity_name(bot_id)
+        ident = self._ident(bot_id)
         for name in self.names():
             root = self.export(self.path(name))
             entry = self._entry(root)
@@ -521,6 +524,12 @@ class KeePass:
         except (OSError, ValueError):
             return {}
         return data if isinstance(data, dict) else {}
+
+    def _ident(self, bot_id: int) -> str:
+        """The name a bot's identity has in the databases: the stored one (an older bot's may have the old prefix),
+        or the one it will get."""
+        found = self._identities().get(str(int(bot_id))) or {}
+        return str(found.get("id") or identity_name(bot_id))
 
     def identity(self, bot_id: int, create: bool = True) -> Optional[Dict[str, str]]:
         """A bot's identity for KeePassXC: its name and a random key, made once."""
@@ -559,13 +568,13 @@ class KeePass:
     def revoke(self, name: str, bot_id: int) -> bool:
         """Whether it was granted."""
         self.get(name)
-        return self._change(self.path(name), identity_name(bot_id), None)
+        return self._change(self.path(name), self._ident(bot_id), None)
 
     def forget_bot(self, bot_id: int) -> List[str]:
         """A destroyed bot: out of every database, and its identity gone. Returns the credentials it had."""
         if not self.is_set_up():
             return []
-        ident = identity_name(bot_id)
+        ident = self._ident(bot_id)
         had = []
         for name in self.names():
             if self._change(self.path(name), ident, None):
@@ -666,8 +675,9 @@ def identity_name(bot_id: int) -> str:
 
 def bot_of(ident: str) -> int:
     """The bot an identity name stands for, or 0 for one Consiglieri did not make."""
-    if ident.startswith(IDENTITY_PREFIX) and ident[len(IDENTITY_PREFIX):].isdigit():
-        return int(ident[len(IDENTITY_PREFIX):])
+    for prefix in (IDENTITY_PREFIX, LEGACY_IDENTITY_PREFIX):  # rename-compat
+        if ident.startswith(prefix) and ident[len(prefix):].isdigit():
+            return int(ident[len(prefix):])
     return 0
 
 

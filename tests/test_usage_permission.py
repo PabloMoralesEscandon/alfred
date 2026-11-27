@@ -47,7 +47,7 @@ class PermissionTests(unittest.TestCase):
         self.assertEqual(bots.DEFAULT_PERMISSIONS["usage"], bots.DEFAULT_PERMISSIONS["schedule"])  # like reminders
         self.assertIn("usage", bots.SWITCHES)
         self.assertTrue(self.bot().allows("usage"))
-        for key in presets.keys():  # the security presets (alfred/presets.py), Basic included
+        for key in presets.keys():  # the security presets (consiglieri/presets.py), Basic included
             self.assertEqual(presets.resolve(key)["usage"], "on", key)
 
     def test_values_and_options(self) -> None:
@@ -69,10 +69,10 @@ class PermissionTests(unittest.TestCase):
 
     def test_sandbox_lets_the_usage_commands_out_only_with_it(self) -> None:
         excluded = self.settings(shell="full", usage="off")["sandbox"]["excludedCommands"]
-        self.assertNotIn("alfred usage-alert *", excluded)
+        self.assertNotIn("consiglieri usage-alert *", excluded)
         excluded = self.settings(shell="full")["sandbox"]["excludedCommands"]
-        self.assertIn("alfred usage-alert *", excluded)
-        self.assertIn("alfred usage", excluded)
+        self.assertIn("consiglieri usage-alert *", excluded)
+        self.assertIn("consiglieri usage", excluded)
 
     def test_summary_names_it(self) -> None:
         self.assertIn("read the Claude plan usage", bots.permission_summary(self.bot(usage="off")).split("You cannot")[1])
@@ -81,7 +81,7 @@ class PermissionTests(unittest.TestCase):
         self.assertIn("usage: off", bots.describe(self.bot(usage="off")))
 
     def test_the_agent_is_told_to_use_it_only_with_the_users_express_permission(self) -> None:
-        # In what the agent reads: its manual (the permission summary, and BOT.md) and the alfred:usage skill.
+        # In what the agent reads: its manual (the permission summary, and BOT.md) and the consiglieri:usage skill.
         summary = bots.permission_summary(self.bot())
         self.assertIn(bots.USAGE_CONSENT_RULE, summary)
         self.assertIn("express permission", bots.USAGE_CONSENT_RULE)
@@ -100,7 +100,7 @@ class PermissionTests(unittest.TestCase):
 
 
 class UsageCommandTests(unittest.TestCase):
-    """`alfred usage` from inside a bot's turn: the permission and the global switch both have to be on."""
+    """`consiglieri usage` from inside a bot's turn: the permission and the global switch both have to be on."""
 
     def setUp(self) -> None:
         self.sandbox = Sandbox()

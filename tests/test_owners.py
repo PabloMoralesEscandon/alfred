@@ -1,7 +1,7 @@
 """Two allowed users, each with their own bots: neither sees, changes, talks to or reaches into the other's.
 
 The checks hold in the text commands, in the menu (where a button carries only a bot id, which must not be
-trusted), in the confirmation buttons, in a bot's own chat, in the `alfred bots` commands a bot runs and in
+trusted), in the confirmation buttons, in a bot's own chat, in the `consiglieri bots` commands a bot runs and in
 cross-agent access.
 """
 

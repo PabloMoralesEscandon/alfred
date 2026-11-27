@@ -1,8 +1,8 @@
-"""Each bot's own browser: a Chromium with its own profile, driven with `alfred browser` (docs/CREDENTIALS.md).
+"""Each bot's own browser: a Chromium with its own profile, driven with `consiglieri browser` (docs/CREDENTIALS.md).
 
 With CONSIGLIERI_BROWSER=bot, a bot with the browser permission gets a browser of its own instead of Orca's or the
 shared Chrome profile. It is a plain Chromium (Playwright's build, which still loads unpacked extensions),
-started by Consiglieri on demand, and driven over the DevTools protocol by `alfred browser ...`: commands any
+started by Consiglieri on demand, and driven over the DevTools protocol by `consiglieri browser ...`: commands any
 agent can run from a shell, whatever its harness or model.
 
     <home>/state/browsers/<bot_id>/       0700, closed to every bot
@@ -13,7 +13,7 @@ agent can run from a shell, whatever its harness or model.
     <home>/state/browser-extensions/keepassxc-browser-<version>/   the extension, unpacked, checked by its hash
 
 With the `creds` permission too, the browser loads KeePassXC-Browser with the bot's identity already in it
-(alfred/keepass.py): the extension fills in the credentials granted to that bot, on their sites only, by
+(consiglieri/keepass.py): the extension fills in the credentials granted to that bot, on their sites only, by
 itself. Without it, no extension is loaded at all.
 
 What the bot reads of a page passes through `scrub`: the values of password fields, and every password and
@@ -141,11 +141,11 @@ def chromium_path(config: Config) -> str:
         from playwright.sync_api import sync_playwright
     except ImportError:
         raise BrowserError("Playwright is not installed: venv/bin/pip install -e '.[browser]', then "
-                           "`alfred browser install`") from None
+                           "`consiglieri browser install`") from None
     with sync_playwright() as playwright:
         path = playwright.chromium.executable_path
     if not os.path.exists(path):
-        raise BrowserError("Chromium is not installed; run `alfred browser install` on the machine")
+        raise BrowserError("Chromium is not installed; run `consiglieri browser install` on the machine")
     return path
 
 
@@ -361,10 +361,10 @@ class BotBrowser:
                                    % (self.dir / "chromium.log"))
             result = worker.evaluate(script, [identity["id"], identity["key"], EXTENSION_SETTINGS])
         if not (result or {}).get("associated"):
-            raise BrowserError("the browser's KeePassXC extension could not connect (%s); check `alfred creds status`"
+            raise BrowserError("the browser's KeePassXC extension could not connect (%s); check `consiglieri creds status`"
                                % ((result or {}).get("error") or "not associated"))
         if not result.get("settings"):
-            raise BrowserError("the browser's KeePassXC extension did not keep its settings; try `alfred browser stop`, "
+            raise BrowserError("the browser's KeePassXC extension did not keep its settings; try `consiglieri browser stop`, "
                                "then the command again")
 
     def wake_extension(self, context: Any) -> bool:
@@ -418,7 +418,7 @@ class BotBrowser:
         for found, page in self.pages(context):
             if found == wanted:
                 return page
-        raise BrowserError("no tab %r; `alfred browser tabs` lists them" % page_id)
+        raise BrowserError("no tab %r; `consiglieri browser tabs` lists them" % page_id)
 
     def tab_urls(self) -> List[str]:
         try:
@@ -446,7 +446,7 @@ def page_secrets(page: Any, granted: Sequence[str]) -> List[str]:
 def check_ref(ref: str) -> str:
     ref = (ref or "").strip()
     if not REF_PATTERN.match(ref):
-        raise BrowserError("not an element ref from `alfred browser snapshot`: %r (they look like e12)" % ref)
+        raise BrowserError("not an element ref from `consiglieri browser snapshot`: %r (they look like e12)" % ref)
     return ref
 
 

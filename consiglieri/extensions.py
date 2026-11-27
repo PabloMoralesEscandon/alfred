@@ -2,10 +2,10 @@
 
 Three layers, each in its own place:
 
-- base: `alfred/plugin/`, a Claude Code plugin shipped with this code. Its
-  skills are `alfred:<skill>` and its `bin/` is on PATH. No bot ever edits it.
+- base: `consiglieri/plugin/`, a Claude Code plugin shipped with this code. Its
+  skills are `consiglieri:<skill>` and its `bin/` is on PATH. No bot ever edits it.
 - extensions: `<bot directory>/extensions/<name>/`, one Claude Code plugin per
-  extension, written by that bot (`~/.alfred-bots/<id>/extensions/`). Skills are
+  extension, written by that bot (`~/.consiglieri-bots/<id>/extensions/`). Skills are
   `<name>:<skill>`, executables in `bin/` are bare commands, and hooks or MCP
   servers are held back (see `held_back`).
 - disabled extensions: `<bot directory>/extensions-disabled/<name>/`, kept on
@@ -31,10 +31,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from .config import Config
+from .config import COMMAND_NAMES, Config
 
 BASE_PLUGIN = Path(__file__).resolve().parent / "plugin"
-BASE_NAME = "alfred"
+BASE_NAME = "consiglieri"
 NAME_PATTERN = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
 MAX_NAME = 40
 RESERVED_PREFIXES = ("claude-", "anthropic-", "anthropics-", "cc-plugin-")
@@ -176,7 +176,7 @@ def find(config: Config, name: str) -> Extension:
     for extension in list_extensions(config):
         if extension.name == name:
             return extension
-    raise ExtensionError("no extension called %r (see `alfred ext list`)" % name)
+    raise ExtensionError("no extension called %r (see `consiglieri ext list`)" % name)
 
 
 def held_back(config: Config, extension: Extension) -> List[str]:
@@ -385,7 +385,7 @@ def check(config: Config, name: str, run_tests: bool = True) -> Dict[str, Any]:
                 errors.append("bin/%s has no #! line" % item.name)
             if shutil.which(item.name) and not str(shutil.which(item.name)).startswith(str(path)):
                 warnings.append("bin/%s hides another command with the same name on PATH" % item.name)
-        base_commands = {item.name for item in (BASE_PLUGIN / "bin").iterdir()} | {"alfred"}
+        base_commands = {item.name for item in (BASE_PLUGIN / "bin").iterdir()} | set(COMMAND_NAMES)  # neither name of the command can be shadowed
         for command in extension.commands:
             if command in base_commands:
                 errors.append("bin/%s would replace one of Consiglieri's own commands" % command)

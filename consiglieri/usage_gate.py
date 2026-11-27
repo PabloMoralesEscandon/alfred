@@ -2,7 +2,7 @@
 back when the plan limits are nearly used up (`--skip-if-low`, `--skip-if`), or delivered only when a
 condition holds (`--only-if`, `--only-if-waste`).
 
-The check reads the usage the way `alfred usage check` does (a reading at most a few minutes old, `/usage`
+The check reads the usage the way `consiglieri usage check` does (a reading at most a few minutes old, `/usage`
 otherwise, never the model), so a held-back item costs no quota: the bot is not woken at all. The conditions
 are the usage-alert language; the verdict, not the numbers, decides. A bot needs the usage permission to put
 a condition on an item, and the item is checked as if unread once the bot no longer has it.

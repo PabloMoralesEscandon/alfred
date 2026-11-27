@@ -42,7 +42,7 @@ def spec(**fields: Any) -> str:
 
 
 class AdminCli(unittest.TestCase):
-    """A bot admin running `alfred bots` in its turn, with the panel's Telegram stood in. No tests of its own."""
+    """A bot admin running `consiglieri bots` in its turn, with the panel's Telegram stood in. No tests of its own."""
 
     def setUp(self) -> None:
         self.sandbox = Sandbox()
@@ -224,8 +224,8 @@ class AdminCliTests(AdminCli):
         self.assertFalse(self.run_json("bots", "set", "helper_bot", "model", "opus")["ok"])  # that needs bots
 
 
-ADMIN_RULES = ["Bash(alfred bots %s *)" % name for name in bots.ADMIN_SUBCOMMANDS]
-BOTS_RULES = ["Bash(alfred bots %s *)" % name for name in bots.BOTS_SUBCOMMANDS]
+ADMIN_RULES = ["Bash(consiglieri bots %s *)" % name for name in bots.ADMIN_SUBCOMMANDS]
+BOTS_RULES = ["Bash(consiglieri bots %s *)" % name for name in bots.BOTS_SUBCOMMANDS]
 
 
 def rules_of(sandbox: Sandbox, **permissions: str) -> Dict[str, Any]:
@@ -255,31 +255,31 @@ class AdminPermissionTests(unittest.TestCase):
 
     def test_claude_code_rules_close_each_helper_without_its_permission(self) -> None:
         none = rules_of(self.sandbox)["permissions"]["deny"]
-        self.assertIn("Bash(alfred bots *)", none)
+        self.assertIn("Bash(consiglieri bots *)", none)
 
         only_bots = rules_of(self.sandbox, bots="on")["permissions"]["deny"]
-        self.assertNotIn("Bash(alfred bots *)", only_bots)
+        self.assertNotIn("Bash(consiglieri bots *)", only_bots)
         for rule in ADMIN_RULES:
             self.assertIn(rule, only_bots)
-            self.assertIn(rule[:-3] + ")", only_bots)  # the bare form too: `alfred bots status`
+            self.assertIn(rule[:-3] + ")", only_bots)  # the bare form too: `consiglieri bots status`
         for rule in BOTS_RULES:
             self.assertNotIn(rule, only_bots)
 
         only_admin = rules_of(self.sandbox, admin="on")["permissions"]["deny"]
-        self.assertNotIn("Bash(alfred bots *)", only_admin)
+        self.assertNotIn("Bash(consiglieri bots *)", only_admin)
         for rule in ADMIN_RULES:
             self.assertNotIn(rule, only_admin)
         for rule in BOTS_RULES:
             self.assertIn(rule, only_admin)
 
         both = rules_of(self.sandbox, admin="on", bots="on")["permissions"]["deny"]
-        self.assertFalse([rule for rule in both if rule.startswith("Bash(alfred bots")])
+        self.assertFalse([rule for rule in both if rule.startswith("Bash(consiglieri bots")])
 
     def test_with_a_sandboxed_shell_the_helpers_run_outside_it_only_with_a_permission(self) -> None:
         sandboxed = rules_of(self.sandbox, shell="full")["sandbox"]["excludedCommands"]
-        self.assertNotIn("alfred bots *", sandboxed)
+        self.assertNotIn("consiglieri bots *", sandboxed)
         admin = rules_of(self.sandbox, shell="full", admin="on")["sandbox"]["excludedCommands"]
-        self.assertIn("alfred bots *", admin)
+        self.assertIn("consiglieri bots *", admin)
 
     def test_the_manual_says_what_a_bot_admin_may_do(self) -> None:
         record, config = self.sandbox.add_bot(permissions={"admin": "on"})
@@ -291,12 +291,12 @@ class AdminPermissionTests(unittest.TestCase):
         from consiglieri import extensions
 
         admin, config = self.sandbox.add_bot(permissions={"admin": "on"})
-        self.assertIn("alfred:bot-admin", (config.workspace / "CLAUDE.md").read_text())
+        self.assertIn("consiglieri:bot-admin", (config.workspace / "CLAUDE.md").read_text())
         plain, plain_config = self.sandbox.add_bot(bot_id=424243, username="other_bot")
-        self.assertNotIn("alfred:bot-admin", (plain_config.workspace / "CLAUDE.md").read_text())
+        self.assertNotIn("consiglieri:bot-admin", (plain_config.workspace / "CLAUDE.md").read_text())
         skill = (extensions.BASE_PLUGIN / "skills" / "bot-admin" / "SKILL.md").read_text()
         self.assertTrue(skill.startswith("---\nname: bot-admin\ndescription: "))
-        for command in ("alfred bots spec", "alfred bots create", "alfred bots status", "alfred bots configure"):
+        for command in ("consiglieri bots spec", "consiglieri bots create", "consiglieri bots status", "consiglieri bots configure"):
             self.assertIn(command, skill)
 
     def test_each_bot_gets_a_key_no_other_bot_can_work_out(self) -> None:
@@ -399,7 +399,7 @@ class SpecTests(unittest.TestCase):
         self.assertNotIn("bots", checked.initial)
         self.assertEqual(bot_admin.extra_values(checked.permissions, checked.extras),
                          {"bots": "on", "shell": "full", "sandbox": "off", "mode": "bypassPermissions"})
-        # bypassPermissions alone, with only the alfred command, is Full access too.
+        # bypassPermissions alone, with only the consiglieri command, is Full access too.
         self.assertEqual(self.check(admin, permissions={"mode": "bypassPermissions"}).extras, ["full"])
 
     def test_folders_rules_and_backend_stay_within_the_admin(self) -> None:
@@ -547,7 +547,7 @@ class AdminFlowTests(PanelHarness):  # type: ignore[misc,valid-type]
         FakeTelegramBot.sent = []
 
     def ask(self, **fields: Any) -> Dict[str, Any]:
-        """The admin's turn: `alfred bots create`, before the pool runs (the command has its own event loop)."""
+        """The admin's turn: `consiglieri bots create`, before the pool runs (the command has its own event loop)."""
         environ = dict(self.sandbox.environ, CONSIGLIERI_BOT_ID=str(ADMIN), CONSIGLIERI_CHAT_ID=str(OWNER),
                        CONSIGLIERI_BOT_KEY=bots.bot_key(self.config, ADMIN, create=True))
         buffer = io.StringIO()

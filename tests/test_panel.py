@@ -95,7 +95,7 @@ class TestPool(BotPool):  # type: ignore[misc,valid-type]
         self.dropped.append(drop_pending)
         if token in self.refuse:
             raise RuntimeError("Unauthorized")
-        username = getattr(getattr(frontend, "record", None), "username", "") or "AlfredPanelBot"
+        username = getattr(getattr(frontend, "record", None), "username", "") or "FamilyPanelBot"
         bot = FakeBot(token, username)
         await frontend.started(SimpleNamespace(bot=bot))
         self.connections.append(username)
@@ -193,17 +193,17 @@ class PanelTests(PanelHarness):
             await self.command("/bot new Research +web model=sonnet Summarize new papers\non protein folding.")
             replies = self.panel_bot.sent[-2:]
             # First the keyboard button, which does not depend on Telegram opening a deep link.
-            self.assertIn('tap "Create @alfredpanel_research_bot" on the keyboard below', replies[0]["text"])
+            self.assertIn('tap "Create @familypanel_research_bot" on the keyboard below', replies[0]["text"])
             self.assertIn("It can", replies[0]["text"])
             keyboard = replies[0]["reply_markup"].to_dict()
             self.assertTrue(keyboard["one_time_keyboard"])
             create, cancel = keyboard["keyboard"][0][0], keyboard["keyboard"][1][0]
             request = create["request_managed_bot"]
-            self.assertEqual((request["suggested_name"], request["suggested_username"]), ("Research", "alfredpanel_research_bot"))
+            self.assertEqual((request["suggested_name"], request["suggested_username"]), ("Research", "familypanel_research_bot"))
             self.assertTrue(0 < request["request_id"] < 2 ** 31)
             self.assertEqual(cancel, {"text": "Cancel"})
             # Then the link, as the second option.
-            link = "https://t.me/newbot/AlfredPanelBot/alfredpanel_research_bot?name=Research"
+            link = "https://t.me/newbot/FamilyPanelBot/familypanel_research_bot?name=Research"
             self.assertIn("Second option, the link: %s" % link, replies[1]["text"])
             button = replies[1]["reply_markup"].inline_keyboard[0][0]
             self.assertEqual(button.url, link)
@@ -255,7 +255,7 @@ class PanelTests(PanelHarness):
             self.assertIn("I hadn't asked for it", self.panel_bot.texts[-1])
             rules = json.loads(self.pool.registry.settings_file(RESEARCH).read_text())["permissions"]
             self.assertEqual(rules["defaultMode"], "dontAsk")
-            self.assertIn("Bash(alfred bots *)", rules["deny"])
+            self.assertIn("Bash(consiglieri bots *)", rules["deny"])
 
         self.play(scenario)
 

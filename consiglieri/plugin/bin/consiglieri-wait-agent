@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Wait until an agent running in Orca stops working, then print what happened as JSON.
 
-    alfred-wait-agent --pane <paneKey> [--timeout 3600] [--interval 5]
+    consiglieri-wait-agent --pane <paneKey> [--timeout 3600] [--interval 5]
 
 Meant to be started in the background: when it exits, the outcome is on stdout.
 `state` is what Orca last reported for the agent ("done", or whatever it shows

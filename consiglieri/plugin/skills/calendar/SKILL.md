@@ -48,5 +48,5 @@ and ask them to confirm explicitly before you do it, as with anything destructiv
 ## Calendar or reminder?
 
 A calendar event lives in the user's calendar and its notifications come from Google. A message in this
-chat at a set time is a reminder (the `alfred:reminders` skill). If the user says "remind me" without
+chat at a set time is a reminder (the `consiglieri:reminders` skill). If the user says "remind me" without
 mentioning the calendar, use a reminder; if they want both, do both.

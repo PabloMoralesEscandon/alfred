@@ -42,13 +42,13 @@ orca worktree create --repo id:<repoId> --name <short-name> --no-parent --agent 
 Start the watcher as a background command (`run_in_background`), tell the user what you launched, and end your turn. You are woken up when it exits.
 
 ```bash
-alfred-wait-agent --pane "<paneKey>" --timeout 3600
+consiglieri-wait-agent --pane "<paneKey>" --timeout 3600
 ```
 
 It prints one JSON line: `state` (`done`, `gone` if the terminal was closed, `timeout`, or the state Orca shows while the agent waits for someone), `last_message`, `worktree`.
 
 - Do not use `orca terminal wait --for tui-idle` right after a launch: it returns at once, before the agent has started.
-- A background watcher does not survive `/stop` or a restart of the bot. For work that may take longer than an hour, also schedule a check: `alfred schedule add --in 1h --task "Check the Orca agent with paneKey <paneKey> in <repo> and tell me how it went"`.
+- A background watcher does not survive `/stop` or a restart of the bot. For work that may take longer than an hour, also schedule a check: `consiglieri schedule add --in 1h --task "Check the Orca agent with paneKey <paneKey> in <repo> and tell me how it went"`.
 
 ## When it stops
 

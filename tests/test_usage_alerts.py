@@ -1,5 +1,5 @@
 """Usage alerts for agents: conditions, one firing per window, wake limits, isolation between bots,
-the `alfred usage-alert` command, and the whole path through the pool with stand-in Telegram and Claude."""
+the `consiglieri usage-alert` command, and the whole path through the pool with stand-in Telegram and Claude."""
 
 from __future__ import annotations
 
@@ -305,7 +305,7 @@ class StructuredSourceTests(unittest.TestCase):
 
 
 class CommandTests(unittest.TestCase):
-    """`alfred usage-alert` inside a bot's turn."""
+    """`consiglieri usage-alert` inside a bot's turn."""
 
     def setUp(self) -> None:
         self.sandbox = Sandbox()

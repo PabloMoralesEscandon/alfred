@@ -20,14 +20,14 @@ class HomeTests(unittest.TestCase):
         # The panel runs no agent: no manual, personality, memory, skills or history of one in the home.
         self.assertEqual(sorted(path.name for path in self.config.home.iterdir()), ["bin", "state"])
         self.assertTrue(self.config.shared_memory_dir.is_dir())  # next to the home, for the bots
-        launcher = self.config.home / "bin" / "alfred"
+        launcher = self.config.home / "bin" / "consiglieri"
         self.assertTrue(os.access(launcher, os.X_OK))
 
         # The launcher is what every bot has on PATH: inside a bot's turn it works on that bot's directory.
         record, bot_config = self.sandbox.add_bot()
         env = {"PATH": os.environ["PATH"], "CONSIGLIERI_BOT_ID": str(record.bot_id)}
         output = subprocess.run([str(launcher), "skills"], stdout=subprocess.PIPE, text=True, check=True, env=env)
-        self.assertIn('"alfred:extensions"', output.stdout)
+        self.assertIn('"consiglieri:extensions"', output.stdout)
         # Outside a bot's turn there is no agent whose skills these would be.
         output = subprocess.run([str(launcher), "skills"], stdout=subprocess.PIPE, text=True, env={"PATH": os.environ["PATH"]})
         self.assertIn('"ok": false', output.stdout)
@@ -37,9 +37,9 @@ class HomeTests(unittest.TestCase):
         # What the old main agent left: its manual, personality, memory, a seed skill and its history.
         self.config.home.mkdir(parents=True)
         old = {
-            "CLAUDE.md": "# Alfred: operating manual",
+            "CLAUDE.md": "# The old main agent: operating manual",
             "AGENTS.md": "old",
-            "SOUL.md": "Your name is Alfred.",
+            "SOUL.md": "Your name is Jeeves.",
             "MEMORY.md": "# Memory\n\n- Drinks mate.\n",
             "memory/MEMORY.md": "- [people/sam](people/sam.md): Sam\n",
             "memory/people/sam.md": "- brother\n",

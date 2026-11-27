@@ -163,12 +163,12 @@ class SoulMenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
 
     def test_view_replace_and_reset_from_a_bots_screen(self) -> None:
         async def scenario() -> None:
-            await self.create(RESEARCH, "alfredpanel_research_bot", "Research", "/bot new Research")
+            await self.create(RESEARCH, "familypanel_research_bot", "Research", "/bot new Research")
             await self.tell(RESEARCH, "hello")  # its SOUL.md comes from the base at its first message
             await self.open()
             for label in ("My bots", "Research", "Personality"):
                 await self.tap(label)
-            self.assertIn("Personality of @alfredpanel_research_bot", self.text)
+            self.assertIn("Personality of @familypanel_research_bot", self.text)
             self.assertIn("Warm, calm and direct.", self.text)
             await self.tap("Replace")
             self.assertIn("Nothing changes until you send it", self.text)
@@ -208,7 +208,7 @@ class SoulMenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
             await self.tap("Basic")
             self.assertIn("Personality: the base", self.text)
             await self.tap("Create")
-            first = await self.create(RESEARCH, "alfredpanel_research_bot", "Research")
+            first = await self.create(RESEARCH, "familypanel_research_bot", "Research")
             await self.tell(RESEARCH, "hello")
             self.assertEqual(soul.read(self.workspace()), "Formal and precise.\n")
             # New bot with its own.
@@ -223,7 +223,7 @@ class SoulMenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
             await self.tap("Basic")
             self.assertIn("Personality: its own", self.text)
             await self.tap("Create")
-            await self.create(5000000002, "alfredpanel_chef_bot", "Chef")
+            await self.create(5000000002, "familypanel_chef_bot", "Chef")
             self.assertEqual(soul.read(self.workspace(5000000002)), "Enthusiastic about food, uses Italian words.\n")
             # Changing the base later leaves existing bots as they are.
             await self.command("/bot base-soul reset")
@@ -234,13 +234,13 @@ class SoulMenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
 
     def test_the_text_shortcuts(self) -> None:
         async def scenario() -> None:
-            await self.create(RESEARCH, "alfredpanel_research_bot", "Research", "/bot new Research")
-            await self.command("/bot soul alfredpanel_research_bot show")
-            self.assertIn("Personality of @alfredpanel_research_bot (SOUL.md)", self.panel_bot.sent[-1]["text"])
-            replies = await self.command("/bot soul alfredpanel_research_bot set Patient teacher.\nUses examples.")
+            await self.create(RESEARCH, "familypanel_research_bot", "Research", "/bot new Research")
+            await self.command("/bot soul familypanel_research_bot show")
+            self.assertIn("Personality of @familypanel_research_bot (SOUL.md)", self.panel_bot.sent[-1]["text"])
+            replies = await self.command("/bot soul familypanel_research_bot set Patient teacher.\nUses examples.")
             self.assertIn("same conversation", replies[0]["text"])
             self.assertEqual(soul.read(self.workspace()), "Patient teacher.\nUses examples.\n")
-            await self.command("/bot soul alfredpanel_research_bot reset")
+            await self.command("/bot soul familypanel_research_bot reset")
             self.assertEqual(soul.read(self.workspace()), soul.clean(soul.for_new_bot(self.config)))
             await self.command("/bot base-soul set Curt.")
             self.assertEqual(soul.base(self.config), "Curt.\n")
@@ -253,10 +253,10 @@ class SoulMenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
         self.sandbox.environ["CONSIGLIERI_ALLOWED_USERS"] = "%d,%d" % (OWNER, SECOND)
 
         async def scenario() -> None:
-            await self.create(RESEARCH, "alfredpanel_research_bot", "Research", "/bot new Research")
+            await self.create(RESEARCH, "familypanel_research_bot", "Research", "/bot new Research")
             soul.write(self.workspace(), "Secret style.")
-            for text in ("/bot soul alfredpanel_research_bot show", "/bot soul alfredpanel_research_bot set Mine now",
-                         "/bot soul alfredpanel_research_bot reset"):
+            for text in ("/bot soul familypanel_research_bot show", "/bot soul familypanel_research_bot set Mine now",
+                         "/bot soul familypanel_research_bot reset"):
                 replies: List[Dict[str, Any]] = []
                 await self.pool.main._cmd_bot(update_for(replies, text, SECOND, chat_id=SECOND),
                                               SimpleNamespace(bot=self.panel_bot, args=text.split()[1:]))

@@ -1,6 +1,6 @@
-"""`alfred creds`: the credentials KeePassXC types into the bots' browsers (docs/CREDENTIALS.md).
+"""`consiglieri creds`: the credentials KeePassXC types into the bots' browsers (docs/CREDENTIALS.md).
 
-The owner can also grant and withdraw them from the Telegram panel (alfred/menus.py). On the machine, from a terminal (never from a bot's turn): `setup`, `add`, `remove`, `grant`, `revoke`, `start`,
+The owner can also grant and withdraw them from the Telegram panel (consiglieri/menus.py). On the machine, from a terminal (never from a bot's turn): `setup`, `add`, `remove`, `grant`, `revoke`, `start`,
 `stop`. Anyone: `status`, and `list`, which in a bot's turn shows only what was granted to that bot. No command
 ever prints a password or a TOTP seed.
 """
@@ -31,7 +31,7 @@ def owner_only(action: str) -> None:
     """Credentials are added and given out only by the user on the machine. A bot's agent always has CONSIGLIERI_BOT_ID
     and CONSIGLIERI_BOT_KEY set; Claude Code's rules deny these subcommands to every bot as well."""
     if _in_bot_turn():
-        raise CredsError("`alfred creds %s` is for the user, on the machine; a bot never runs it" % action)
+        raise CredsError("`consiglieri creds %s` is for the user, on the machine; a bot never runs it" % action)
 
 
 def _secret(prompt: str, confirm: bool = True) -> str:
@@ -69,7 +69,7 @@ def notify(config: Config, record: Any, text: str) -> bool:
 def _audit(config: Config, event: str, record: Any, name: str) -> None:
     from .bots import audit
 
-    audit(config, event, record, by="the user on the machine", via="alfred creds", credential=name)
+    audit(config, event, record, by="the user on the machine", via="consiglieri creds", credential=name)
 
 
 def _bot_warnings(config: Config, record: Any) -> List[str]:
@@ -101,7 +101,7 @@ def cmd_setup(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
     store = KeePass(config)
     done = store.setup()
     return {"ok": True, "done": done or ["already set up"], "directory": str(store.dir),
-            "next": "alfred creds add <name> --url <site> --username <user>; then alfred creds grant <name> <bot>"}
+            "next": "consiglieri creds add <name> --url <site> --username <user>; then consiglieri creds grant <name> <bot>"}
 
 
 def cmd_add(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
@@ -161,7 +161,7 @@ def cmd_revoke(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
 def cmd_list(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
     store = KeePass(config)
     if not store.is_set_up():
-        return {"ok": True, "credentials": [], "note": "credentials are not set up (alfred creds setup)"}
+        return {"ok": True, "credentials": [], "note": "credentials are not set up (consiglieri creds setup)"}
     if _in_bot_turn():
         from .cli import require, verified_caller
 

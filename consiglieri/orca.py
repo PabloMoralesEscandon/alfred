@@ -91,12 +91,12 @@ def summary(config: Config) -> str:
 
         store = KeePass(config)
         creds = ("credentials set up, KeePassXC %s" % ("running" if store.running() else "starts on first use")
-                 if store.is_set_up() else "no credentials (alfred creds setup)")
-        return "each bot its own Chromium (alfred browser); %s" % creds
+                 if store.is_set_up() else "no credentials (consiglieri creds setup)")
+        return "each bot its own Chromium (consiglieri browser); %s" % creds
     if config.browser == "chrome":
         # Whether the extension is connected is only knowable from inside a Claude turn.
         if config.chrome_profile:
-            return "Claude in Chrome, profile %s (`alfred chrome` opens it)" % config.chrome_profile
+            return "Claude in Chrome, profile %s (`consiglieri chrome` opens it)" % config.chrome_profile
         return "Claude in Chrome (Chrome must be open with the Claude extension signed in)"
     if not shutil.which(config.orca_bin):
         return "unavailable (Orca CLI not found)"
@@ -106,7 +106,7 @@ def summary(config: Config) -> str:
         linked = workspace(config) is not None
     except OrcaError as exc:
         return "unavailable (%s)" % exc
-    return "ready" if linked else "works, but not linked to its own workspace (run `alfred browser-setup`)"
+    return "ready" if linked else "works, but not linked to its own workspace (run `consiglieri browser-setup`)"
 
 
 def setup_browser(config: Config, *, test: bool = True) -> List[Step]:

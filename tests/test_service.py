@@ -20,6 +20,16 @@ class ServiceTests(unittest.TestCase):
         self.sandbox = Sandbox()
         self.addCleanup(self.sandbox.cleanup)
         self.config = self.sandbox.config
+        # A safety net: no test reaches the real service manager, which runs the user's live service.
+        for name in ("_launchctl", "_systemctl"):
+            patcher = mock.patch.object(service, name, side_effect=AssertionError("real %s called" % name))
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        # Nor the user's real LaunchAgents and systemd folders.
+        fake_home = self.sandbox.root / "user-home"
+        patcher = mock.patch.object(service.Path, "home", return_value=fake_home)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def make_ready(self) -> None:
         self.sandbox.environ["TELEGRAM_BOT_TOKEN"] = "123:abc"
@@ -35,7 +45,7 @@ class ServiceTests(unittest.TestCase):
 
     def test_launchd_plist_restarts_forever_and_logs_to_the_home(self) -> None:
         plist = plistlib.loads(service.launchd_plist(self.config))
-        self.assertEqual(plist["Label"], "com.alfred.bot")
+        self.assertEqual(plist["Label"], "com.consiglieri.bot")
         self.assertEqual(plist["ProgramArguments"], [sys.executable, "-m", "consiglieri", "run"])
         self.assertIs(plist["KeepAlive"], True)
         self.assertIs(plist["RunAtLoad"], True)
@@ -77,8 +87,10 @@ class ServiceTests(unittest.TestCase):
     def test_install_goes_ahead_when_ready(self) -> None:
         self.make_ready()
         with mock.patch.object(service, "platform", return_value="launchd"), \
+                mock.patch.object(service, "retire_legacy", return_value=False) as retire, \
                 mock.patch.object(service, "launchd_install", return_value=service.launchd_plist_path()) as launchd:
             path, notes = service.install(self.config)
+        retire.assert_called_once_with()
         launchd.assert_called_once_with(self.config)
         self.assertEqual(path, service.launchd_plist_path())
         self.assertIn("automatic login", notes[0])

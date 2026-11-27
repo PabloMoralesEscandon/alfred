@@ -112,8 +112,8 @@ class MenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
             self.assertIn("⚠️ Browser", self.text)  # the risky choice is flagged
             await self.tap("Next")
             self.assertIn("Step 7 of 7", self.text)
-            # AlfredPanelBot -> alfredpanel_ + slug, cut to fit 32 characters.
-            self.assertIn("Username: @alfredpanel_gestor_de_calend_bot", self.text)
+            # FamilyPanelBot -> familypanel_ + slug, cut to fit 32 characters.
+            self.assertIn("Username: @familypanel_gestor_de_calend_bot", self.text)
             self.assertIn("Model: sonnet", self.text)
             self.assertIn("Effort: high", self.text)
             self.assertIn("Permissions: 🎛 Custom (from ⭐ Assistant: + browser)", self.text)
@@ -124,14 +124,14 @@ class MenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
             self.assertIn("Request sent", self.text)
             keyboard = self.panel_bot.sent[-2]["reply_markup"].to_dict()
             request = keyboard["keyboard"][0][0]["request_managed_bot"]
-            self.assertEqual(request["suggested_username"], "alfredpanel_gestor_de_calend_bot")
+            self.assertEqual(request["suggested_username"], "familypanel_gestor_de_calend_bot")
             self.assertEqual(request["suggested_name"], "Gestor de Calendarios")
-            self.assertIn("t.me/newbot/AlfredPanelBot/alfredpanel_gestor_de_calend_bot", self.panel_bot.sent[-1]["text"])
+            self.assertIn("t.me/newbot/FamilyPanelBot/familypanel_gestor_de_calend_bot", self.panel_bot.sent[-1]["text"])
 
             # Telegram creates it; the bot starts with exactly what was chosen.
             self.panel_bot.tokens[RESEARCH] = "%d:%s" % (RESEARCH, "A" * 35)
             record = await self.pool.on_managed_bot(
-                {"id": OWNER}, {"id": RESEARCH, "username": "alfredpanel_gestor_de_calend_bot", "first_name": "Gestor de Calendarios"})
+                {"id": OWNER}, {"id": RESEARCH, "username": "familypanel_gestor_de_calend_bot", "first_name": "Gestor de Calendarios"})
             self.assertEqual(record.settings, {"task": "Keep my calendar tidy and remind me of events.",
                                                "model": "sonnet", "effort": "high"})
             self.assertEqual(record.permissions, {"web": "on", "edit": "on", "browser": "on"})
@@ -285,13 +285,13 @@ class MenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
             await self.tap("Back")
             await self.tap("Customize")  # now from Basic
             self.assertIn("🔐 Mode: dontAsk", self.labels())
-            self.assertIn("🐚 Shell: only alfred", self.labels())
+            self.assertIn("🐚 Shell: only consiglieri", self.labels())
 
         self.play(scenario)
 
     def test_menu_every_button_fits_telegrams_64_bytes(self) -> None:
         async def scenario() -> None:
-            await self.create(RESEARCH, "alfredpanel_research_bot", "Research", "/bot new Research")
+            await self.create(RESEARCH, "familypanel_research_bot", "Research", "/bot new Research")
             seen: List[str] = []
             await self.open()
             seen += [data for row in self.rows for _, data in row]
@@ -314,11 +314,11 @@ class MenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
 
     def test_menu_my_bots_edits_model_effort_task_permissions_and_pauses(self) -> None:
         async def scenario() -> None:
-            await self.create(RESEARCH, "alfredpanel_research_bot", "Research", "/bot new Research")
+            await self.create(RESEARCH, "familypanel_research_bot", "Research", "/bot new Research")
             await self.open()
             await self.tap("My bots")
             await self.tap("Research")
-            self.assertIn("Research (@alfredpanel_research_bot), on", self.text)
+            self.assertIn("Research (@familypanel_research_bot), on", self.text)
             await self.tap("Model")
             await self.tap("Opus")
             self.assertIn("Model set to opus", self.text)
@@ -373,7 +373,7 @@ class MenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
             self.assertIn("⚠️ Browser", self.text)
             await self.tap("Create")
             self.panel_bot.tokens[RESEARCH] = "%d:%s" % (RESEARCH, "A" * 35)
-            record = await self.pool.on_managed_bot({"id": OWNER}, {"id": RESEARCH, "username": "alfredpanel_research_bot"})
+            record = await self.pool.on_managed_bot({"id": OWNER}, {"id": RESEARCH, "username": "familypanel_research_bot"})
             self.assertEqual(record.permissions, presets.apply("power", {}))
 
         self.play(scenario)
@@ -406,7 +406,7 @@ class MenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
 
     def test_menu_an_existing_bot_shows_its_preset_and_asks_before_granting_more(self) -> None:
         async def scenario() -> None:
-            await self.create(RESEARCH, "alfredpanel_research_bot", "Research", "/bot new Research")
+            await self.create(RESEARCH, "familypanel_research_bot", "Research", "/bot new Research")
             await self.open()
             await self.tap("My bots")
             await self.tap("Research")
@@ -417,7 +417,7 @@ class MenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
             self.assertIn("🎛 Customize", self.labels())
 
             await self.tap("Power")
-            self.assertIn("Give @alfredpanel_research_bot more permissions?", self.text)
+            self.assertIn("Give @familypanel_research_bot more permissions?", self.text)
             self.assertIn("It gains: + file edits, + web, + browser, mode: acceptEdits, shell: any command", self.text)
             await self.tap("No, back")
             self.assertEqual(self.pool.registry.get(RESEARCH).permissions, {})
@@ -447,7 +447,7 @@ class MenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
 
     def test_menu_bots_made_before_presets_keep_their_permissions(self) -> None:
         async def scenario() -> None:
-            await self.create(RESEARCH, "alfredpanel_research_bot", "Research", "/bot new Research")
+            await self.create(RESEARCH, "familypanel_research_bot", "Research", "/bot new Research")
             record = self.pool.registry.get(RESEARCH)
             # What the old Broad button stored, plus an extra folder of its own.
             old = {"web": "on", "edit": "on", "browser": "on", "shell": "full", "mode": "acceptEdits", "folders": str(self.work)}
@@ -504,7 +504,7 @@ class MenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
 
     def test_menu_destroy_asks_first(self) -> None:
         async def scenario() -> None:
-            await self.create(RESEARCH, "alfredpanel_research_bot", "Research", "/bot new Research")
+            await self.create(RESEARCH, "familypanel_research_bot", "Research", "/bot new Research")
             await self.open()
             await self.tap("My bots")
             await self.tap("Research")
@@ -516,7 +516,7 @@ class MenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
             await self.tap("Yes, destroy it")
             self.assertIsNone(self.pool.registry.get(RESEARCH))
             self.assertNotIn(RESEARCH, self.pool.frontends)
-            self.assertIn("Destroyed @alfredpanel_research_bot", self.text)
+            self.assertIn("Destroyed @familypanel_research_bot", self.text)
             self.assertIn("No bots yet.", self.text)
 
         self.play(scenario)
@@ -539,7 +539,7 @@ class MenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
             await self.tap("Customize")
             self.assertFalse([label for label in self.labels() if "ross-agent" in label])
 
-            await self.create(RESEARCH, "alfredpanel_research_bot", "Research", "/bot new Research")
+            await self.create(RESEARCH, "familypanel_research_bot", "Research", "/bot new Research")
             await self.open()
             await self.tap("My bots")
             await self.tap("Research")
@@ -583,7 +583,7 @@ class MenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
             self.assertIn("CROSS-AGENT ACCESS ON since", self.text)  # the bot's own screen
             self.assertIn("Permissions: 🔒 Basic + ⚠️ Cross-agent access", self.text)
             await self.tap("Back")
-            self.assertIn("Research @alfredpanel_research_bot ⚠️ CROSS-AGENT", self.labels())  # the list
+            self.assertIn("Research @familypanel_research_bot ⚠️ CROSS-AGENT", self.labels())  # the list
             await self.tap("Research")
             await self.tap("Permissions")
             await self.tap("withdraw")
@@ -597,7 +597,7 @@ class MenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
 
     def test_menu_cross_agent_buttons_fit_and_a_stranger_cannot_grant(self) -> None:
         async def scenario() -> None:
-            await self.create(RESEARCH, "alfredpanel_research_bot", "Research", "/bot new Research")
+            await self.create(RESEARCH, "familypanel_research_bot", "Research", "/bot new Research")
             await self.open()
             for label in ("My bots", "Research", "Permissions", "Cross-agent access"):
                 await self.tap(label)
@@ -624,7 +624,7 @@ class MenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
         from consiglieri import scheduler
 
         async def scenario() -> None:
-            await self.create(RESEARCH, "alfredpanel_research_bot", "Research", "/bot new Research")
+            await self.create(RESEARCH, "familypanel_research_bot", "Research", "/bot new Research")
             soon = scheduler.utc_now() + timedelta(hours=2)
             first = self.pool.store.add(chat_id=OWNER, due=soon, text="Call Sam", bot_id=RESEARCH)
             self.pool.store.add(chat_id=555, due=soon + timedelta(hours=1), text="Weekly digest",
@@ -670,7 +670,7 @@ class MenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
         from consiglieri import usage_alerts
 
         async def scenario() -> None:
-            await self.create(RESEARCH, "alfredpanel_research_bot", "Research", "/bot new Research -usage")
+            await self.create(RESEARCH, "familypanel_research_bot", "Research", "/bot new Research -usage")
             store = usage_alerts.AlertStore.for_bot(self.config, RESEARCH)
             store.add("session.used > 80", note="slow down", chat_id=OWNER)
             await self.open()
@@ -687,7 +687,7 @@ class MenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
 
     def test_menu_folders_and_rules_are_typed_in_and_checked(self) -> None:
         async def scenario() -> None:
-            await self.create(RESEARCH, "alfredpanel_research_bot", "Research", "/bot new Research")
+            await self.create(RESEARCH, "familypanel_research_bot", "Research", "/bot new Research")
             await self.open()
             for label in ("My bots", "Research", "Folders and rules", "Working folder"):
                 await self.tap(label)
@@ -713,11 +713,11 @@ class MenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
         from consiglieri import shared_memory
 
         async def scenario() -> None:
-            await self.create(RESEARCH, "alfredpanel_research_bot", "Research", "/bot new Research")
+            await self.create(RESEARCH, "familypanel_research_bot", "Research", "/bot new Research")
             await self.pool.set_cross_agent(self.pool.registry.get(RESEARCH), True, OWNER, "command")
             await self.open()
             await self.tap("Audit")
-            self.assertIn("granted @alfredpanel_research_bot by %d (command)" % OWNER, self.text)
+            self.assertIn("granted @familypanel_research_bot by %d (command)" % OWNER, self.text)
             await self.tap("Back")
             shared_memory.add(self.config, "user", "Lives in Madrid")
             shared_memory.add(self.config, "user", "Works as a designer")
@@ -733,7 +733,7 @@ class MenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
 
     def test_menu_browser_choice_stores_clears_and_shows_on_screen(self) -> None:
         async def scenario() -> None:
-            await self.create(RESEARCH, "alfredpanel_research_bot", "Research", "/bot new Research +browser")
+            await self.create(RESEARCH, "familypanel_research_bot", "Research", "/bot new Research +browser")
             await self.open()
             await self.tap("My bots")
             await self.tap("Research")
@@ -785,7 +785,7 @@ class MenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
         async def scenario() -> None:
             # Here nobody may grant from Telegram (several panel users and none listed): the grant path is shut.
             self.sandbox.environ["CONSIGLIERI_CREDENTIALS_GRANTERS"] = "none"
-            await self.create(RESEARCH, "alfredpanel_research_bot", "Research", "/bot new Research")
+            await self.create(RESEARCH, "familypanel_research_bot", "Research", "/bot new Research")
             await self.open()
             await self.tap("My bots")
             await self.tap("Research")
@@ -793,7 +793,7 @@ class MenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
 
             # Store not set up, neither creds nor own browser enabled.
             await self.tap("Credentials")
-            self.assertIn("alfred creds setup", self.text)
+            self.assertIn("consiglieri creds setup", self.text)
             self.assertIn("Creds permission: off", self.text)
             self.assertIn("Without both the creds permission and its own browser", self.text)
             self.assertEqual(self.labels(), ["⬅️ Back"])
@@ -871,7 +871,7 @@ class MenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
                     await self.tap("Yes, withdraw tum")
                     self.assertGreater(to_thread.call_count, calls_before)
 
-            self.assertIn("Withdrew «tum» from @alfredpanel_research_bot", self.text)
+            self.assertIn("Withdrew «tum» from @familypanel_research_bot", self.text)
             self.assertIn("No credentials are granted", self.text)
             entries = bots.read_audit(self.config)
             self.assertEqual(len(entries), 1)
@@ -891,8 +891,8 @@ class MenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
     @unittest.skipUnless(HAS_CLI, "keepassxc-cli is not installed")
     def test_menu_credentials_with_real_keepass_lists_only_bots_own_never_secrets_and_withdraws(self) -> None:
         async def scenario() -> None:
-            await self.create(RESEARCH, "alfredpanel_research_bot", "Research", "/bot new Research +browser +creds")
-            await self.create(CHEF_ID, "alfredpanel_chef_bot", "Chef", "/bot new Chef +browser +creds")
+            await self.create(RESEARCH, "familypanel_research_bot", "Research", "/bot new Research +browser +creds")
+            await self.create(CHEF_ID, "familypanel_chef_bot", "Chef", "/bot new Chef +browser +creds")
             await self.pool.set_setting(self.pool.registry.get(RESEARCH), "browser", "bot")
 
             store = keepass.KeePass(self.config)
@@ -943,7 +943,7 @@ class MenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
                 # Withdraw tum from Research: asks first, then revokes in KeePassXC, audits and notifies.
                 for label in ("Back", "Back", "Research", "Credentials", "Withdraw tum"):
                     await self.tap(label)
-                self.assertIn("Withdraw credential «tum» from @alfredpanel_research_bot?", self.text)
+                self.assertIn("Withdraw credential «tum» from @familypanel_research_bot?", self.text)
                 for row in self.rows:
                     for _, data in row:
                         self.assertLessEqual(len(data.encode("utf-8")), 64, data)
@@ -963,7 +963,7 @@ class MenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
 
                 # Grant tum back from the panel: asks first, then grants in KeePassXC, audits and notifies.
                 await self.tap("Grant tum")
-                self.assertIn("Grant credential «tum» to @alfredpanel_research_bot?", self.text)
+                self.assertIn("Grant credential «tum» to @familypanel_research_bot?", self.text)
                 self.assertIn("User: ge12abc", self.text)
                 for secret in (secret_pw, other_pw, TOTP_SEED, current_totp):
                     self.assertNotIn(secret, self.text)
@@ -973,7 +973,7 @@ class MenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
                 await self.tap("Yes, grant tum")
                 self.assertEqual([c.name for c in store.granted_to(RESEARCH)], ["tum"])
                 self.assertEqual([c.name for c in store.granted_to(CHEF_ID)], ["mail"])
-                self.assertIn("Granted «tum» to @alfredpanel_research_bot", self.text)
+                self.assertIn("Granted «tum» to @familypanel_research_bot", self.text)
                 self.assertIn("🔒 Withdraw tum", self.labels())
 
                 # Audit lines match creds_cli (by=OWNER, via="panel") and show in the Audit screen.
@@ -983,7 +983,7 @@ class MenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
                                   ("credential_granted", OWNER, "panel", "tum", RESEARCH)])
                 await self.open()
                 await self.tap("Audit")
-                self.assertIn("credential withdrawn from @alfredpanel_research_bot by %d (panel) [credential tum]" % OWNER,
+                self.assertIn("credential withdrawn from @familypanel_research_bot by %d (panel) [credential tum]" % OWNER,
                               self.text)
 
                 # Bot chat notification is queued and delivered only to Research's chat.

@@ -37,7 +37,7 @@ class ExtensionTests(unittest.TestCase):
             command.chmod(0o755)
         return root
 
-    def test_a_new_extension_is_a_plugin_alfred_loads_next_to_the_base(self) -> None:
+    def test_a_new_extension_is_a_plugin_consiglieri_loads_next_to_the_base(self) -> None:
         root = self.make_weather()
 
         manifest = json.loads((root / ".claude-plugin" / "plugin.json").read_text())
@@ -49,14 +49,14 @@ class ExtensionTests(unittest.TestCase):
 
         skills = {skill.name: skill.source for skill in home.list_skills(self.config)}
         self.assertEqual(skills["weather:forecast"], "extension")
-        self.assertEqual(skills["alfred:extensions"], "base")
+        self.assertEqual(skills["consiglieri:extensions"], "base")
         argv = ClaudeBackend(self.config).command(None, live=True)
         plugins = [argv[index + 1] for index, flag in enumerate(argv) if flag == "--plugin-dir"]
         self.assertEqual(plugins, [str(extensions.BASE_PLUGIN), str(root)])
         self.assertEqual(extensions.bin_dirs(self.config), [extensions.BASE_PLUGIN / "bin", root / "bin"])
 
     def test_names_are_checked_and_never_taken_twice(self) -> None:
-        for bad in ("Weather", "my_ext", "alfred", "claude-tools", "-x", "a" * 41):
+        for bad in ("Weather", "my_ext", "consiglieri", "claude-tools", "-x", "a" * 41):
             with self.assertRaises(extensions.ExtensionError, msg=bad):
                 extensions.scaffold(self.config, bad, "something")
         extensions.scaffold(self.config, "weather", "Weather lookups")
@@ -68,8 +68,8 @@ class ExtensionTests(unittest.TestCase):
     def test_check_refuses_broken_or_unsafe_parts(self) -> None:
         root = self.make_weather()
         (root / "bin" / "not-executable").write_text("#!/bin/sh\n", encoding="utf-8")
-        (root / "bin" / "alfred-wait-agent").write_text("#!/bin/sh\n", encoding="utf-8")
-        (root / "bin" / "alfred-wait-agent").chmod(0o755)
+        (root / "bin" / "consiglieri-wait-agent").write_text("#!/bin/sh\n", encoding="utf-8")
+        (root / "bin" / "consiglieri-wait-agent").chmod(0o755)
         (root / "lib").mkdir()
         (root / "lib" / "client.py").write_text('API_KEY = "sk-ant-abcdefghijklmnopqrstuvwxyz123456"\n', encoding="utf-8")
         (root / "skills" / "vague").mkdir()
@@ -82,7 +82,7 @@ class ExtensionTests(unittest.TestCase):
         errors = "\n".join(report["errors"])
         for expected in (
             "bin/not-executable is not executable",
-            "bin/alfred-wait-agent would replace one of Consiglieri's own commands",
+            "bin/consiglieri-wait-agent would replace one of Consiglieri's own commands",
             "lib/client.py looks like it contains a Anthropic or OpenAI key",
             "skills/vague/SKILL.md needs a description",
             "CLAUDE.md inside an extension is not loaded",
@@ -191,25 +191,25 @@ class ExtensionTests(unittest.TestCase):
         env = dict(os.environ, **self.sandbox.environ)
         env["CONSIGLIERI_BOT_ID"] = str(self.record.bot_id)  # inside the bot's turn
 
-        def alfred(*argv: str):
+        def consiglieri(*argv: str):
             completed = subprocess.run(
                 [sys.executable, "-m", "consiglieri.cli", *argv], env=env, stdout=subprocess.PIPE, text=True, timeout=60
             )
             return completed.returncode, json.loads(completed.stdout)
 
-        code, created = alfred("ext", "new", "weather", "Weather", "lookups")
+        code, created = consiglieri("ext", "new", "weather", "Weather", "lookups")
         self.assertEqual((code, created["extension"]["description"]), (0, "Weather lookups"))
-        code, failed = alfred("ext", "new", "Bad Name", "x")
+        code, failed = consiglieri("ext", "new", "Bad Name", "x")
         self.assertEqual((code, failed["ok"]), (1, False))
-        code, checked = alfred("ext", "check", "weather")
+        code, checked = consiglieri("ext", "check", "weather")
         self.assertEqual((code, checked["ok"]), (0, True))
         self.assertIn("no skills", checked["warnings"][0])
-        code, listed = alfred("ext", "list")
+        code, listed = consiglieri("ext", "list")
         self.assertEqual([item["name"] for item in listed["extensions"]], ["weather"])
-        self.assertEqual(alfred("ext", "disable", "weather")[1]["extension"]["enabled"], False)
-        self.assertEqual(alfred("ext", "enable", "weather")[1]["extension"]["enabled"], True)
-        self.assertIn("removed-extensions", alfred("ext", "remove", "weather")[1]["moved_to"])
-        code, missing = alfred("ext", "check", "weather")
+        self.assertEqual(consiglieri("ext", "disable", "weather")[1]["extension"]["enabled"], False)
+        self.assertEqual(consiglieri("ext", "enable", "weather")[1]["extension"]["enabled"], True)
+        self.assertIn("removed-extensions", consiglieri("ext", "remove", "weather")[1]["moved_to"])
+        code, missing = consiglieri("ext", "check", "weather")
         self.assertEqual(code, 1)
         self.assertIn("no extension called", missing["error"])
 

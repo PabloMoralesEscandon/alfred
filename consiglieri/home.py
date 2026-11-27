@@ -2,7 +2,7 @@
 
 The home is deliberately outside this repository and runs no agent: it holds the panel's state (the bots'
 registry and tokens, the scheduler, the audit log, the usage history, the base personality) under
-`state/`, and `bin/alfred`, the launcher every bot finds on its PATH. Each bot has its own directory
+`state/`, and `bin/consiglieri`, the launcher every bot finds on its PATH. Each bot has its own directory
 next to it (see bots.py); the skill and memory helpers here work on whichever directory a bot's
 configuration names.
 
@@ -22,14 +22,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from .config import REPO_ROOT, Config
+from .config import COMMAND_NAMES, REPO_ROOT, Config
 
 TEMPLATES = Path(__file__).resolve().parent / "templates"
 
 
 @dataclass
 class Skill:
-    name: str  # as Claude Code shows it: `alfred:browser`, `<extension>:<skill>`, or a bare local name
+    name: str  # as Claude Code shows it: `consiglieri:browser`, `<extension>:<skill>`, or a bare local name
     description: str
     path: Path
     source: str = "local"  # base, extension, or local (in .claude/skills, outside any extension)
@@ -160,9 +160,8 @@ def _write_if_changed(path: Path, content: str) -> None:
 
 
 def _write_launcher(config: Config) -> None:
-    """`bin/alfred` runs this checkout's CLI with the interpreter that started the panel. Every bot has it on PATH."""
-    launcher = config.home / "bin" / "alfred"
-    launcher.parent.mkdir(parents=True, exist_ok=True)
+    """`bin/consiglieri` runs this checkout's CLI with the interpreter that started the panel. Every bot has it on
+    PATH. While the old name lasts, `bin/consiglieri` is the same script: the bots' rules are written for both names."""
     script = (
         "#!/bin/sh\n"
         "# Managed by Consiglieri. Rewritten on every start.\n"
@@ -170,13 +169,16 @@ def _write_launcher(config: Config) -> None:
         'PYTHONPATH=%s${PYTHONPATH:+:$PYTHONPATH} exec %s -m consiglieri "$@"\n'
         % (shlex.quote(str(config.home)), shlex.quote(str(REPO_ROOT)), shlex.quote(sys.executable))
     )
-    _write_if_changed(launcher, script)
-    launcher.chmod(launcher.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    for name in COMMAND_NAMES:
+        launcher = config.home / "bin" / name
+        launcher.parent.mkdir(parents=True, exist_ok=True)
+        _write_if_changed(launcher, script)
+        launcher.chmod(launcher.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
 def _git(home: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["git", "-c", "user.name=Alfred", "-c", "user.email=alfred@localhost", *args],
+        ["git", "-c", "user.name=Consiglieri", "-c", "user.email=consiglieri@localhost", *args],
         cwd=str(home),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

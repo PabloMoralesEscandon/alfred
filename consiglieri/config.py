@@ -4,8 +4,8 @@ Lookup order for every setting: process environment, then `$CONSIGLIERI_HOME/.en
 then the `.env` next to this repository. The allow-list is re-read on every
 check so access can be changed without restarting the bot.
 
-Settings used to be called `ALFRED_*`. Until an install is migrated (`consiglieri migrate`), every
-`CONSIGLIERI_X` lookup also takes `ALFRED_X` from the same place when the new name is not set there, and the
+Before the rename the settings were `ALFRED_*` (rename-compat). Until an install is migrated (`consiglieri
+migrate`), every `CONSIGLIERI_X` lookup also takes the old name from the same place when the new one is not set there, and the
 new name wins when both are (see `env_get` and `Config.get`; docs/RENAME_PLAN.md, phase 3).
 """
 
@@ -20,17 +20,31 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Set
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_HOME = Path.home() / ".alfred"
+DEFAULT_HOME = Path.home() / ".consiglieri"
+LEGACY_HOME = Path.home() / ".alfred"  # rename-compat: the home before the rename, until `consiglieri migrate`
 LEGACY_WHITELIST_PREFIX = "whitelisted@"
 PREFIX = "CONSIGLIERI_"
+COMMAND = "consiglieri"  # the command a bot or the user types, and the home's launcher in bin/
+# rename-compat: the old command. Its launcher stays in the home's bin/ until the install is migrated, so
+# every rule that names the command (allow, deny, sandbox exclusions) is written for each name in COMMAND_NAMES.
+LEGACY_COMMAND = "alfred"  # rename-compat
+COMMAND_NAMES = (COMMAND, LEGACY_COMMAND)  # rename-compat
 LEGACY_PREFIX = "ALFRED_"  # rename-compat: the settings' names before the rename
 
 log = logging.getLogger("consiglieri.config")
 _warned: Set[str] = set()
 
 
+def default_home() -> Path:
+    """The home when no setting names one: ~/.consiglieri, or an install's old ~/.consiglieri while only that exists.
+    Always resolved, like a home that is set, so the bots' and the shared folders derived from it agree."""
+    if not DEFAULT_HOME.exists() and LEGACY_HOME.exists():  # rename-compat
+        return LEGACY_HOME.resolve()  # rename-compat
+    return DEFAULT_HOME.resolve()
+
+
 def legacy_name(name: str) -> str:
-    """The old name of a setting (`CONSIGLIERI_X` -> `ALFRED_X`), or "" for one that never had a prefix."""
+    """The old name of a setting (rename-compat: `CONSIGLIERI_X` -> `ALFRED_X`), or "" for one without the prefix."""
     return LEGACY_PREFIX + name[len(PREFIX):] if name.startswith(PREFIX) else ""  # rename-compat
 
 
@@ -62,7 +76,7 @@ def in_bot_turn(environ: Optional[Dict[str, str]] = None) -> bool:
 
 
 def with_legacy_names(env: Dict[str, str]) -> Dict[str, str]:
-    """The agent's environment with each `CONSIGLIERI_X` also as `ALFRED_X`, for scripts written before the
+    """The agent's environment with each `CONSIGLIERI_X` also under its old name (rename-compat), for scripts written before the
     rename (an extension's, a bot's own). The command and Consiglieri read only the new names first."""
     legacy = {legacy_name(key): value for key, value in env.items() if legacy_name(key)}  # rename-compat
     return {**env, **legacy}  # an old name inherited from the service's own environment never wins
@@ -114,7 +128,7 @@ class Config:
     home: Path = DEFAULT_HOME
     env_files: List[Path] = field(default_factory=list)
     environ: Dict[str, str] = field(default_factory=lambda: dict(os.environ))
-    # Set for one of the bots (see `alfred/bots.py`); 0 is the control panel, which runs no agent.
+    # Set for one of the bots (see `consiglieri/bots.py`); 0 is the control panel, which runs no agent.
     bot_id: int = 0
     # Where this bot's agent runs and keeps its memory and inbox. None for the panel: then it is the home.
     workspace_dir: Optional[Path] = None
@@ -128,7 +142,7 @@ class Config:
         # CONSIGLIERI_ENV_FILE points at a different settings file than the one next to the code.
         repo_env = Path(_pick(environ, "CONSIGLIERI_ENV_FILE") or REPO_ROOT / ".env").expanduser()
         home_text = _pick(environ, "CONSIGLIERI_HOME") or _pick(_parse_env_lines(_read_lines(repo_env)), "CONSIGLIERI_HOME")
-        home = Path(home_text).expanduser().resolve() if home_text else DEFAULT_HOME
+        home = Path(home_text).expanduser().resolve() if home_text else default_home()
         return cls(home=home, env_files=[home / ".env", repo_env], environ=environ)
 
     # -- raw lookup ---------------------------------------------------------
@@ -202,18 +216,18 @@ class Config:
     @property
     def browser(self) -> str:
         """Which browser the agent drives: `orca` (default), `chrome` (Claude in Chrome), `bot` (each bot its own
-        Chromium, driven with `alfred browser`, where KeePassXC fills in its credentials), or `none`."""
+        Chromium, driven with `consiglieri browser`, where KeePassXC fills in its credentials), or `none`."""
         value = self.get("CONSIGLIERI_BROWSER", "orca").lower()
         return value if value in ("orca", "chrome", "bot", "none") else "orca"
 
     @property
     def chrome_profile(self) -> str:
-        """The Chrome profile folder kept for Consiglieri (for example `Alfred`), so `alfred chrome` can open it."""
+        """The Chrome profile folder kept for Consiglieri (for example `Consiglieri`), so `consiglieri chrome` can open it."""
         return self.get("CONSIGLIERI_CHROME_PROFILE")
 
     @property
     def chrome_app(self) -> str:
-        """The browser `alfred chrome` opens: an app name on macOS, a command elsewhere."""
+        """The browser `consiglieri chrome` opens: an app name on macOS, a command elsewhere."""
         return self.get("CONSIGLIERI_CHROME_APP", "Google Chrome" if sys.platform == "darwin" else "google-chrome")
 
     @property
@@ -306,7 +320,7 @@ class Config:
         value = self.get("CONSIGLIERI_BOTS_HOME")
         if value:
             return Path(value).expanduser().resolve()
-        return self.home.parent / ("%s-bots" % self.home.name)  # ~/.alfred -> ~/.alfred-bots
+        return self.home.parent / ("%s-bots" % self.home.name)  # ~/.consiglieri -> ~/.consiglieri-bots
 
     @property
     def shared_dir(self) -> Path:
@@ -318,7 +332,7 @@ class Config:
         value = self.get("CONSIGLIERI_SHARED_HOME")
         if value:
             return Path(value).expanduser().resolve()
-        return self.home.parent / ("%s-shared" % self.home.name)  # ~/.alfred -> ~/.alfred-shared
+        return self.home.parent / ("%s-shared" % self.home.name)  # ~/.consiglieri -> ~/.consiglieri-shared
 
     @property
     def shared_memory_dir(self) -> Path:

@@ -1,7 +1,7 @@
 """Bot admins: bots that create and set up other bots for their owner, from a spec (docs/BOT_ADMIN.md).
 
 A bot with the `admin` permission drafts a spec from what the user asks for (name, task, personality, preset,
-model, effort, reminders) and hands it to `alfred bots create`. Everything that matters is decided here, in
+model, effort, reminders) and hands it to `consiglieri bots create`. Everything that matters is decided here, in
 Python, never by the bot: the spec is data, checked field by field, and
 
 - nothing in it may be above what the admin itself has: each permission, its folders, its backend and
@@ -17,7 +17,7 @@ The panel checks the request again when Telegram says the bot exists, against th
 (`revalidate`), so a request that no longer holds starts the bot with the least instead.
 
 The requests live in <home>/state/bots/admin-requests.json, which no bot can read or write (the home is
-closed to every bot); `alfred bots` and the panel are the only writers, under a file lock.
+closed to every bot); `consiglieri bots` and the panel are the only writers, under a file lock.
 """
 
 from __future__ import annotations
@@ -409,7 +409,7 @@ def parse_spec(config: Config, admin: BotRecord, data: Any, allow_past: bool = F
 
 
 def parse_changes(config: Config, data: Any) -> Dict[str, Any]:
-    """What `alfred bots configure` may change on a bot the admin made: task, model, effort, soul, reminders.
+    """What `consiglieri bots configure` may change on a bot the admin made: task, model, effort, soul, reminders.
     Never its permissions, folders or backend: those are the user's, from the panel."""
     if not isinstance(data, dict) or not data:
         raise SpecError(["give the changes as a JSON object with any of: %s" % ", ".join(CONFIGURE_KEYS)])
@@ -561,7 +561,7 @@ def new_request(admin: BotRecord, checked: Checked, data: Dict[str, Any], userna
 
 
 def public(request: Dict[str, Any], registry: Optional[BotRegistry] = None) -> Dict[str, Any]:
-    """A request as `alfred bots status` shows it to the admin."""
+    """A request as `consiglieri bots status` shows it to the admin."""
     shown = {
         "id": request["id"],
         "status": request["status"],
@@ -668,8 +668,8 @@ def created_event(record: BotRecord, request: Dict[str, Any], checked: Optional[
     if checked.extras:
         lines.append("Waiting for the user's yes in the panel: %s. Do not ask them to hurry." % ", ".join(
             EXTRAS[key][0] for key in checked.extras))
-    lines.append("Next: check it with `alfred bots status %s`, adjust task, model, effort, personality or reminders "
-                 "with `alfred bots configure %s` if needed, and tell the user to open %s and press Start "
+    lines.append("Next: check it with `consiglieri bots status %s`, adjust task, model, effort, personality or reminders "
+                 "with `consiglieri bots configure %s` if needed, and tell the user to open %s and press Start "
                  "(it can't write to them before that)." % (request["id"], record.username, record.link))
     return "\n".join(lines)
 

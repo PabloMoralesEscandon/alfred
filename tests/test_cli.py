@@ -57,20 +57,20 @@ class CliTests(unittest.TestCase):
         _, everything = self.run_json("schedule", "list", "--all")
         self.assertEqual(len(everything["items"]), 2)
 
-    def test_chrome_opens_alfreds_own_profile(self) -> None:
+    def test_chrome_opens_its_own_profile(self) -> None:
         code, refused = self.run_json("chrome")
         self.assertEqual((code, refused["ok"]), (1, False))
         self.assertIn("CONSIGLIERI_CHROME_PROFILE", refused["error"])
 
-        os.environ["CONSIGLIERI_CHROME_PROFILE"] = "Alfred"
+        os.environ["CONSIGLIERI_CHROME_PROFILE"] = "Consiglieri"
         with mock.patch("consiglieri.cli.subprocess.Popen") as popen, mock.patch("consiglieri.cli.sys.platform", "darwin"):
             code, opened = self.run_json("chrome")
-        self.assertEqual((code, opened["profile"]), (0, "Alfred"))
-        self.assertEqual(popen.call_args[0][0], ["open", "-na", "Google Chrome", "--args", "--profile-directory=Alfred"])
+        self.assertEqual((code, opened["profile"]), (0, "Consiglieri"))
+        self.assertEqual(popen.call_args[0][0], ["open", "-na", "Google Chrome", "--args", "--profile-directory=Consiglieri"])
 
         with mock.patch("consiglieri.cli.sys.platform", "linux"):
-            self.sandbox.environ.update(CONSIGLIERI_CHROME_PROFILE="Alfred", CONSIGLIERI_CHROME_APP="chromium")
-            self.assertEqual(cli.chrome_command(self.sandbox.config), ["chromium", "--profile-directory=Alfred"])
+            self.sandbox.environ.update(CONSIGLIERI_CHROME_PROFILE="Consiglieri", CONSIGLIERI_CHROME_APP="chromium")
+            self.assertEqual(cli.chrome_command(self.sandbox.config), ["chromium", "--profile-directory=Consiglieri"])
 
     def test_event_is_queued_for_the_chat_and_due_at_once(self) -> None:
         from consiglieri.scheduler import SchedulerStore
@@ -129,7 +129,7 @@ class CliTests(unittest.TestCase):
         self.assertIn(str(self.sandbox.home), output)
 
         _, payload = self.run_json("skills")
-        self.assertEqual([skill["name"] for skill in payload["skills"]], ["alfred:bot-admin", "alfred:browser", "alfred:calendar", "alfred:extensions", "alfred:orca-agents", "alfred:reminders", "alfred:usage", "alfred:web-logins"])
+        self.assertEqual([skill["name"] for skill in payload["skills"]], ["consiglieri:bot-admin", "consiglieri:browser", "consiglieri:calendar", "consiglieri:extensions", "consiglieri:orca-agents", "consiglieri:reminders", "consiglieri:usage", "consiglieri:web-logins"])
 
         self.sandbox.fake_cli("claude", {"fresh": claude_lines("At your service.", "sess-A")})
         with mock.patch.dict(os.environ, self.sandbox.environ):
@@ -148,14 +148,14 @@ class CliTests(unittest.TestCase):
             buffer = io.StringIO()
             with redirect_stdout(buffer), mock.patch("sys.stderr", io.StringIO()), self.assertRaises(SystemExit):
                 cli.main(["chat", "-m", "hello"])  # --bot is required
-            for alias in ("main", "alfred", "0"):
+            for alias in ("main", "consiglieri", "0"):
                 code, payload = self.run_json("event", "--bot", alias, "hello")
                 self.assertIn("no bot called", payload["error"], alias)
 
     def test_no_command_prints_help(self) -> None:
         code, output = self.run_cli()
         self.assertEqual(code, 2)
-        self.assertIn("usage: alfred", output)
+        self.assertIn("usage: consiglieri", output)
 
 
 class SplitMessageTests(unittest.TestCase):

@@ -1,4 +1,4 @@
-"""The `alfred` command inside a bot's turn: it acts as that bot, in its chats, within its permissions."""
+"""The `consiglieri` command inside a bot's turn: it acts as that bot, in its chats, within its permissions."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ class FakeTelegramBot:
 
     def __init__(self, token: str) -> None:
         self.token = token
-        self.username = "AlfredPanelBot"
+        self.username = "FamilyPanelBot"
 
     async def __aenter__(self) -> "FakeTelegramBot":
         return self
@@ -155,9 +155,9 @@ class BotCliTests(unittest.TestCase):
         message = FakeTelegramBot.sent[-1]
         self.assertEqual((message["token"], message["chat_id"]), ("1:PANELPANELPANELPANELPANELPANELPANEL", 99))
         self.assertIn("@research_bot asks for it", message["text"])
-        # The username extends the panel's: AlfredPanelBot -> alfredpanel_<slug>_bot.
-        self.assertEqual(asked["link"], "https://t.me/newbot/AlfredPanelBot/alfredpanel_helper_bot?name=Helper")
-        pending = self.registry.take_pending(99, "alfredpanel_helper_bot")
+        # The username extends the panel's: FamilyPanelBot -> familypanel_<slug>_bot.
+        self.assertEqual(asked["link"], "https://t.me/newbot/FamilyPanelBot/familypanel_helper_bot?name=Helper")
+        pending = self.registry.take_pending(99, "familypanel_helper_bot")
         self.assertEqual((pending.settings, pending.permissions), ({"task": "Fetch the data"}, {}))
 
     def test_skills_and_extensions_are_the_bots_own(self) -> None:
@@ -178,14 +178,14 @@ class BotCliTests(unittest.TestCase):
                     self.assertFalse(result["ok"], (target, word, result))
         self.assertFalse(self.registry.get(RESEARCH).cross_agent)
         self.assertFalse(self.registry.get(CHEF).cross_agent)
-        # Nor the operator's own `alfred` outside a bot's turn: only the control panel grants it.
+        # Nor the operator's own `consiglieri` outside a bot's turn: only the control panel grants it.
         with mock.patch.dict(os.environ, {"CONSIGLIERI_BOT_ID": ""}):
             self.assertFalse(self.run_json("bots", "set", "chef_bot", "cross", "on")["ok"])
         self.assertFalse(self.registry.get(CHEF).cross_agent)
         # A bot that asks for a new bot can't smuggle it in: the request carries no cross-agent access.
         asked = self.run_json("bots", "new", "Spy", "+cross", "cross=on")
         self.assertTrue(asked["ok"], asked)
-        pending = self.registry.take_pending(99, "alfredpanel_spy_bot")
+        pending = self.registry.take_pending(99, "familypanel_spy_bot")
         self.assertEqual(pending.permissions, {})
         self.assertNotIn("cross_agent", vars(pending))
         # A bot with cross-agent access may do more than this one, so this one can't steer it; its state stays.

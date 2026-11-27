@@ -40,7 +40,7 @@ class Base(unittest.TestCase):
             self.registry.save(BotRecord(bot_id=bot_id, username=username, name=username, owner_id=99, chat_ids=[99],
                                          permissions={"browser": "on", "creds": "on"}))
         env = dict(os.environ)
-        for name in ("CONSIGLIERI_BOT_ID", "CONSIGLIERI_BOT_KEY"):
+        for name in ("CONSIGLIERI_BOT_ID", "CONSIGLIERI_BOT_KEY", "ALFRED_BOT_ID", "ALFRED_BOT_KEY"):  # rename-compat
             env.pop(name, None)
         patcher = mock.patch.dict(os.environ, env, clear=True)
         patcher.start()
@@ -82,10 +82,10 @@ class TotpAndNames(unittest.TestCase):
                 keepass.clean_url(bad)
 
     def test_identity_names(self) -> None:
-        self.assertEqual(keepass.identity_name(42), "alfred-42")
-        self.assertEqual(keepass.bot_of("alfred-42"), 42)
+        self.assertEqual(keepass.identity_name(42), "consiglieri-42")
+        self.assertEqual(keepass.bot_of("consiglieri-42"), 42)
         self.assertEqual(keepass.bot_of("chrome"), 0)
-        self.assertEqual(keepass.bot_of("alfred-x"), 0)
+        self.assertEqual(keepass.bot_of("consiglieri-x"), 0)
 
 
 @unittest.skipUnless(HAS_CLI, "keepassxc-cli is not installed")
@@ -143,8 +143,8 @@ class StoreTests(Base):
         self.assertEqual([c.name for c in self.store.granted_to(BOT_A)], ["tum"])
         self.assertEqual(self.store.granted_to(BOT_B), [])
         hub = self.store._identities_in(self.store.export(self.store.hub))
-        self.assertEqual(list(hub), ["alfred-%d" % BOT_A])
-        self.assertEqual(hub["alfred-%d" % BOT_A], self.store.identity(BOT_A)["key"])
+        self.assertEqual(list(hub), ["consiglieri-%d" % BOT_A])
+        self.assertEqual(hub["consiglieri-%d" % BOT_A], self.store.identity(BOT_A)["key"])
         mail = self.store._identities_in(self.store.export(self.store.path("mail")))
         self.assertEqual(mail, {})  # the identity is only where it was granted
         secrets = self.store.secrets_for(BOT_A)
@@ -172,7 +172,7 @@ class StoreTests(Base):
         self.store.grant("tum", BOT_B)
         self.assertEqual(self.store.forget_bot(BOT_A), ["tum"])
         self.assertEqual(self.store.get("tum").bots, [BOT_B])
-        self.assertEqual(list(self.store._identities_in(self.store.export(self.store.hub))), ["alfred-%d" % BOT_B])
+        self.assertEqual(list(self.store._identities_in(self.store.export(self.store.hub))), ["consiglieri-%d" % BOT_B])
         self.assertIsNone(self.store.identity(BOT_A, create=False))
 
     def test_destroying_a_bot_takes_it_out(self) -> None:
@@ -435,24 +435,24 @@ class PermissionTests(Base):
 
     def test_rules(self) -> None:
         off = self.rules(browser="on")["permissions"]
-        self.assertIn("Bash(alfred creds *)", off["deny"])
+        self.assertIn("Bash(consiglieri creds *)", off["deny"])
         on = self.rules(browser="on", creds="on")["permissions"]
-        self.assertNotIn("Bash(alfred creds *)", on["deny"])
-        self.assertIn("Bash(alfred browser *)", on["allow"])
+        self.assertNotIn("Bash(consiglieri creds *)", on["deny"])
+        self.assertIn("Bash(consiglieri browser *)", on["allow"])
         for settings in (off, on, self.rules(shell="full", mode="bypassPermissions", creds="on")["permissions"]):
-            for rule in bots.CREDS_OWNER_RULES + bots.KEEPASS_RULES + ("Bash(*alfred browser install*)",):
+            for rule in bots.CREDS_OWNER_RULES + bots.KEEPASS_RULES + ("Bash(*consiglieri browser install*)",):
                 self.assertIn(rule, settings["deny"])
         no_browser = self.rules()["permissions"]
-        self.assertIn("Bash(alfred browser *)", no_browser["deny"])
+        self.assertIn("Bash(consiglieri browser *)", no_browser["deny"])
 
     def test_sandbox_lets_the_helpers_out(self) -> None:
         sandbox = self.rules(shell="full", browser="on", creds="on")["sandbox"]
-        self.assertIn("alfred browser *", sandbox["excludedCommands"])
-        self.assertIn("alfred creds list", sandbox["excludedCommands"])
-        self.assertNotIn("alfred creds *", sandbox["excludedCommands"])
+        self.assertIn("consiglieri browser *", sandbox["excludedCommands"])
+        self.assertIn("consiglieri creds list", sandbox["excludedCommands"])
+        self.assertNotIn("consiglieri creds *", sandbox["excludedCommands"])
         sandbox = self.rules(shell="full")["sandbox"]
-        self.assertNotIn("alfred browser *", sandbox["excludedCommands"])
-        self.assertNotIn("alfred creds list", sandbox["excludedCommands"])
+        self.assertNotIn("consiglieri browser *", sandbox["excludedCommands"])
+        self.assertNotIn("consiglieri creds list", sandbox["excludedCommands"])
 
     def test_bot_admin_never_gives_it(self) -> None:
         admin = BotRecord(bot_id=1, username="admin_bot", name="Admin", owner_id=99,

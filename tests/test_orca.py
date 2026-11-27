@@ -29,7 +29,7 @@ class OrcaTests(unittest.TestCase):
 
     def test_setup_registers_the_home_and_proves_tabs_open_there(self) -> None:
         state = install_fake_orca(self.sandbox)
-        self.sandbox.environ["ORCA_WORKTREE_ID"] = "the-terminal-alfred-was-started-from"
+        self.sandbox.environ["ORCA_WORKTREE_ID"] = "the-terminal-consiglieri-was-started-from"
 
         steps = orca.setup_browser(self.config)
 
@@ -64,7 +64,7 @@ class OrcaTests(unittest.TestCase):
 
     def test_unlinked_home_is_called_out(self) -> None:
         install_fake_orca(self.sandbox)
-        self.assertIn("alfred browser-setup", orca.summary(self.config))
+        self.assertIn("consiglieri browser-setup", orca.summary(self.config))
 
     def test_screenshot_command_saves_a_file_instead_of_printing_the_image(self) -> None:
         state = install_fake_orca(self.sandbox, registered=True)

@@ -219,7 +219,7 @@ class DraftMenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
             await self.tap("Basic")
             self.assertIn("Personality: its own", self.text)
             await self.tap("Create")
-            await self.create(RESEARCH, "alfredpanel_tutor_bot", "Tutor")
+            await self.create(RESEARCH, "familypanel_tutor_bot", "Tutor")
             self.assertEqual(soul.read(self.pool.registry.workspace(RESEARCH)), OTHER_DRAFT + "\n")
 
         self.play(scenario)
@@ -246,7 +246,7 @@ class DraftMenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
 
     def test_on_a_bots_screen_cancel_saves_nothing_and_edit_by_hand_saves_only_what_is_sent(self) -> None:
         async def scenario() -> None:
-            await self.create(RESEARCH, "alfredpanel_research_bot", "Research", "/bot new Research")
+            await self.create(RESEARCH, "familypanel_research_bot", "Research", "/bot new Research")
             workspace = self.pool.registry.workspace(RESEARCH)
             soul.write(workspace, "Original.")
             await self.open()
@@ -296,7 +296,7 @@ class DraftMenuTests(MenuDriver, PanelHarness):  # type: ignore[misc,valid-type]
         self.sandbox.environ["CONSIGLIERI_ALLOWED_USERS"] = "%d,%d" % (OWNER, SECOND)
 
         async def scenario() -> None:
-            await self.create(RESEARCH, "alfredpanel_research_bot", "Research", "/bot new Research")
+            await self.create(RESEARCH, "familypanel_research_bot", "Research", "/bot new Research")
             soul.write(self.pool.registry.workspace(RESEARCH), "Original.")
             from types import SimpleNamespace
 

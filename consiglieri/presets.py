@@ -226,7 +226,7 @@ def phrase(name: str, value: str) -> str:
     if name in SWITCHES:
         return "%s %s" % ("+" if value == "on" else "−", WORDS.get(name, name))
     if name == "shell":
-        return "shell: %s" % ("any command" if value == "full" else "only alfred")
+        return "shell: %s" % ("any command" if value == "full" else "only consiglieri")
     return "%s: %s" % (WORDS.get(name, name), value)
 
 

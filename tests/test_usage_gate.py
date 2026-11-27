@@ -2,7 +2,7 @@
 
 - The decision: `skip_if` holds a delivery back, `only_if` lets it through only when it holds, forecast values
   with active hours, and what happens when the usage can't be read or the bot lost the usage permission.
-- `alfred schedule add --skip-if-low|--skip-if|--only-if|--only-if-waste`: validation, the usage permission,
+- `consiglieri schedule add --skip-if-low|--skip-if|--only-if|--only-if-waste`: validation, the usage permission,
   and what `schedule list` shows.
 - The service: a held-back item never reaches the bot.
 """
@@ -110,7 +110,7 @@ class DecisionTests(unittest.TestCase):
 
 
 class ScheduleCommandTests(unittest.TestCase):
-    """`alfred schedule add` with usage conditions, from inside a bot's turn."""
+    """`consiglieri schedule add` with usage conditions, from inside a bot's turn."""
 
     def setUp(self) -> None:
         self.sandbox = Sandbox()

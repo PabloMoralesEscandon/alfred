@@ -404,11 +404,11 @@ class Agent:
 
     def _environment(self, chat_id: int, user_id: Optional[int], username: Optional[str]) -> Dict[str, str]:
         chat = Chat(chat_id)
-        # Tokens stay with the runtime: `alfred send` looks them up by bot id, so the agent never needs them.
+        # Tokens stay with the runtime: `consiglieri send` looks them up by bot id, so the agent never needs them.
         env = {key: value for key, value in orca.detached_env(os.environ).items() if key != "TELEGRAM_BOT_TOKEN"}
         env["CONSIGLIERI_HOME"] = str(self.config.home)
         env["CONSIGLIERI_BOT_ID"] = str(self.config.bot_id)
-        # Proves to `alfred bots` that the caller is this bot: another bot can't compute it (docs/BOT_ADMIN.md).
+        # Proves to `consiglieri bots` that the caller is this bot: another bot can't compute it (docs/BOT_ADMIN.md).
         from .bots import bot_key
 
         env["CONSIGLIERI_BOT_KEY"] = bot_key(self.config, self.config.bot_id, create=True)

@@ -206,7 +206,7 @@ class TelegramBotTests(unittest.TestCase):
         self.sandbox.fake_cli("claude", {"fresh": claude_lines("NO_REPLY", "sess-A")})
 
         async def scenario() -> None:
-            await self.say("send me the report with alfred send")
+            await self.say("send me the report with consiglieri send")
             self.sandbox.fake_cli("claude", {"fresh": claude_lines("`no_reply`.", "sess-A")})
             await self.say("thanks")
 
@@ -393,7 +393,7 @@ class TelegramBotTests(unittest.TestCase):
         _, status, skills, schedule, backend, bad_backend, switched, fresh, help_text = self.bot.sent
         self.assertIn("Backend: claude\nModel: the claude default\nEffort: the claude default\nSession: sess-A", status)
         self.assertIn("Scheduled: 1", status)
-        self.assertIn("• alfred:extensions", skills)
+        self.assertIn("• consiglieri:extensions", skills)
         self.assertIn("Call Sam", schedule)
         self.assertIn("Backend: claude", backend)
         self.assertIn("unknown backend", bad_backend)

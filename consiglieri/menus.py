@@ -167,7 +167,7 @@ CALENDAR_WARNING = (
 
 CREDS_WARNING = (
     "🔑 Credentials: KeePassXC fills the credentials you grant it into its own browser, only on their sites; it "
-    "never sees them. You add them on the machine (alfred creds add) and grant each one in Credentials. It needs "
+    "never sees them. You add them on the machine (consiglieri creds add) and grant each one in Credentials. It needs "
     "CONSIGLIERI_BROWSER=bot. With an open shell it is not walled off from them: keep those bots on Basic or Assistant.")
 
 
@@ -713,7 +713,7 @@ class Menus:
         record = self._record(session) if editing else session.draft()
         changes: Dict[str, str] = {}
         if verb == "shell":
-            changes["shell"] = "alfred" if record.permission("shell") == "full" else "full"
+            changes["shell"] = "consiglieri" if record.permission("shell") == "full" else "full"
         elif verb == "mode":
             current = record.permission("mode")
             position = MODE_CYCLE.index(current) if current in MODE_CYCLE else -1
@@ -991,7 +991,7 @@ class Menus:
         for name, label in SWITCH_LABELS:
             rows.append([("%s %s" % (_mark(record.allows(name)), label), "perm:%s" % name)])
         full = record.permission("shell") == "full"
-        rows.append([("%s Shell: %s" % ("⚠️" if full else "🐚", "any command" if full else "only alfred"), "shell")])
+        rows.append([("%s Shell: %s" % ("⚠️" if full else "🐚", "any command" if full else "only consiglieri"), "shell")])
         if bots.shell_is_open(record):
             rows.append([("%s Sandbox for the shell" % (_mark(record.allows("sandbox")) if record.allows("sandbox") else "⚠️ ⬜"), "perm:sandbox")])
         mode = record.permission("mode")
@@ -1170,7 +1170,7 @@ class Menus:
         if session.creds_error:
             lines.append("⚠️ Could not read credentials: %s" % session.creds_error)
         elif not session.creds_set_up:
-            lines.append("The credential store is not set up yet. Set it up on the machine with:\nalfred creds setup")
+            lines.append("The credential store is not set up yet. Set it up on the machine with:\nconsiglieri creds setup")
         elif not session.creds:
             lines.append("No credentials are granted to %s." % record.handle)
         else:
@@ -1189,7 +1189,7 @@ class Menus:
             elif not self.pool.config.may_grant_credentials(session.user_id):
                 lines += ["", "Only the users in CONSIGLIERI_CREDENTIALS_GRANTERS may grant credentials from here."]
             lines += ["", "New credentials (with their password) are added on the machine:\n"
-                          "alfred creds add <name> --url <site> --username <user>"]
+                          "consiglieri creds add <name> --url <site> --username <user>"]
         return Screen("\n".join(lines), rows + [[("⬅️ Back", "back")]])
 
     def _screen_bot_creds_revoke(self, session: Session) -> Screen:
@@ -1345,7 +1345,7 @@ class Menus:
             return self._screen_list(session)
         items = self.pool.store.pending_for_bot(record.bot_id)
         lines, rows = self._item_lines(session, items)
-        head = ("Reminders and timed tasks of %s, soonest first. It schedules them itself (alfred schedule, or when "
+        head = ("Reminders and timed tasks of %s, soonest first. It schedules them itself (consiglieri schedule, or when "
                 "you ask it in its chat); tap a number to cancel one." % record.handle)
         if not record.allows("schedule"):
             head += "\n\nIts Reminders permission is off, so it can't add new ones."
@@ -1367,7 +1367,7 @@ class Menus:
         alerts = usage_alerts.AlertStore.for_bot(config, record.bot_id).alerts()
         session.alert_ids = [alert.id for alert in alerts[:20]]
         lines = ["Usage alerts of %s: conditions on the Claude plan usage that wake it. It sets them itself "
-                 "(alfred usage-alert) when it has the Plan usage permission; each wake-up uses plan usage." % record.handle, ""]
+                 "(consiglieri usage-alert) when it has the Plan usage permission; each wake-up uses plan usage." % record.handle, ""]
         if not record.allows("usage"):
             lines.append("Its Plan usage permission is off (Permissions → Customize), so it can't add alerts.")
         note = usage_monitor.permission_note(config, record)

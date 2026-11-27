@@ -1,6 +1,6 @@
-"""The `alfred` command.
+"""The `consiglieri` command.
 
-For the operator: `run`, `init`, `service`, `chat --bot`. For a bot's agent (through `bin/alfred`
+For the operator: `run`, `init`, `service`, `chat --bot`. For a bot's agent (through `bin/consiglieri`
 on its PATH): `schedule`, `send`, `event`, `skills`, `ext`. The agent-facing commands print JSON so
 the model can read the outcome reliably.
 
@@ -57,7 +57,7 @@ def resolve_bot_id(config: Config, args: argparse.Namespace) -> int:
 
         record = BotRegistry(config).find(wanted)
         if record is None:
-            raise CommandError("no bot called %r; run `alfred bots list`" % wanted)
+            raise CommandError("no bot called %r; run `consiglieri bots list`" % wanted)
         return record.bot_id
     value = env_get("CONSIGLIERI_BOT_ID").strip()
     try:
@@ -261,7 +261,7 @@ def cmd_schedule_cancel(config: Config, args: argparse.Namespace) -> Dict[str, A
     require(record, "schedule")
     item = SchedulerStore(config.db_path).cancel(args.id, resolve_chat_id(args), bot_id=own_bot_only(config, record, args))
     if item is None:
-        raise CommandError("no single pending item matches %r; run `alfred schedule list`" % args.id)
+        raise CommandError("no single pending item matches %r; run `consiglieri schedule list`" % args.id)
     return {"ok": True, "item": describe(item)}
 
 
@@ -339,7 +339,7 @@ def cmd_send(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
 
 def bot_token(config: Config, bot_id: int) -> str:
     """The token to post as: a bot's, from its private state folder. Bot 0 is the panel's, from .env, used only to
-    ask the owner to create a bot (`alfred bots new`)."""
+    ask the owner to create a bot (`consiglieri bots new`)."""
     if not bot_id:
         try:
             return config.telegram_token
@@ -354,7 +354,7 @@ def bot_token(config: Config, bot_id: int) -> str:
 
 
 def verified_caller(config: Config):
-    """The bot calling `alfred bots`, checked against the key its agent was started with (CONSIGLIERI_BOT_KEY): a bot
+    """The bot calling `consiglieri bots`, checked against the key its agent was started with (CONSIGLIERI_BOT_KEY): a bot
     that changes CONSIGLIERI_BOT_ID to another bot's does not know that bot's key. None outside a bot's turn."""
     from .bots import key_matches
 
@@ -411,7 +411,7 @@ def cmd_bots_set(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
     registry = BotRegistry(config)
     record = registry.find(args.name, owner_id=caller.owner_id if caller is not None else None)
     if record is None:  # another user's bot reads as missing too
-        raise CommandError("no bot called %r; run `alfred bots list`" % args.name)
+        raise CommandError("no bot called %r; run `consiglieri bots list`" % args.name)
     setting = args.setting.lower()
     if caller is not None:
         if record.bot_id == caller.bot_id:
@@ -510,7 +510,7 @@ def _refuse(config: Config, caller, problems: List[str], data: Any) -> None:
     """A refused spec or request goes to the audit log, with what it asked for, and back to the bot."""
     from . import bots
 
-    bots.audit(config, "admin_refused", caller, caller.handle, "alfred bots", admin=caller.handle,
+    bots.audit(config, "admin_refused", caller, caller.handle, "consiglieri bots", admin=caller.handle,
                problems=problems, input=json.dumps(data, ensure_ascii=False, default=str)[:4000])
     raise CommandError("refused: %s" % "; ".join(problems))
 
@@ -532,7 +532,7 @@ def cmd_bots_spec(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
         "starts_with": presets.name_of(checked.initial),
         "waits_for_the_users_yes": [bot_admin.EXTRAS[key][0] for key in checked.extras],
         "limits": limits or "within the limits",
-        "next": "alfred bots create with the same spec sends it to the user" if not limits else "a limit stops it now",
+        "next": "consiglieri bots create with the same spec sends it to the user" if not limits else "a limit stops it now",
     }
 
 
@@ -586,7 +586,7 @@ def cmd_bots_create(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
         request = asyncio.run(ask())
     except Exception as exc:
         raise CommandError("Telegram refused: %s" % exc) from exc
-    bots.audit(config, "admin_requested", caller, caller.handle, "alfred bots create", admin=caller.handle,
+    bots.audit(config, "admin_requested", caller, caller.handle, "consiglieri bots create", admin=caller.handle,
                request=request["id"], username=request["username"], spec=checked.as_dict(),
                extras=[bot_admin.EXTRAS[key][0] for key in checked.extras])
     return {
@@ -596,7 +596,7 @@ def cmd_bots_create(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
         "link": request["link"],
         "waits_for_the_users_yes": [bot_admin.EXTRAS[key][0] for key in checked.extras],
         "next": ("Tell the user the request is in their chat with @%s: they tap \"Create @%s\" and confirm. You are "
-                 "woken with an [Event] when the bot exists (or check with alfred bots status %s). The link above "
+                 "woken with an [Event] when the bot exists (or check with consiglieri bots status %s). The link above "
                  "is the second option." % (request["panel"], request["username"], request["id"])),
     }
 
@@ -634,7 +634,7 @@ def cmd_bots_configure(config: Config, args: argparse.Namespace) -> Dict[str, An
     try:
         changes = bot_admin.parse_changes(config, data)
     except bot_admin.SpecError as exc:
-        bots.audit(config, "admin_refused", record, caller.handle, "alfred bots configure", admin=caller.handle,
+        bots.audit(config, "admin_refused", record, caller.handle, "consiglieri bots configure", admin=caller.handle,
                    problems=exc.problems)
         raise CommandError("refused: %s" % "; ".join(exc.problems)) from exc
     if changes.get("reminders") and not record.allows("schedule"):
@@ -650,7 +650,7 @@ def cmd_bots_configure(config: Config, args: argparse.Namespace) -> Dict[str, An
         soul.write(registry.workspace(record.bot_id), changes["soul"])
     scheduled = bot_admin.schedule_reminders(config, record, changes.get("reminders") or [])
     fields = sorted(changes)
-    bots.audit(config, "admin_configured", record, caller.handle, "alfred bots configure", admin=caller.handle,
+    bots.audit(config, "admin_configured", record, caller.handle, "consiglieri bots configure", admin=caller.handle,
                fields=fields, request=record.request_id)
     return {"ok": True, "bot": record.username, "changed": fields, "reminders_scheduled": len(scheduled),
             "note": "applies from its next message"}
@@ -726,7 +726,7 @@ def cmd_ext_new(config: Config, args: argparse.Namespace) -> Dict[str, Any]:
         return {
             "ok": True,
             "extension": created.to_json(),
-            "next": "add skills/<skill>/SKILL.md and bin/<command>, then run `alfred ext check %s`" % created.name,
+            "next": "add skills/<skill>/SKILL.md and bin/<command>, then run `consiglieri ext check %s`" % created.name,
         }
 
     return _extension_call(action, config)
@@ -859,7 +859,7 @@ def cmd_usage_alert_add(config: Config, args: argparse.Namespace) -> Dict[str, A
     when = args.when
     if not when:
         if not words:
-            raise CommandError("give a condition, such as: alfred usage-alert add 'week.surplus > 0' --hours 9-20")
+            raise CommandError("give a condition, such as: consiglieri usage-alert add 'week.surplus > 0' --hours 9-20")
         when = words.pop(0)
     return _add_usage_alert(config, args, when, " ".join(words).strip())
 
@@ -887,7 +887,7 @@ def cmd_usage_alert_remove(config: Config, args: argparse.Namespace) -> Dict[str
     bot_id = usage_alert_bot(config, args)
     alert = usage_alerts.AlertStore.for_bot(config, bot_id).remove(args.id)
     if alert is None:
-        raise CommandError("no single alert matches %r; run `alfred usage-alert list`" % args.id)
+        raise CommandError("no single alert matches %r; run `consiglieri usage-alert list`" % args.id)
     return {"ok": True, "removed": alert.describe()}
 
 
@@ -897,7 +897,7 @@ def cmd_usage(config: Config, args: argparse.Namespace) -> int:
     try:
         require_usage(config, calling_bot(config))
     except CommandError as exc:
-        print("alfred: %s" % exc, file=sys.stderr)
+        print("consiglieri: %s" % exc, file=sys.stderr)
         return 1
     print(asyncio.run(usage.fetch(config, dict(os.environ))))
     return 0
@@ -979,7 +979,7 @@ def _usage_question(config: Config, args: argparse.Namespace, condition: str, an
         if as_json:
             print(json.dumps({"ok": False, "error": str(exc), "exit_code": exc.code}, ensure_ascii=False, sort_keys=True))
         else:
-            print("alfred: %s" % exc, file=sys.stderr)
+            print("consiglieri: %s" % exc, file=sys.stderr)
         return exc.code
     if not as_json:
         print("%s: %s" % ("true" if result else "false", reason))
@@ -1021,7 +1021,7 @@ def cmd_usage_running_low(config: Config, args: argparse.Namespace) -> int:
     if threshold is None:
         threshold = usage_monitor.MonitorSettings.from_config(config).low_threshold
     if not 0 < threshold <= 100:
-        print("alfred: the threshold is a percentage between 1 and 100", file=sys.stderr)
+        print("consiglieri: the threshold is a percentage between 1 and 100", file=sys.stderr)
         return EXIT_BAD_QUESTION
 
     def answer(result, reason, node, values, evaluation, forecast):
@@ -1076,7 +1076,7 @@ def cmd_service(config: Config, args: argparse.Namespace) -> int:
             print("Service: %s" % service.status())
             print("Log: %s" % service.log_path(config))
     except service.ServiceError as exc:
-        print("alfred: %s" % exc, file=sys.stderr)
+        print("consiglieri: %s" % exc, file=sys.stderr)
         return 1
     return 0
 
@@ -1096,7 +1096,7 @@ def cmd_chat(config: Config, args: argparse.Namespace) -> int:
     home.prepare(config)
     record = BotRegistry(config).find(args.bot)
     if record is None:
-        print("alfred: no bot called %r (there is no main agent; `alfred chat --bot <bot>` talks to one of "
+        print("consiglieri: no bot called %r (there is no main agent; `consiglieri chat --bot <bot>` talks to one of "
               "the bots)" % args.bot, file=sys.stderr)
         return 1
     config = BotRegistry(config).config_for(record.bot_id)
@@ -1142,8 +1142,8 @@ def cmd_chat(config: Config, args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="alfred", description="Consiglieri: a set of Telegram agents driven by Claude Code.")
-    parser.add_argument("--version", action="version", version="alfred %s" % __version__)
+    parser = argparse.ArgumentParser(prog="consiglieri", description="Consiglieri: a set of Telegram agents driven by Claude Code.")
+    parser.add_argument("--version", action="version", version="consiglieri %s" % __version__)
     commands = parser.add_subparsers(dest="command")
 
     commands.add_parser("run", help="start the control panel, the bots and the scheduler").set_defaults(run=cmd_run)
@@ -1199,9 +1199,9 @@ def build_parser() -> argparse.ArgumentParser:
                     "week.windows_left, week.max_spend, week.surplus (the weekly forecast for the active hours),\n"
                     "session.projected, week.projected (percent at the reset at the recent pace).\n"
                     "Operators: < <= > >= = !=, joined with and, or, not and parentheses.\n"
-                    "Example: alfred usage-alert add --when \"session.left < 1h and session.used = 0\" use the spare window\n"
-                    "Example: alfred usage-alert add 'week.surplus > 0' --hours 9-20\n"
-                    "Example: alfred usage-alert waste --hours 9-20  (weekly quota that can't be used up)\n"
+                    "Example: consiglieri usage-alert add --when \"session.left < 1h and session.used = 0\" use the spare window\n"
+                    "Example: consiglieri usage-alert add 'week.surplus > 0' --hours 9-20\n"
+                    "Example: consiglieri usage-alert waste --hours 9-20  (weekly quota that can't be used up)\n"
                     "An alert fires once (or with --repeat, once per window; forecast alerts once per quota week).\n"
                     "Each wake-up uses plan usage.",
     )
@@ -1295,7 +1295,7 @@ def build_parser() -> argparse.ArgumentParser:
     bots_new.add_argument("task", nargs="*")
     bots_new.add_argument("--owner", type=int, help="Telegram user id to ask, outside a bot's turn")
     bots_new.set_defaults(json=cmd_bots_new)
-    # The bot admin's helpers (docs/BOT_ADMIN.md and the alfred:bot-admin skill); they need the admin permission.
+    # The bot admin's helpers (docs/BOT_ADMIN.md and the consiglieri:bot-admin skill); they need the admin permission.
     for verb, handler, text in (("spec", cmd_bots_spec, "check a spec without sending anything"),
                                 ("create", cmd_bots_create, "send the user a request to create a bot from a spec")):
         sub_parser = bots_actions.add_parser(verb, help=text)
@@ -1316,8 +1316,8 @@ def build_parser() -> argparse.ArgumentParser:
     from .browser_cli import add_parser as add_browser_parser
     from .creds_cli import add_parser as add_creds_parser
 
-    add_browser_parser(commands)  # alfred browser: each bot's own browser (CONSIGLIERI_BROWSER=bot)
-    add_creds_parser(commands)  # alfred creds: the credentials KeePassXC fills in (docs/CREDENTIALS.md)
+    add_browser_parser(commands)  # consiglieri browser: each bot's own browser (CONSIGLIERI_BROWSER=bot)
+    add_creds_parser(commands)  # consiglieri creds: the credentials KeePassXC fills in (docs/CREDENTIALS.md)
 
     commands.add_parser("chrome", help="open a window of Consiglieri's own Chrome profile").set_defaults(json=cmd_chrome)
 
@@ -1390,7 +1390,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         try:
             return args.run(config, args)
         except RuntimeError as exc:
-            print("alfred: %s" % exc, file=sys.stderr)
+            print("consiglieri: %s" % exc, file=sys.stderr)
             return 1
         except KeyboardInterrupt:
             return 130

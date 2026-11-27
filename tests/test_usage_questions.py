@@ -1,8 +1,8 @@
 """Questions an agent asks about the plan usage, and alerts on the weekly forecast.
 
-- `alfred usage check|running_low|forecast`: a one-line verdict by default, the breakdown with --json,
+- `consiglieri usage check|running_low|forecast`: a one-line verdict by default, the breakdown with --json,
   exit codes, the reading cache and its cap, the usage permission, and no model call.
-- `alfred usage-alert add 'week.surplus > 0' --hours ...` and `usage-alert waste`: one firing per quota
+- `consiglieri usage-alert add 'week.surplus > 0' --hours ...` and `usage-alert waste`: one firing per quota
   week, again only when the loss grows, active hours, the margin, and the event the bot gets.
 - The base skill tells agents to act on the verdict.
 """
@@ -56,7 +56,7 @@ def reading(week: float = 52.0, week_left: timedelta = timedelta(hours=30), sess
 
 
 class QuestionCommandTests(unittest.TestCase):
-    """`alfred usage check|running_low|forecast` from inside a bot's turn, with a stand-in `claude`."""
+    """`consiglieri usage check|running_low|forecast` from inside a bot's turn, with a stand-in `claude`."""
 
     def setUp(self) -> None:
         self.sandbox = Sandbox()
@@ -200,11 +200,11 @@ class QuestionCommandTests(unittest.TestCase):
         record = BotRecord(bot_id=BOT, username="research_bot", name="Research", owner_id=99, chat_ids=[99],
                            permissions={"usage": "off"})
         deny = bots.claude_settings(self.sandbox.config, record)["permissions"]["deny"]
-        self.assertIn("Bash(alfred usage *)", deny)  # running_low, check, forecast
-        self.assertIn("Bash(alfred usage-alert *)", deny)  # waste
+        self.assertIn("Bash(consiglieri usage *)", deny)  # running_low, check, forecast
+        self.assertIn("Bash(consiglieri usage-alert *)", deny)  # waste
         record.permissions.update({"usage": "on", "shell": "full"})
         excluded = bots.claude_settings(self.sandbox.config, record)["sandbox"]["excludedCommands"]
-        self.assertIn("alfred usage *", excluded)
+        self.assertIn("consiglieri usage *", excluded)
 
     def test_no_model_call(self) -> None:
         self.ask("running_low")
@@ -408,8 +408,8 @@ class SkillTests(unittest.TestCase):
         self.text = (extensions.BASE_PLUGIN / "skills" / "usage" / "SKILL.md").read_text(encoding="utf-8")
 
     def test_the_skill_teaches_the_verdict_pattern(self) -> None:
-        for expected in ("alfred usage running_low", "alfred usage check", "alfred usage forecast",
-                         "alfred usage-alert waste", "verdict", "do not recompute", "NO_REPLY", "urgent",
+        for expected in ("consiglieri usage running_low", "consiglieri usage check", "consiglieri usage forecast",
+                         "consiglieri usage-alert waste", "verdict", "do not recompute", "NO_REPLY", "urgent",
                          "exit code 3", "week.used >= 90", "--json"):
             self.assertIn(expected, self.text)
 
