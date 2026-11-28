@@ -1,5 +1,5 @@
 """Usage alerts for agents: conditions, one firing per window, wake limits, isolation between bots,
-the `alfred usage-alert` command, and the whole path through the pool with stand-in Telegram and Claude."""
+the `consiglieri usage-alert` command, and the whole path through the pool with stand-in Telegram and Claude."""
 
 from __future__ import annotations
 
@@ -13,16 +13,16 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from unittest import mock
 
-from alfred import cli, home, usage_alerts, usage_monitor
-from alfred.bots import BotRecord, BotRegistry
-from alfred.scheduler import KIND_EVENT, SchedulerStore
-from alfred.usage_alerts import AlertStore, ConditionError, parse
-from alfred.usage_monitor import (ClaudeUsageSource, MonitorSettings, Reading, SpareWeeklyRule, UsageHistory,
+from consiglieri import cli, home, usage_alerts, usage_monitor
+from consiglieri.bots import BotRecord, BotRegistry
+from consiglieri.scheduler import KIND_EVENT, SchedulerStore
+from consiglieri.usage_alerts import AlertStore, ConditionError, parse
+from consiglieri.usage_monitor import (ClaudeUsageSource, MonitorSettings, Reading, SpareWeeklyRule, UsageHistory,
                                   UsageMonitor, UsageSource, Window)
 from fakes import Sandbox
 
 try:
-    from alfred.telegram_bot import BotPool
+    from consiglieri.telegram_bot import BotPool
     from test_panel import OWNER, TestPool, token_for
 except ImportError:  # pragma: no cover
     BotPool = None  # type: ignore
@@ -172,7 +172,7 @@ class MonitorCycleTests(unittest.TestCase):
     def setUp(self) -> None:
         self.sandbox = Sandbox()
         self.addCleanup(self.sandbox.cleanup)
-        self.sandbox.environ["ALFRED_USAGE_MONITOR"] = "1"
+        self.sandbox.environ["CONSIGLIERI_USAGE_MONITOR"] = "1"
         home.prepare(self.sandbox.config)
         self.config = self.sandbox.config
         self.registry = BotRegistry(self.config)
@@ -268,7 +268,7 @@ class MonitorCycleTests(unittest.TestCase):
         self.assertEqual(settings.window_share_percent, 8.0)
         needed, available = SpareWeeklyRule.estimate(reading(week=60, week_left=timedelta(hours=20)), NOW, 8.0)
         self.assertEqual((needed, available), (5.0, 4.0))  # 40% unused takes 5 windows; 4 fit before the reset
-        self.sandbox.environ["ALFRED_USAGE_WINDOW_SHARE"] = "12.5"
+        self.sandbox.environ["CONSIGLIERI_USAGE_WINDOW_SHARE"] = "12.5"
         self.assertEqual(MonitorSettings.from_config(self.config).window_share_percent, 12.5)
         self.assertEqual(SpareWeeklyRule().evaluate(None), [])  # the rule itself does nothing yet
 
@@ -305,7 +305,7 @@ class StructuredSourceTests(unittest.TestCase):
 
 
 class CommandTests(unittest.TestCase):
-    """`alfred usage-alert` inside a bot's turn."""
+    """`consiglieri usage-alert` inside a bot's turn."""
 
     def setUp(self) -> None:
         self.sandbox = Sandbox()
@@ -316,11 +316,11 @@ class CommandTests(unittest.TestCase):
         for bot_id, username in ((RESEARCH, "research_bot"), (CHEF, "chef_bot")):
             self.registry.save(BotRecord(bot_id=bot_id, username=username, name=username, owner_id=99, chat_ids=[99],
                                          permissions={"usage": "on"}))
-        self.sandbox.environ["ALFRED_USAGE_MONITOR"] = "1"
+        self.sandbox.environ["CONSIGLIERI_USAGE_MONITOR"] = "1"
 
     def run_json(self, bot_id: int, *argv: str) -> Dict[str, Any]:
-        environ = dict(self.sandbox.environ, ALFRED_BOT_ID=str(bot_id), ALFRED_CHAT_ID="99", ALFRED_USER_ID="99",
-                       ALFRED_USERNAME="pablo", ALFRED_THREAD_ID="")
+        environ = dict(self.sandbox.environ, CONSIGLIERI_BOT_ID=str(bot_id), CONSIGLIERI_CHAT_ID="99", CONSIGLIERI_USER_ID="99",
+                       CONSIGLIERI_USERNAME="pablo", CONSIGLIERI_THREAD_ID="")
         buffer = io.StringIO()
         with mock.patch.dict(os.environ, environ), redirect_stdout(buffer):
             cli.main(list(argv))
@@ -357,7 +357,7 @@ class CommandTests(unittest.TestCase):
         self.assertFalse(AlertStore.for_bot(self.sandbox.config, RESEARCH).path.exists())
 
     def test_refused_while_the_monitor_is_off(self) -> None:
-        self.sandbox.environ["ALFRED_USAGE_MONITOR"] = "0"
+        self.sandbox.environ["CONSIGLIERI_USAGE_MONITOR"] = "0"
         refused = self.run_json(RESEARCH, "usage-alert", "add", "--when", "week.used > 90")
         self.assertFalse(refused["ok"])
         self.assertIn("usage monitor is off", refused["error"])
@@ -375,7 +375,7 @@ class PoolTests(unittest.TestCase):
     def setUp(self) -> None:
         self.sandbox = Sandbox()
         self.addCleanup(self.sandbox.cleanup)
-        self.sandbox.environ["ALFRED_ALLOWED_USERS"] = str(OWNER)
+        self.sandbox.environ["CONSIGLIERI_ALLOWED_USERS"] = str(OWNER)
         self.sandbox.environ["TELEGRAM_BOT_TOKEN"] = token_for(1, "P")
         home.prepare(self.sandbox.config)
         self.sandbox.fake_cli("claude", {"fresh": [
@@ -406,7 +406,7 @@ class PoolTests(unittest.TestCase):
         self.assertEqual(self.sandbox.calls("claude"), [])
 
     def test_the_event_wakes_only_the_bot_that_set_the_alert(self) -> None:
-        self.sandbox.environ["ALFRED_USAGE_MONITOR"] = "1"
+        self.sandbox.environ["CONSIGLIERI_USAGE_MONITOR"] = "1"
 
         async def run() -> None:
             pool = TestPool(self.sandbox.config)

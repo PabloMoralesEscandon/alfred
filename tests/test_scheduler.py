@@ -5,8 +5,8 @@ import sqlite3
 import unittest
 from datetime import datetime, timedelta, timezone
 
-from alfred import scheduler
-from alfred.scheduler import SchedulerStore
+from consiglieri import scheduler
+from consiglieri.scheduler import SchedulerStore
 from fakes import Sandbox
 
 T0 = datetime(2030, 1, 1, 9, 0, tzinfo=timezone.utc)
@@ -90,7 +90,7 @@ class SchedulerTests(unittest.TestCase):
         async def deliver(item) -> None:
             raise scheduler.Skip("week 92% used")
 
-        with self.assertLogs("alfred.scheduler", level="INFO"):
+        with self.assertLogs("consiglieri.scheduler", level="INFO"):
             asyncio.run(scheduler.run_scheduler(self.store, deliver, once=True))
         done = self.store.get(item["id"])
         self.assertEqual((done["status"], done["last_error"]), (scheduler.STATUS_SKIPPED, None))
@@ -148,7 +148,7 @@ class SchedulerTests(unittest.TestCase):
                 raise RuntimeError("nope")
             delivered.append(item["message"])
 
-        with self.assertLogs("alfred.scheduler", level="ERROR"):
+        with self.assertLogs("consiglieri.scheduler", level="ERROR"):
             asyncio.run(scheduler.run_scheduler(self.store, deliver, once=True))
 
         self.assertEqual(sorted(delivered), ["good", "interrupted"])

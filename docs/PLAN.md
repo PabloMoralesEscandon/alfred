@@ -38,17 +38,17 @@ contains no domain logic at all.
 
 ```text
  Telegram ──► telegram_bot.py ──► agent.py ──► backends/claude.py ──► claude -p --resume <id>
-   ▲            auth, files,       per-chat      (or codex.py)            cwd = ALFRED_HOME
+   ▲            auth, files,       per-chat      (or codex.py)            cwd = CONSIGLIERI_HOME
    │            /commands,         lock and                                 │ reads CLAUDE.md, SOUL.md,
    │            progress           session                                  │ memory/,   .claude/skills/*
    │                                  ▲                                     │ writes memory/, new skills  
    │                                  │ scheduled tasks                     ▼
-   └──────── scheduler.py ◄── SQLite ◄──────────────── bin/alfred schedule | send | skills
+   └──────── scheduler.py ◄── SQLite ◄──────────────── bin/consiglieri schedule | send | skills
 ```
 
 ## Design decisions
 
-**The home lives outside the repo** (`~/.alfred`, set by `ALFRED_HOME`). Code is the runtime; the home
+**The home lives outside the repo** (`~/.consiglieri`, set by `CONSIGLIERI_HOME`). Code is the runtime; the home
 is the agent's state. This keeps self-modification away from the source tree and makes the old blanket
 `*.md` gitignore unnecessary.
 
@@ -73,10 +73,10 @@ and pass `--resume`. A lost session falls back to a fresh one automatically. `/n
 once per conversation, so the time and chat id travel as a `<context .../>` line on each message.
 
 **Abilities are skills, including the built-in ones.** Scheduling is taught by a seeded `reminders`
-skill that documents the `alfred schedule` CLI. Adding an ability never requires touching the runtime
+skill that documents the `consiglieri schedule` CLI. Adding an ability never requires touching the runtime
 prompt. Only two skills are seeded: `reminders` and `create-skill`, the one that teaches skill writing.
 
-**The agent talks back to the runtime through a CLI on its PATH** (`bin/alfred`). The chat id comes from
+**The agent talks back to the runtime through a CLI on its PATH** (`bin/consiglieri`). The chat id comes from
 the environment, so the model never has to pass ids around, which was a source of errors before.
 
 **Receiving and replying are separate.** The Telegram side hands a message to the agent
@@ -87,15 +87,15 @@ when one of its background commands finishes. Messages and results are therefore
 result can answer two messages, and some results answer none. This replaced "one process per message",
 which could not be corrected mid-task, could not be woken, and capped every job at one turn. The
 process is tracked per message through the CLI's `command_lifecycle` events, restarted fresh when its
-stored session is gone, and stopped when a turn shows no sign of life for `ALFRED_TIMEOUT` seconds.
+stored session is gone, and stopped when a turn shows no sign of life for `CONSIGLIERI_TIMEOUT` seconds.
 `/stop` kills it; the next message resumes the conversation in a new one.
 
 **The last message of a turn is the reply, and the agent can stay quiet.** Its final text is posted,
-`alfred send` posts earlier, and a final message of exactly `NO_REPLY` posts nothing. Posting only
-through `alfred send` was considered and rejected: a progress note followed by the answer in the final
+`consiglieri send` posts earlier, and a final message of exactly `NO_REPLY` posts nothing. Posting only
+through `consiglieri send` was considered and rejected: a progress note followed by the answer in the final
 text is the natural pattern, and it would have lost the answer.
 
-**Anything can wake the agent.** `alfred event "text"` queues a note that reaches the chat's agent
+**Anything can wake the agent.** `consiglieri event "text"` queues a note that reaches the chat's agent
 within a couple of seconds as an `[Event]` message. It goes through the scheduler's table, so it works
 from any process on the machine and survives a restart of the bot.
 
@@ -123,7 +123,7 @@ weighed for browser access:
 | Option | Verdict |
 | --- | --- |
 | Orca's built-in browser via the `orca` CLI | Default. Already installed and running here, plain shell commands (so it works headless and with either backend), persistent logins, tabs visible in the app. Verified live. |
-| Claude in Chrome (`claude --chrome`) | Supported with `ALFRED_BROWSER=chrome`. Uses the user's real Chrome and its sessions. Claude backend only, and needs a Chrome window with the extension signed in. Verified live. |
+| Claude in Chrome (`claude --chrome`) | Supported with `CONSIGLIERI_BROWSER=chrome`. Uses the user's real Chrome and its sessions. Claude backend only, and needs a Chrome window with the extension signed in. Verified live. |
 | Safari | Rejected. No scripting surface short of desktop control (clicking by screenshot), which is slow and fragile. |
 
 Running the whole agent inside Orca (Telegram messages typed into an Orca terminal, replies scraped
@@ -138,27 +138,27 @@ Consiglieri's scheduler and are not used, because Consiglieri's entries are tied
 
 | Area | Delivered |
 | --- | --- |
-| Package | `alfred/` replaces the five flat scripts; `pyproject.toml`; `alfred` command |
+| Package | `consiglieri/` replaces the five flat scripts; `pyproject.toml`; `consiglieri` command |
 | Backends | Claude Code (a process that stays open per chat, or one per turn; resume, lost-session retry) and Codex (`exec --json`, resume) |
 | Home | Bootstrap, managed manual, seed skills, launcher, git autosave, one-time import of the old layout |
 | Agent core | Per-chat session and backend, messages taken mid-turn, self-started turns, new-skill detection |
 | Memory | `memory/` folder of topic files with an always-loaded index; saved on request or by Consiglieri's own decision; every change reported in the reply; `/memory` |
 | Telegram | Allow-list by id or username, `/help /new /stop /usage /status /skills /schedule /backend`, attachments to inbox, live tool progress, typing indicator, reply splitting, `/stop` kills the process group |
 | Scheduler | Messages and agent tasks, one-off and recurring, crash recovery, old database migrated in place |
-| Agent tools | `alfred schedule add\|list\|cancel`, `alfred send [--file]`, `alfred event`, `alfred skills` |
+| Agent tools | `consiglieri schedule add\|list\|cancel`, `consiglieri send [--file]`, `consiglieri event`, `consiglieri skills` |
 | Orca agents | Seeded `orca-agents` skill with a watcher script: launch agents in Orca projects, get woken when they stop, report |
-| Terminal | `alfred chat` talks to the same agent without Telegram |
-| Service | `alfred service install\|status\|logs\|restart\|uninstall`: launchd agent on macOS, systemd user unit on Linux |
-| Browser | Seeded `browser` skill for Orca's built-in browser, `alfred browser-setup`, `alfred screenshot`, browser state in `/status` |
+| Terminal | `consiglieri chat` talks to the same agent without Telegram |
+| Service | `consiglieri service install\|status\|logs\|restart\|uninstall`: launchd agent on macOS, systemd user unit on Linux |
+| Browser | Seeded `browser` skill for Orca's built-in browser, `consiglieri browser-setup`, `consiglieri screenshot`, browser state in `/status` |
 | Tests | 125 tests using stand-in `claude`/`codex`/`orca` binaries and a stand-in Telegram |
 
-Verified live with real Claude Code through `alfred chat`: it scheduled a reminder using the seeded
+Verified live with real Claude Code through `consiglieri chat`: it scheduled a reminder using the seeded
 skill, wrote a fact to memory, recalled both in the resumed session, wrote itself a `disk-report` skill
 when asked to learn a procedure, and used that skill in a brand-new conversation.
 
 Browser verified live the same way: Consiglieri opened Hacker News in Orca's browser, clicked through to
 another page, read it, saved a screenshot and closed its tab, all inside its own Orca workspace. The
-same task was then repeated through Claude in Chrome with `ALFRED_BROWSER=chrome`.
+same task was then repeated through Claude in Chrome with `CONSIGLIERI_BROWSER=chrome`.
 
 Not verified live:
 
@@ -203,7 +203,7 @@ Not verified live:
 
 - **Group chats and multiple users** with per-user memory folders instead of one shared `memory/`.
 - **Webhooks in.** An HTTP endpoint so other systems (mail rules, CI, home automation) can hand Consiglieri
-  a prompt. `alfred event` is the local half of this already.
+  a prompt. `consiglieri event` is the local half of this already.
 - **Remote homes.** Run the agent in a container or on another machine while the Telegram process stays
   small; the backend interface is the seam for this.
 

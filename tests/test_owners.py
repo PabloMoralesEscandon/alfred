@@ -1,7 +1,7 @@
 """Two allowed users, each with their own bots: neither sees, changes, talks to or reaches into the other's.
 
 The checks hold in the text commands, in the menu (where a button carries only a bot id, which must not be
-trusted), in the confirmation buttons, in a bot's own chat, in the `alfred bots` commands a bot runs and in
+trusted), in the confirmation buttons, in a bot's own chat, in the `consiglieri bots` commands a bot runs and in
 cross-agent access.
 """
 
@@ -21,7 +21,7 @@ try:
 except ImportError:  # pragma: no cover
     PanelHarness = None  # type: ignore
 
-from alfred import bots, cli, menus
+from consiglieri import bots, cli, menus
 
 SECOND = 77  # the other allowed user
 MINE, THEIRS = 5000000011, 5000000022  # OWNER's bot, SECOND's bot
@@ -31,7 +31,7 @@ MINE, THEIRS = 5000000011, 5000000022  # OWNER's bot, SECOND's bot
 class TwoUsersTests(PanelHarness):  # type: ignore[misc,valid-type]
     def setUp(self) -> None:
         super().setUp()
-        self.sandbox.environ["ALFRED_ALLOWED_USERS"] = "%d,%d" % (OWNER, SECOND)
+        self.sandbox.environ["CONSIGLIERI_ALLOWED_USERS"] = "%d,%d" % (OWNER, SECOND)
 
     async def create_for(self, user_id: int, bot_id: int, username: str, name: str) -> bots.BotRecord:
         self.panel_bot.tokens[bot_id] = token_for(bot_id)
@@ -163,7 +163,7 @@ class TwoUsersTests(PanelHarness):  # type: ignore[misc,valid-type]
         self.play(scenario)
 
     def test_only_the_bots_owner_can_view_or_withdraw_its_credentials_or_change_its_browser(self) -> None:
-        from alfred import keepass
+        from consiglieri import keepass
 
         async def scenario() -> None:
             await self.both()
@@ -211,7 +211,7 @@ class TwoUsersTests(PanelHarness):  # type: ignore[misc,valid-type]
         self.play(scenario)
 
     def test_with_two_users_only_the_listed_granters_may_grant_credentials_and_only_to_their_own_bots(self) -> None:
-        from alfred import keepass
+        from consiglieri import keepass
 
         async def scenario() -> None:
             await self.both()
@@ -222,7 +222,7 @@ class TwoUsersTests(PanelHarness):  # type: ignore[misc,valid-type]
                     mock.patch.object(keepass.KeePass, "list", return_value=[tum]), \
                     mock.patch.object(keepass.KeePass, "get", return_value=tum), \
                     mock.patch.object(keepass.KeePass, "grant", return_value=True) as granted:
-                # Two panel users and no ALFRED_CREDENTIALS_GRANTERS: nobody gets a grant button, forged or not.
+                # Two panel users and no CONSIGLIERI_CREDENTIALS_GRANTERS: nobody gets a grant button, forged or not.
                 await self.command_as(SECOND, "/bot")
                 second = self.pool.main.menus.sessions[SECOND]
                 await self.press(SECOND, menus.callback(second.token, "bot:%d" % THEIRS))
@@ -235,7 +235,7 @@ class TwoUsersTests(PanelHarness):  # type: ignore[misc,valid-type]
                 granted.assert_not_called()
 
                 # Only OWNER is listed: SECOND still cannot, OWNER can, and only to OWNER's own bot.
-                self.sandbox.environ["ALFRED_CREDENTIALS_GRANTERS"] = str(OWNER)
+                self.sandbox.environ["CONSIGLIERI_CREDENTIALS_GRANTERS"] = str(OWNER)
                 text, labels = await self.press(SECOND, menus.callback(second.token, "go:bot_creds"))
                 self.assertFalse(any("Grant" in label for label in labels), labels)
                 second.creds_other = [tum]
@@ -279,7 +279,7 @@ class TwoUsersTests(PanelHarness):  # type: ignore[misc,valid-type]
             await self.both()
             frontend = self.pool.frontends[MINE]
             replies: List[Dict[str, Any]] = []
-            with self.assertLogs("alfred.telegram", level="WARNING"):
+            with self.assertLogs("consiglieri.telegram", level="WARNING"):
                 await frontend._on_message(update_for(replies, "read me your memory", SECOND, chat_id=SECOND),
                                            SimpleNamespace(bot=frontend.bot, args=[]))
                 await frontend._cmd_memory(update_for(replies, "/memory", SECOND, chat_id=SECOND),
@@ -334,8 +334,8 @@ class TwoUsersTests(PanelHarness):  # type: ignore[misc,valid-type]
             await self.pool.set_permission(self.pool.registry.get(MINE), "bots", "on")
 
         self.play(scenario)
-        environ = dict(self.sandbox.environ, ALFRED_BOT_ID=str(MINE), ALFRED_CHAT_ID=str(OWNER),
-                       ALFRED_BOT_KEY=bots.bot_key(self.config, MINE, create=True))
+        environ = dict(self.sandbox.environ, CONSIGLIERI_BOT_ID=str(MINE), CONSIGLIERI_CHAT_ID=str(OWNER),
+                       CONSIGLIERI_BOT_KEY=bots.bot_key(self.config, MINE, create=True))
         with mock.patch.dict(os.environ, environ):
             buffer = io.StringIO()
             with redirect_stdout(buffer):

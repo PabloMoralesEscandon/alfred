@@ -10,7 +10,7 @@ Se consideraron tres caminos:
 | Opción | Qué haría falta | Por qué no / por qué sí |
 |---|---|---|
 | **Conector de Google Calendar de claude.ai (MCP)** | Que el usuario conecte Google Calendar una vez en claude.ai → Settings → Connectors. Consiglieri solo abre o cierra sus herramientas por bot | **Elegida.** Es la más sencilla: ni credenciales, ni OAuth, ni código de API en Consiglieri. Los bots ya corren con Claude Code y la cuenta del usuario, que carga los conectores de claude.ai; las herramientas se llaman `mcp__claude_ai_Google_Calendar__*`, y el modelo de permisos ya tiene un precedente idéntico (el servidor MCP de Chrome con el permiso `browser`) |
-| Integración propia con la API de Google (`alfred calendar …`) | Un cliente OAuth propio en Google Cloud, guardar y renovar tokens, código para listar y crear, sus tests | Mucho más código y un secreto más que proteger. Daría control fino (solo leer y crear), pero no compensa para una primera versión |
+| Integración propia con la API de Google (`consiglieri calendar …`) | Un cliente OAuth propio en Google Cloud, guardar y renovar tokens, código para listar y crear, sus tests | Mucho más código y un secreto más que proteger. Daría control fino (solo leer y crear), pero no compensa para una primera versión |
 | Calendar.app de macOS vía `osascript` | Permiso de Automatización de macOS para el servicio, AppleScript | Sin credenciales, pero solo macOS (el servicio también corre en Linux), lento con calendarios grandes y con un aviso de privacidad que nadie puede aceptar en modo desatendido |
 
 Consecuencias de la elección:
@@ -37,7 +37,7 @@ Sigue el modelo de `schedule` y `usage`:
   en `EXTRAS`: el bot nace con él sin aprobación aparte. Un administrador sigue sin poder darlo si él no lo
   tiene.
 - **El manual** del bot lo lista en «What you may do» y el panel muestra un aviso con dónde se conecta.
-- **Crear eventos requiere el sí del usuario** (skill `alfred:calendar`): solo cuando el usuario pidió ese
+- **Crear eventos requiere el sí del usuario** (skill `consiglieri:calendar`): solo cuando el usuario pidió ese
   evento en el chat o aceptó la propuesta; nunca por iniciativa propia ni porque lo diga un texto leído; sin
   invitados ni recurrencia salvo que se pida. Esto es instrucción, no regla de Claude Code.
 

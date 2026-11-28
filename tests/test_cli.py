@@ -7,8 +7,8 @@ import unittest
 from contextlib import redirect_stdout
 from unittest import mock
 
-from alfred import cli
-from alfred.text import split_message
+from consiglieri import cli
+from consiglieri.text import split_message
 from fakes import Sandbox, claude_lines
 
 
@@ -18,8 +18,8 @@ class CliTests(unittest.TestCase):
         self.addCleanup(self.sandbox.cleanup)
         # As inside a bot's turn: every agent is a bot, and the commands act as it.
         self.record, self.bot_config = self.sandbox.add_bot()
-        environ = dict(self.sandbox.environ, ALFRED_CHAT_ID="7", ALFRED_USER_ID="99", ALFRED_USERNAME="pablo",
-                       ALFRED_BOT_ID=str(self.record.bot_id))
+        environ = dict(self.sandbox.environ, CONSIGLIERI_CHAT_ID="7", CONSIGLIERI_USER_ID="99", CONSIGLIERI_USERNAME="pablo",
+                       CONSIGLIERI_BOT_ID=str(self.record.bot_id))
         patcher = mock.patch.dict(os.environ, environ)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -57,30 +57,30 @@ class CliTests(unittest.TestCase):
         _, everything = self.run_json("schedule", "list", "--all")
         self.assertEqual(len(everything["items"]), 2)
 
-    def test_chrome_opens_alfreds_own_profile(self) -> None:
+    def test_chrome_opens_its_own_profile(self) -> None:
         code, refused = self.run_json("chrome")
         self.assertEqual((code, refused["ok"]), (1, False))
-        self.assertIn("ALFRED_CHROME_PROFILE", refused["error"])
+        self.assertIn("CONSIGLIERI_CHROME_PROFILE", refused["error"])
 
-        os.environ["ALFRED_CHROME_PROFILE"] = "Alfred"
-        with mock.patch("alfred.cli.subprocess.Popen") as popen, mock.patch("alfred.cli.sys.platform", "darwin"):
+        os.environ["CONSIGLIERI_CHROME_PROFILE"] = "Consiglieri"
+        with mock.patch("consiglieri.cli.subprocess.Popen") as popen, mock.patch("consiglieri.cli.sys.platform", "darwin"):
             code, opened = self.run_json("chrome")
-        self.assertEqual((code, opened["profile"]), (0, "Alfred"))
-        self.assertEqual(popen.call_args[0][0], ["open", "-na", "Google Chrome", "--args", "--profile-directory=Alfred"])
+        self.assertEqual((code, opened["profile"]), (0, "Consiglieri"))
+        self.assertEqual(popen.call_args[0][0], ["open", "-na", "Google Chrome", "--args", "--profile-directory=Consiglieri"])
 
-        with mock.patch("alfred.cli.sys.platform", "linux"):
-            self.sandbox.environ.update(ALFRED_CHROME_PROFILE="Alfred", ALFRED_CHROME_APP="chromium")
-            self.assertEqual(cli.chrome_command(self.sandbox.config), ["chromium", "--profile-directory=Alfred"])
+        with mock.patch("consiglieri.cli.sys.platform", "linux"):
+            self.sandbox.environ.update(CONSIGLIERI_CHROME_PROFILE="Consiglieri", CONSIGLIERI_CHROME_APP="chromium")
+            self.assertEqual(cli.chrome_command(self.sandbox.config), ["chromium", "--profile-directory=Consiglieri"])
 
     def test_event_is_queued_for_the_chat_and_due_at_once(self) -> None:
-        from alfred.scheduler import SchedulerStore
+        from consiglieri.scheduler import SchedulerStore
 
         code, queued = self.run_json("event", "The", "agent in mus-solver", "finished")
         self.assertEqual((code, queued["ok"]), (0, True))
         self.assertEqual((queued["item"]["kind"], queued["item"]["text"]), ("event", "The agent in mus-solver finished"))
 
         # Another process on this machine names the bot and the chat itself.
-        with mock.patch.dict(os.environ, {"ALFRED_BOT_ID": "", "ALFRED_CHAT_ID": ""}):
+        with mock.patch.dict(os.environ, {"CONSIGLIERI_BOT_ID": "", "CONSIGLIERI_CHAT_ID": ""}):
             code, other = self.run_json("event", "--bot", "helper_bot", "--chat-id", "8", "Backup done")
         self.assertEqual((code, other["ok"]), (0, True))
         store = SchedulerStore(self.sandbox.config.db_path)
@@ -112,7 +112,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual((code, payload["ok"]), (1, False))
 
     def test_agent_commands_need_a_chat(self) -> None:
-        with mock.patch.dict(os.environ, {"ALFRED_CHAT_ID": ""}):
+        with mock.patch.dict(os.environ, {"CONSIGLIERI_CHAT_ID": ""}):
             code, payload = self.run_json("schedule", "list")
         self.assertEqual(code, 1)
         self.assertIn("no chat", payload["error"])
@@ -129,7 +129,7 @@ class CliTests(unittest.TestCase):
         self.assertIn(str(self.sandbox.home), output)
 
         _, payload = self.run_json("skills")
-        self.assertEqual([skill["name"] for skill in payload["skills"]], ["alfred:bot-admin", "alfred:browser", "alfred:calendar", "alfred:extensions", "alfred:orca-agents", "alfred:reminders", "alfred:usage", "alfred:web-logins"])
+        self.assertEqual([skill["name"] for skill in payload["skills"]], ["consiglieri:bot-admin", "consiglieri:browser", "consiglieri:calendar", "consiglieri:extensions", "consiglieri:orca-agents", "consiglieri:reminders", "consiglieri:usage", "consiglieri:web-logins"])
 
         self.sandbox.fake_cli("claude", {"fresh": claude_lines("At your service.", "sess-A")})
         with mock.patch.dict(os.environ, self.sandbox.environ):
@@ -139,7 +139,7 @@ class CliTests(unittest.TestCase):
 
     def test_without_a_bot_there_is_no_agent_to_act_as(self) -> None:
         # From a terminal, outside any bot's turn: there is no main agent to post, schedule, wake or chat as.
-        with mock.patch.dict(os.environ, {"ALFRED_BOT_ID": ""}):
+        with mock.patch.dict(os.environ, {"CONSIGLIERI_BOT_ID": ""}):
             for argv in (("schedule", "add", "--in", "20m", "--message", "x"), ("schedule", "list"),
                          ("event", "hello"), ("send", "hello"), ("skills",), ("ext", "list")):
                 code, payload = self.run_json(*argv)
@@ -148,14 +148,14 @@ class CliTests(unittest.TestCase):
             buffer = io.StringIO()
             with redirect_stdout(buffer), mock.patch("sys.stderr", io.StringIO()), self.assertRaises(SystemExit):
                 cli.main(["chat", "-m", "hello"])  # --bot is required
-            for alias in ("main", "alfred", "0"):
+            for alias in ("main", "consiglieri", "0"):
                 code, payload = self.run_json("event", "--bot", alias, "hello")
                 self.assertIn("no bot called", payload["error"], alias)
 
     def test_no_command_prints_help(self) -> None:
         code, output = self.run_cli()
         self.assertEqual(code, 2)
-        self.assertIn("usage: alfred", output)
+        self.assertIn("usage: consiglieri", output)
 
 
 class SplitMessageTests(unittest.TestCase):

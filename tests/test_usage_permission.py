@@ -11,12 +11,12 @@ from contextlib import redirect_stderr, redirect_stdout
 from typing import Any, Dict, List, Tuple
 from unittest import mock
 
-from alfred import bots, cli, home, presets
-from alfred.bots import BotRecord, BotRegistry
+from consiglieri import bots, cli, home, presets
+from consiglieri.bots import BotRecord, BotRegistry
 from fakes import Sandbox
 
 try:
-    from alfred.telegram_bot import BotPool  # noqa: F401  (test_panel needs it to import)
+    from consiglieri.telegram_bot import BotPool  # noqa: F401  (test_panel needs it to import)
     from test_panel import OWNER, RESEARCH, PanelHarness
 except ImportError:  # pragma: no cover
     PanelHarness = unittest.TestCase  # type: ignore
@@ -47,7 +47,7 @@ class PermissionTests(unittest.TestCase):
         self.assertEqual(bots.DEFAULT_PERMISSIONS["usage"], bots.DEFAULT_PERMISSIONS["schedule"])  # like reminders
         self.assertIn("usage", bots.SWITCHES)
         self.assertTrue(self.bot().allows("usage"))
-        for key in presets.keys():  # the security presets (alfred/presets.py), Basic included
+        for key in presets.keys():  # the security presets (consiglieri/presets.py), Basic included
             self.assertEqual(presets.resolve(key)["usage"], "on", key)
 
     def test_values_and_options(self) -> None:
@@ -69,10 +69,10 @@ class PermissionTests(unittest.TestCase):
 
     def test_sandbox_lets_the_usage_commands_out_only_with_it(self) -> None:
         excluded = self.settings(shell="full", usage="off")["sandbox"]["excludedCommands"]
-        self.assertNotIn("alfred usage-alert *", excluded)
+        self.assertNotIn("consiglieri usage-alert *", excluded)
         excluded = self.settings(shell="full")["sandbox"]["excludedCommands"]
-        self.assertIn("alfred usage-alert *", excluded)
-        self.assertIn("alfred usage", excluded)
+        self.assertIn("consiglieri usage-alert *", excluded)
+        self.assertIn("consiglieri usage", excluded)
 
     def test_summary_names_it(self) -> None:
         self.assertIn("read the Claude plan usage", bots.permission_summary(self.bot(usage="off")).split("You cannot")[1])
@@ -81,7 +81,7 @@ class PermissionTests(unittest.TestCase):
         self.assertIn("usage: off", bots.describe(self.bot(usage="off")))
 
     def test_the_agent_is_told_to_use_it_only_with_the_users_express_permission(self) -> None:
-        # In what the agent reads: its manual (the permission summary, and BOT.md) and the alfred:usage skill.
+        # In what the agent reads: its manual (the permission summary, and BOT.md) and the consiglieri:usage skill.
         summary = bots.permission_summary(self.bot())
         self.assertIn(bots.USAGE_CONSENT_RULE, summary)
         self.assertIn("express permission", bots.USAGE_CONSENT_RULE)
@@ -100,7 +100,7 @@ class PermissionTests(unittest.TestCase):
 
 
 class UsageCommandTests(unittest.TestCase):
-    """`alfred usage` from inside a bot's turn: the permission and the global switch both have to be on."""
+    """`consiglieri usage` from inside a bot's turn: the permission and the global switch both have to be on."""
 
     def setUp(self) -> None:
         self.sandbox = Sandbox()
@@ -113,7 +113,7 @@ class UsageCommandTests(unittest.TestCase):
                                      permissions={"usage": "off"}))
 
     def run_usage(self, bot: bool = True) -> Tuple[int, str, str]:
-        environ = dict(self.sandbox.environ, ALFRED_BOT_ID=str(BOT) if bot else "")
+        environ = dict(self.sandbox.environ, CONSIGLIERI_BOT_ID=str(BOT) if bot else "")
         out, err = io.StringIO(), io.StringIO()
         with mock.patch.dict(os.environ, environ), redirect_stdout(out), redirect_stderr(err):
             code = cli.main(["usage"])
@@ -139,7 +139,7 @@ class UsageCommandTests(unittest.TestCase):
 
     def test_allowed_with_the_permission_and_the_monitor_on(self) -> None:
         self.grant("on")
-        self.sandbox.environ["ALFRED_USAGE_MONITOR"] = "1"
+        self.sandbox.environ["CONSIGLIERI_USAGE_MONITOR"] = "1"
         code, out, _ = self.run_usage()
         self.assertEqual(code, 0)
         self.assertIn("Session: 33% used", out)
@@ -168,7 +168,7 @@ class PanelTests(PanelHarness):  # type: ignore[misc,valid-type]
         self.play(scenario)
 
     def test_no_warning_when_the_monitor_is_on(self) -> None:
-        self.sandbox.environ["ALFRED_USAGE_MONITOR"] = "1"
+        self.sandbox.environ["CONSIGLIERI_USAGE_MONITOR"] = "1"
 
         async def scenario() -> None:
             await self.create(RESEARCH, "research_bot", "Research", "/bot new Research")

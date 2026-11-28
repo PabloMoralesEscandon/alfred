@@ -2,7 +2,7 @@
 
 - The decision: `skip_if` holds a delivery back, `only_if` lets it through only when it holds, forecast values
   with active hours, and what happens when the usage can't be read or the bot lost the usage permission.
-- `alfred schedule add --skip-if-low|--skip-if|--only-if|--only-if-waste`: validation, the usage permission,
+- `consiglieri schedule add --skip-if-low|--skip-if|--only-if|--only-if-waste`: validation, the usage permission,
   and what `schedule list` shows.
 - The service: a held-back item never reaches the bot.
 """
@@ -18,11 +18,11 @@ from datetime import timedelta
 from typing import Any, Dict, Optional, Tuple
 from unittest import mock
 
-from alfred import cli, home, scheduler, usage_gate
-from alfred.bots import BotRecord, BotRegistry
-from alfred.scheduler import SchedulerStore
-from alfred.usage_gate import Decision, Gate, GateError
-from alfred.usage_monitor import Reading
+from consiglieri import cli, home, scheduler, usage_gate
+from consiglieri.bots import BotRecord, BotRegistry
+from consiglieri.scheduler import SchedulerStore
+from consiglieri.usage_gate import Decision, Gate, GateError
+from consiglieri.usage_monitor import Reading
 from fakes import Sandbox
 from test_usage_alerts import FixedSource
 from test_usage_questions import NOW, reading
@@ -110,7 +110,7 @@ class DecisionTests(unittest.TestCase):
 
 
 class ScheduleCommandTests(unittest.TestCase):
-    """`alfred schedule add` with usage conditions, from inside a bot's turn."""
+    """`consiglieri schedule add` with usage conditions, from inside a bot's turn."""
 
     def setUp(self) -> None:
         self.sandbox = Sandbox()
@@ -125,7 +125,7 @@ class ScheduleCommandTests(unittest.TestCase):
                                      permissions={"usage": "on" if usage else "off"}))
 
     def add(self, *argv: str, extra: Optional[Dict[str, str]] = None) -> Tuple[int, Dict[str, Any], str]:
-        environ = dict(self.sandbox.environ, ALFRED_BOT_ID=str(BOT), ALFRED_CHAT_ID="99", **(extra or {}))
+        environ = dict(self.sandbox.environ, CONSIGLIERI_BOT_ID=str(BOT), CONSIGLIERI_CHAT_ID="99", **(extra or {}))
         out, err = io.StringIO(), io.StringIO()
         with mock.patch.dict(os.environ, environ), redirect_stdout(out), redirect_stderr(err):
             code = cli.main(["schedule", "add", "--in", "1h", "--task", "write the report"] + list(argv))
@@ -144,7 +144,7 @@ class ScheduleCommandTests(unittest.TestCase):
 
         _, payload, _ = self.add("--skip-if-low", "week", "--threshold", "80", "--projected")
         self.assertEqual(self.stored(payload).skip_if, "week.used >= 80 or week.projected >= 100")
-        _, payload, _ = self.add("--skip-if-low", "session", extra={"ALFRED_USAGE_LOW_THRESHOLD": "75"})
+        _, payload, _ = self.add("--skip-if-low", "session", extra={"CONSIGLIERI_USAGE_LOW_THRESHOLD": "75"})
         self.assertEqual(self.stored(payload).skip_if, "session.used >= 75")
 
     def test_skip_if_only_if_waste_hours_and_unread_policy(self) -> None:
@@ -183,11 +183,11 @@ class ScheduleCommandTests(unittest.TestCase):
         self.assertNotIn("usage", payload["item"])
 
     def test_the_monitor_switch_is_not_needed(self) -> None:
-        code, payload, _ = self.add("--skip-if-low", extra={"ALFRED_USAGE_MONITOR": "0"})
+        code, payload, _ = self.add("--skip-if-low", extra={"CONSIGLIERI_USAGE_MONITOR": "0"})
         self.assertEqual(code, 0, payload)
 
     def list_items(self) -> list:
-        environ = dict(self.sandbox.environ, ALFRED_BOT_ID=str(BOT), ALFRED_CHAT_ID="99")
+        environ = dict(self.sandbox.environ, CONSIGLIERI_BOT_ID=str(BOT), CONSIGLIERI_CHAT_ID="99")
         out = io.StringIO()
         with mock.patch.dict(os.environ, environ), redirect_stdout(out), redirect_stderr(io.StringIO()):
             cli.main(["schedule", "list"])

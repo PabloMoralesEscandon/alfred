@@ -1,7 +1,0 @@
-{
-  "name": "alfred",
-  "displayName": "Consiglieri base",
-  "version": "0.2.0",
-  "description": "Consiglieri's built-in skills and helpers. Shipped with Consiglieri's code; its agents do not edit it.",
-  "author": {"name": "Consiglieri"}
-}

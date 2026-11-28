@@ -15,12 +15,12 @@ import os
 from typing import Any, Awaitable, Callable, List, Optional
 
 try:
-    from alfred.telegram_bot import COMMANDS, TelegramBot
+    from consiglieri.telegram_bot import COMMANDS, TelegramBot
 except ImportError:  # pragma: no cover
     TelegramBot = None  # type: ignore
     COMMANDS = []
 
-from alfred import home, scheduler
+from consiglieri import home, scheduler
 from fakes import Sandbox, claude_lines
 
 
@@ -89,7 +89,7 @@ class TelegramBotTests(unittest.TestCase):
     def setUp(self) -> None:
         self.sandbox = Sandbox()
         self.addCleanup(self.sandbox.cleanup)
-        self.sandbox.environ["ALFRED_ALLOWED_USERS"] = "pablo"
+        self.sandbox.environ["CONSIGLIERI_ALLOWED_USERS"] = "pablo"
         self.sandbox.environ["TELEGRAM_BOT_TOKEN"] = "123:abc"
         self.record, self.config = self.sandbox.add_bot()
         self.bot = FakeBot()
@@ -206,7 +206,7 @@ class TelegramBotTests(unittest.TestCase):
         self.sandbox.fake_cli("claude", {"fresh": claude_lines("NO_REPLY", "sess-A")})
 
         async def scenario() -> None:
-            await self.say("send me the report with alfred send")
+            await self.say("send me the report with consiglieri send")
             self.sandbox.fake_cli("claude", {"fresh": claude_lines("`no_reply`.", "sess-A")})
             await self.say("thanks")
 
@@ -234,7 +234,7 @@ class TelegramBotTests(unittest.TestCase):
         stranger = dict(user_id=5, username="mallory")
 
         async def scenario() -> None:
-            with self.assertLogs("alfred.telegram", level="WARNING"):
+            with self.assertLogs("consiglieri.telegram", level="WARNING"):
                 await self.say("hello", **stranger)
                 await self.app._cmd_skills(make_update(self.bot, "/skills", **stranger), self.context())
                 await self.app._cmd_new(make_update(self.bot, "/new", **stranger), self.context())
@@ -249,7 +249,7 @@ class TelegramBotTests(unittest.TestCase):
         self.assertEqual(self.app.agent.backend_name(7), "claude")
 
     def test_user_id_allow_list_works_without_a_username(self) -> None:
-        self.sandbox.environ["ALFRED_ALLOWED_USERS"] = "99"
+        self.sandbox.environ["CONSIGLIERI_ALLOWED_USERS"] = "99"
         self.sandbox.fake_cli("claude", {"fresh": claude_lines("Hi.", "sess-A")})
 
         async def scenario() -> None:
@@ -283,7 +283,7 @@ class TelegramBotTests(unittest.TestCase):
 
             self.bot.sent.clear()
             await self.app.agent.stop(7)
-            self.sandbox.environ["ALFRED_CLAUDE_BIN"] = str(self.sandbox.root / "missing")
+            self.sandbox.environ["CONSIGLIERI_CLAUDE_BIN"] = str(self.sandbox.root / "missing")
             await self.say("hi")
 
         self.play(scenario)
@@ -393,7 +393,7 @@ class TelegramBotTests(unittest.TestCase):
         _, status, skills, schedule, backend, bad_backend, switched, fresh, help_text = self.bot.sent
         self.assertIn("Backend: claude\nModel: the claude default\nEffort: the claude default\nSession: sess-A", status)
         self.assertIn("Scheduled: 1", status)
-        self.assertIn("• alfred:extensions", skills)
+        self.assertIn("• consiglieri:extensions", skills)
         self.assertIn("Call Sam", schedule)
         self.assertIn("Backend: claude", backend)
         self.assertIn("unknown backend", bad_backend)
@@ -421,7 +421,7 @@ class TelegramBotTests(unittest.TestCase):
             self.assertIn("Model: claude-fable-5-2\n", await status())
 
             # The owner edits .env while the bot runs.
-            self.sandbox.environ["ALFRED_CLAUDE_MODEL"] = "sonnet"
+            self.sandbox.environ["CONSIGLIERI_CLAUDE_MODEL"] = "sonnet"
             self.sandbox.fake_cli("claude", answering_as("claude-sonnet-5-5"))
             self.assertIn("Model: sonnet\n", await status())
             await self.say("two")
@@ -432,7 +432,7 @@ class TelegramBotTests(unittest.TestCase):
             pids.append(self.app.agent.live_pid(7))
             self.assertIn("Effort: the claude default\n", await status())
 
-            self.sandbox.environ["ALFRED_CLAUDE_EFFORT"] = "max"
+            self.sandbox.environ["CONSIGLIERI_CLAUDE_EFFORT"] = "max"
             self.assertIn("Effort: max\n", await status())
             await self.say("four")  # a new effort level also reopens the process
             pids.append(self.app.agent.live_pid(7))
@@ -465,7 +465,7 @@ class TelegramBotTests(unittest.TestCase):
         self.assertEqual(self.bot.sent, ["Hi.", "Fresh conversation. I still have my memory and skills.", "Hi."])
 
     def test_a_backend_that_cannot_stay_open_runs_one_turn_per_message(self) -> None:
-        self.sandbox.environ["ALFRED_BACKEND"] = "codex"
+        self.sandbox.environ["CONSIGLIERI_BACKEND"] = "codex"
         self.sandbox.fake_cli("codex", {"fresh": [
             {"type": "thread.started", "thread_id": "thread-1"},
             {"type": "item.completed", "item": {"type": "agent_message", "text": "From codex."}},
@@ -482,7 +482,7 @@ class TelegramBotTests(unittest.TestCase):
         self.assertNotIn("live", self.sandbox.calls("codex")[0])
 
     def test_live_mode_can_be_turned_off(self) -> None:
-        self.sandbox.environ["ALFRED_LIVE"] = "0"
+        self.sandbox.environ["CONSIGLIERI_LIVE"] = "0"
         self.sandbox.fake_cli("claude", {"fresh": claude_lines("Hi.", "sess-A")})
 
         async def scenario() -> None:

@@ -6,9 +6,9 @@ import stat
 import unittest
 from pathlib import Path
 
-from alfred import shared_memory
-from alfred.config import Config
-from alfred.shared_memory import SharedMemoryError
+from consiglieri import shared_memory
+from consiglieri.config import Config
+from consiglieri.shared_memory import SharedMemoryError
 from fakes import Sandbox
 
 
@@ -23,7 +23,7 @@ class SharedMemoryTests(unittest.TestCase):
         self.assertEqual(self.config.shared_memory_dir, self.config.shared_dir / "memory")
         self.assertIsNone(shared_memory.location_problem(self.config))
         for inside in (self.config.home / "shared", self.config.bots_home / "shared"):
-            environ = dict(self.sandbox.environ, ALFRED_SHARED_HOME=str(inside))
+            environ = dict(self.sandbox.environ, CONSIGLIERI_SHARED_HOME=str(inside))
             config = Config(home=self.config.home, env_files=self.config.env_files, environ=environ)
             self.assertIn("which every bot is denied", shared_memory.location_problem(config) or "")
 
@@ -88,7 +88,7 @@ class SharedMemoryTests(unittest.TestCase):
         writer = shared_memory.render_copy(self.config, shared_memory.WRITER)
         self.assertIn("Every other agent will read what you write", writer)
         self.assertFalse(hasattr(shared_memory, "MAIN"))  # no main agent writes it: only the user, and bots allowed to
-        self.assertNotIn("Alfred", copy)
+        self.assertNotIn("Alfred", copy)  # rename-compat: the old main agent is never named
         shared_memory.remove(self.config, "user")
         self.assertIn("Nothing has been shared yet", shared_memory.render_copy(self.config, shared_memory.READER))
 

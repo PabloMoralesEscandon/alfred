@@ -4,7 +4,7 @@ import asyncio
 import os
 import unittest
 
-from alfred import usage
+from consiglieri import usage
 from fakes import Sandbox
 
 
@@ -47,7 +47,7 @@ class UsageTests(unittest.TestCase):
         self.sandbox.fake_cli("claude", {"fresh": [], "exit": 1})
         self.assertEqual(self.fetch(), "Could not get usage: no answer from claude")
 
-        self.sandbox.environ["ALFRED_CLAUDE_BIN"] = str(self.sandbox.root / "missing")
+        self.sandbox.environ["CONSIGLIERI_CLAUDE_BIN"] = str(self.sandbox.root / "missing")
         self.assertIn("Could not get usage:", self.fetch())
         self.assertIn("not installed", self.fetch())
 

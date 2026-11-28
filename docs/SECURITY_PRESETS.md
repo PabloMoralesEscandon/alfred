@@ -25,22 +25,22 @@ sit on top of any preset, and choosing a preset never changes it.
 
 ## The plan usage tool: on in every preset, used only with your express permission
 
-The `usage` permission (`alfred usage check`, `alfred usage running_low`, `alfred usage-alert`,
-`alfred schedule add --skip-if-low` and the other usage conditions, and the `alfred:usage` skill) is **on by
+The `usage` permission (`consiglieri usage check`, `consiglieri usage running_low`, `consiglieri usage-alert`,
+`consiglieri schedule add --skip-if-low` and the other usage conditions, and the `consiglieri:usage` skill) is **on by
 default**, like `schedule` (reminders), so it is in every preset, Basic included. Having the tool is not leave
 to use it: **a bot uses it only with its user's express permission**, that is, when the user asks it to check
 the usage, gives it a rule about usage, or says yes when the bot asks. Without that it does not run the
 commands and asks first. This rule is written in three places the bot reads or that describe it:
 
 - the bot's manual: `bots.permission_summary()` adds `bots.USAGE_CONSENT_RULE` under "What you may do", and
-  `templates/BOT.md` repeats it next to the `alfred` tools;
-- the `alfred:usage` skill, in its description and in its first section (and the `alfred:reminders` skill,
+  `templates/BOT.md` repeats it next to the `consiglieri` tools;
+- the `consiglieri:usage` skill, in its description and in its first section (and the `consiglieri:reminders` skill,
   where it mentions usage conditions);
 - this document and the permission table in the README.
 
-The rule is an instruction, not a lock: nothing in Claude Code or in `alfred` can tell whether the user said
+The rule is an instruction, not a lock: nothing in Claude Code or in `consiglieri` can tell whether the user said
 yes. The lock is the switch: `/bot perm <bot> usage off` (or **Customize**, or `-usage` in `/bot new`) denies
-the commands in Claude Code, `alfred` refuses them, and the service skips the usage conditions of that bot's
+the commands in Claude Code, `consiglieri` refuses them, and the service skips the usage conditions of that bot's
 scheduled items. Choosing a preset turns it back on, since it is the default.
 
 Basic is what a bot gets when nothing is chosen: `/bot new` without options, and a bot you create in
@@ -51,7 +51,7 @@ them. Power now states `sandbox on` explicitly, which is the default anyway.
 
 ## Where they live
 
-`alfred/presets.py`, as data:
+`consiglieri/presets.py`, as data:
 
 - `PRESET_PERMISSIONS`: preset -> permissions it sets. Its order is the order from least to most.
 - `PRESET_INFO`: preset -> icon, label, "can", "cannot" and a warning, in plain words.
@@ -73,7 +73,7 @@ Nothing about presets is stored on a bot. A bot keeps the permissions it always 
 out each time it is shown. Bots created before presets need no migration and nothing is rewritten when they
 are read.
 
-## In the menus (`alfred/menus.py`)
+## In the menus (`consiglieri/menus.py`)
 
 - **Create bot, step 5**: a button per preset (the current one marked ●) with each preset's "can / cannot /
   warning" in the message, then **🎛 Customize**. Picking a preset goes straight to the summary.
@@ -90,7 +90,7 @@ are read.
   + browser, ..."); one that only takes away applies at once. Toggling a single switch under Customize applies
   at once, as before.
 
-A preset is applied in one write by `BotPool.set_permissions` (`alfred/telegram_bot.py`). Like
+A preset is applied in one write by `BotPool.set_permissions` (`consiglieri/telegram_bot.py`). Like
 `set_permission`, it applies from the bot's next message.
 
 ## Text shortcuts
@@ -114,7 +114,7 @@ unsandboxed shell (Full access) can get around the text rules.
 
 ## The shared memory under every preset
 
-Every agent reads the shared memory (`~/.alfred-shared/memory`), whatever its preset and with or without
+Every agent reads the shared memory (`~/.consiglieri-shared/memory`), whatever its preset and with or without
 cross-agent access. Its index is loaded into each conversation through the agent's copy,
 `SHARED_MEMORY.md`, and the folder is an extra working directory and in the sandbox's `allowRead`. It sits
 outside Consiglieri's home and the bots' directories, so no blacklist rule covers it. No preset lets a bot write
@@ -134,12 +134,12 @@ for lack of an allow rule, but not under `bypassPermissions`.
 
 ## Credentials under every preset
 
-The `creds` permission ([docs/CREDENTIALS.md](CREDENTIALS.md)) lets a bot's own browser (`ALFRED_BROWSER=bot`) load
+The `creds` permission ([docs/CREDENTIALS.md](CREDENTIALS.md)) lets a bot's own browser (`CONSIGLIERI_BROWSER=bot`) load
 KeePassXC's extension with the bot's identity, so it fills in the credentials the user granted that bot (`/bot` →
-Credentials, or `alfred creds grant` on the machine), only on their sites, never showing it the secret. It is off in every preset and template, Full
+Credentials, or `consiglieri creds grant` on the machine), only on their sites, never showing it the secret. It is off in every preset and template, Full
 access included, and a bot admin can never turn it on. Whatever a bot's permissions, Claude Code denies it the owner's
-subcommands (`alfred creds setup`, `add`, `remove`, `grant`, `revoke`, `start`, `stop`, `alfred browser install`) and
-anything naming KeePassXC. With `shell alfred` (Basic, Assistant) a bot reaches its credentials only through its
+subcommands (`consiglieri creds setup`, `add`, `remove`, `grant`, `revoke`, `start`, `stop`, `consiglieri browser install`) and
+anything naming KeePassXC. With `shell consiglieri` (Basic, Assistant) a bot reaches its credentials only through its
 browser; with an open shell it runs as the user and the wall between bots is a convention (docs/CREDENTIALS.md §7).
 
 ## Bot admins under every preset
@@ -178,11 +178,11 @@ a bot matching it exactly reads as "🧑‍💼 Bot admin". Turning `admin` on f
 
 ## Files touched
 
-- `alfred/presets.py` (new): the presets and the functions above.
-- `alfred/menus.py`: the old `PRESETS` and `PRESET_LABELS` removed. New preset screens (`new_perms`,
+- `consiglieri/presets.py` (new): the presets and the functions above.
+- `consiglieri/menus.py`: the old `PRESETS` and `PRESET_LABELS` removed. New preset screens (`new_perms`,
   `bot_perms`), Customize screens (`new_perms_custom`, `bot_perms_custom`), the confirmation
   (`bot_perms_confirm`), and the preset name in the summary and on a bot's page.
-- `alfred/telegram_bot.py`: `BotPool.set_permissions`, the preset shortcut in `/bot perm`, `Preset:` in
+- `consiglieri/telegram_bot.py`: `BotPool.set_permissions`, the preset shortcut in `/bot perm`, `Preset:` in
   `/bot show`, the preset in the creation message and in `/help`.
 
 Merged with security-control (refactor at `0e56192`): the cross-agent button moved from the old switches

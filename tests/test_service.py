@@ -8,8 +8,8 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from unittest import mock
 
-from alfred import cli, service
-from alfred.config import REPO_ROOT
+from consiglieri import cli, service
+from consiglieri.config import REPO_ROOT
 from fakes import Sandbox, claude_lines
 
 
@@ -20,50 +20,60 @@ class ServiceTests(unittest.TestCase):
         self.sandbox = Sandbox()
         self.addCleanup(self.sandbox.cleanup)
         self.config = self.sandbox.config
+        # A safety net: no test reaches the real service manager, which runs the user's live service.
+        for name in ("_launchctl", "_systemctl"):
+            patcher = mock.patch.object(service, name, side_effect=AssertionError("real %s called" % name))
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        # Nor the user's real LaunchAgents and systemd folders.
+        fake_home = self.sandbox.root / "user-home"
+        patcher = mock.patch.object(service.Path, "home", return_value=fake_home)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def make_ready(self) -> None:
         self.sandbox.environ["TELEGRAM_BOT_TOKEN"] = "123:abc"
-        self.sandbox.environ["ALFRED_ALLOWED_USERS"] = "99"
+        self.sandbox.environ["CONSIGLIERI_ALLOWED_USERS"] = "99"
         self.sandbox.fake_cli("claude", {"fresh": claude_lines("ok")})
 
     def test_environment_records_a_deduplicated_path_and_the_home(self) -> None:
         self.sandbox.environ["PATH"] = "/a/bin:/b/bin:/a/bin::/c/bin"
         env = service.service_environment(self.config)
         self.assertEqual(env["PATH"], "/a/bin:/b/bin:/c/bin")
-        self.assertEqual(env["ALFRED_HOME"], str(self.config.home))
+        self.assertEqual(env["CONSIGLIERI_HOME"], str(self.config.home))
         self.assertEqual(env["PYTHONPATH"], str(REPO_ROOT))
 
     def test_launchd_plist_restarts_forever_and_logs_to_the_home(self) -> None:
         plist = plistlib.loads(service.launchd_plist(self.config))
-        self.assertEqual(plist["Label"], "com.alfred.bot")
-        self.assertEqual(plist["ProgramArguments"], [sys.executable, "-m", "alfred", "run"])
+        self.assertEqual(plist["Label"], "com.consiglieri.bot")
+        self.assertEqual(plist["ProgramArguments"], [sys.executable, "-m", "consiglieri", "run"])
         self.assertIs(plist["KeepAlive"], True)
         self.assertIs(plist["RunAtLoad"], True)
-        self.assertEqual(plist["StandardErrorPath"], str(self.config.state_dir / "alfred.log"))
-        self.assertEqual(plist["EnvironmentVariables"]["ALFRED_HOME"], str(self.config.home))
+        self.assertEqual(plist["StandardErrorPath"], str(self.config.state_dir / "consiglieri.log"))
+        self.assertEqual(plist["EnvironmentVariables"]["CONSIGLIERI_HOME"], str(self.config.home))
         self.assertNotIn("TELEGRAM_BOT_TOKEN", plist["EnvironmentVariables"])  # secrets stay in .env
 
     def test_systemd_unit(self) -> None:
         unit = service.systemd_unit(self.config)
-        self.assertIn('ExecStart="%s" "-m" "alfred" "run"' % sys.executable, unit)
+        self.assertIn('ExecStart="%s" "-m" "consiglieri" "run"' % sys.executable, unit)
         self.assertIn("Restart=always", unit)
-        self.assertIn('Environment="ALFRED_HOME=%s"' % self.config.home, unit)
+        self.assertIn('Environment="CONSIGLIERI_HOME=%s"' % self.config.home, unit)
         self.assertIn("WantedBy=default.target", unit)
         self.assertNotIn("TELEGRAM_BOT_TOKEN", unit)
 
     def test_preflight_names_everything_that_would_make_the_bot_crash_loop(self) -> None:
-        self.sandbox.environ["ALFRED_CLAUDE_BIN"] = str(self.sandbox.root / "missing-claude")
+        self.sandbox.environ["CONSIGLIERI_CLAUDE_BIN"] = str(self.sandbox.root / "missing-claude")
         problems = service.preflight(self.config)
         self.assertEqual(len(problems), 3)
         self.assertIn("TELEGRAM_BOT_TOKEN", problems[0])
-        self.assertIn("ALFRED_ALLOWED_USERS", problems[1])
+        self.assertIn("CONSIGLIERI_ALLOWED_USERS", problems[1])
         self.assertIn("missing-claude", problems[2])
 
         self.make_ready()
         self.assertEqual(service.preflight(self.config), [])
 
-        self.sandbox.environ["ALFRED_BACKEND"] = "codex"
-        self.sandbox.environ["ALFRED_CODEX_BIN"] = str(self.sandbox.root / "missing-codex")
+        self.sandbox.environ["CONSIGLIERI_BACKEND"] = "codex"
+        self.sandbox.environ["CONSIGLIERI_CODEX_BIN"] = str(self.sandbox.root / "missing-codex")
         self.assertIn("missing-codex", service.preflight(self.config)[0])
 
     def test_install_refuses_before_touching_the_service_manager(self) -> None:
@@ -77,8 +87,10 @@ class ServiceTests(unittest.TestCase):
     def test_install_goes_ahead_when_ready(self) -> None:
         self.make_ready()
         with mock.patch.object(service, "platform", return_value="launchd"), \
+                mock.patch.object(service, "retire_legacy", return_value=False) as retire, \
                 mock.patch.object(service, "launchd_install", return_value=service.launchd_plist_path()) as launchd:
             path, notes = service.install(self.config)
+        retire.assert_called_once_with()
         launchd.assert_called_once_with(self.config)
         self.assertEqual(path, service.launchd_plist_path())
         self.assertIn("automatic login", notes[0])

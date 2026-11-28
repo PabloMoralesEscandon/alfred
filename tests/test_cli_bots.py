@@ -1,4 +1,4 @@
-"""The `alfred` command inside a bot's turn: it acts as that bot, in its chats, within its permissions."""
+"""The `consiglieri` command inside a bot's turn: it acts as that bot, in its chats, within its permissions."""
 
 from __future__ import annotations
 
@@ -10,9 +10,9 @@ from contextlib import redirect_stdout
 from typing import Any, Dict, List
 from unittest import mock
 
-from alfred import cli, home
-from alfred.bots import BotRecord, BotRegistry
-from alfred.scheduler import SchedulerStore
+from consiglieri import cli, home
+from consiglieri.bots import BotRecord, BotRegistry
+from consiglieri.scheduler import SchedulerStore
 from fakes import Sandbox
 
 RESEARCH = 5000000001
@@ -27,7 +27,7 @@ class FakeTelegramBot:
 
     def __init__(self, token: str) -> None:
         self.token = token
-        self.username = "AlfredPanelBot"
+        self.username = "FamilyPanelBot"
 
     async def __aenter__(self) -> "FakeTelegramBot":
         return self
@@ -64,11 +64,11 @@ class BotCliTests(unittest.TestCase):
         self.addCleanup(patcher.stop)
 
     def as_bot(self, bot_id: int, thread: str = "") -> None:
-        from alfred.bots import bot_key
+        from consiglieri.bots import bot_key
 
-        environ = dict(self.sandbox.environ, ALFRED_BOT_ID=str(bot_id), ALFRED_CHAT_ID="99", ALFRED_USER_ID="99",
-                       ALFRED_BOT_KEY=bot_key(self.sandbox.config, bot_id, create=True),
-                       ALFRED_USERNAME="pablo", ALFRED_THREAD_ID=thread)
+        environ = dict(self.sandbox.environ, CONSIGLIERI_BOT_ID=str(bot_id), CONSIGLIERI_CHAT_ID="99", CONSIGLIERI_USER_ID="99",
+                       CONSIGLIERI_BOT_KEY=bot_key(self.sandbox.config, bot_id, create=True),
+                       CONSIGLIERI_USERNAME="pablo", CONSIGLIERI_THREAD_ID=thread)
         patcher = mock.patch.dict(os.environ, environ)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -155,9 +155,9 @@ class BotCliTests(unittest.TestCase):
         message = FakeTelegramBot.sent[-1]
         self.assertEqual((message["token"], message["chat_id"]), ("1:PANELPANELPANELPANELPANELPANELPANEL", 99))
         self.assertIn("@research_bot asks for it", message["text"])
-        # The username extends the panel's: AlfredPanelBot -> alfredpanel_<slug>_bot.
-        self.assertEqual(asked["link"], "https://t.me/newbot/AlfredPanelBot/alfredpanel_helper_bot?name=Helper")
-        pending = self.registry.take_pending(99, "alfredpanel_helper_bot")
+        # The username extends the panel's: FamilyPanelBot -> familypanel_<slug>_bot.
+        self.assertEqual(asked["link"], "https://t.me/newbot/FamilyPanelBot/familypanel_helper_bot?name=Helper")
+        pending = self.registry.take_pending(99, "familypanel_helper_bot")
         self.assertEqual((pending.settings, pending.permissions), ({"task": "Fetch the data"}, {}))
 
     def test_skills_and_extensions_are_the_bots_own(self) -> None:
@@ -178,14 +178,14 @@ class BotCliTests(unittest.TestCase):
                     self.assertFalse(result["ok"], (target, word, result))
         self.assertFalse(self.registry.get(RESEARCH).cross_agent)
         self.assertFalse(self.registry.get(CHEF).cross_agent)
-        # Nor the operator's own `alfred` outside a bot's turn: only the control panel grants it.
-        with mock.patch.dict(os.environ, {"ALFRED_BOT_ID": ""}):
+        # Nor the operator's own `consiglieri` outside a bot's turn: only the control panel grants it.
+        with mock.patch.dict(os.environ, {"CONSIGLIERI_BOT_ID": ""}):
             self.assertFalse(self.run_json("bots", "set", "chef_bot", "cross", "on")["ok"])
         self.assertFalse(self.registry.get(CHEF).cross_agent)
         # A bot that asks for a new bot can't smuggle it in: the request carries no cross-agent access.
         asked = self.run_json("bots", "new", "Spy", "+cross", "cross=on")
         self.assertTrue(asked["ok"], asked)
-        pending = self.registry.take_pending(99, "alfredpanel_spy_bot")
+        pending = self.registry.take_pending(99, "familypanel_spy_bot")
         self.assertEqual(pending.permissions, {})
         self.assertNotIn("cross_agent", vars(pending))
         # A bot with cross-agent access may do more than this one, so this one can't steer it; its state stays.
@@ -210,10 +210,10 @@ class BotCliTests(unittest.TestCase):
 
     def test_bots_commands_refuse_a_bot_pretending_to_be_another(self) -> None:
         self.grant(CHEF, bots="on")
-        with mock.patch.dict(os.environ, {"ALFRED_BOT_ID": str(CHEF)}):  # research's key, chef's id
+        with mock.patch.dict(os.environ, {"CONSIGLIERI_BOT_ID": str(CHEF)}):  # research's key, chef's id
             refused = self.run_json("bots", "list")
         self.assertFalse(refused["ok"])
-        self.assertIn("ALFRED_BOT_KEY does not match", refused["error"])
+        self.assertIn("CONSIGLIERI_BOT_KEY does not match", refused["error"])
 
 
 if __name__ == "__main__":

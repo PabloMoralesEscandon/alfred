@@ -16,9 +16,9 @@ log) is done by its Python process. Each allowed user creates their own bots and
 those; nobody gets a bot by default. [docs/PANEL_ONLY.md](docs/PANEL_ONLY.md) explains the design, what
 happened to the old main agent's files and reminders, and the open questions.
 
-Consiglieri used to be called Alfred. The command (`alfred`), the settings (`ALFRED_*`), the home
-(`~/.alfred`) and the service keep the old name for now; [docs/RENAME_PLAN.md](docs/RENAME_PLAN.md) has
-the plan for moving them.
+Consiglieri had another name before. An install from then keeps working until it is moved to the new
+names; see [Upgrading from before the rename](#upgrading-from-before-the-rename) and
+[docs/RENAME_PLAN.md](docs/RENAME_PLAN.md).
 
 The design and roadmap are in [docs/PLAN.md](docs/PLAN.md); how the bots are created, and why this way,
 in [docs/AGENT_CHATS_RESEARCH.md](docs/AGENT_CHATS_RESEARCH.md).
@@ -36,33 +36,33 @@ in [docs/AGENT_CHATS_RESEARCH.md](docs/AGENT_CHATS_RESEARCH.md).
 python3 -m venv venv
 venv/bin/pip install -e .
 cp .env.example .env        # then fill in the token and who is allowed
-venv/bin/alfred run
+venv/bin/consiglieri run
 ```
 
 `.env` needs two values:
 
 ```env
 TELEGRAM_BOT_TOKEN=1234567890:your_token
-ALFRED_ALLOWED_USERS=123456789
+CONSIGLIERI_ALLOWED_USERS=123456789
 ```
 
-`ALFRED_ALLOWED_USERS` takes Telegram user ids and usernames, comma-separated. Ids are safer because
+`CONSIGLIERI_ALLOWED_USERS` takes Telegram user ids and usernames, comma-separated. Ids are safer because
 usernames can change hands. To find an id, send `/start` to the bot from that account: unlisted accounts
 get a reply with their id and nothing else. The old `whitelisted@username` lines still work. The allow-list
 is re-read on every message, so changing it needs no restart.
 
-One process does everything: `alfred run` polls Telegram and delivers scheduled reminders.
+One process does everything: `consiglieri run` polls Telegram and delivers scheduled reminders.
 
 ### Keeping it running
 
-`alfred run` in a terminal stops when the terminal closes. Install it as a background service instead:
+`consiglieri run` in a terminal stops when the terminal closes. Install it as a background service instead:
 
 ```bash
-venv/bin/alfred service install     # start now, at every login, and again whenever it exits
-venv/bin/alfred service status
-venv/bin/alfred service logs        # last lines of ~/.alfred/state/alfred.log
-venv/bin/alfred service restart     # after changing code or the backend settings
-venv/bin/alfred service uninstall
+venv/bin/consiglieri service install     # start now, at every login, and again whenever it exits
+venv/bin/consiglieri service status
+venv/bin/consiglieri service logs        # last lines of ~/.consiglieri/state/consiglieri.log
+venv/bin/consiglieri service restart     # after changing code or the backend settings
+venv/bin/consiglieri service uninstall
 ```
 
 On macOS this is a launchd agent, on Linux a systemd user unit. `install` refuses if the token, the
@@ -74,10 +74,10 @@ allow-list or the backend CLI is missing, so it cannot end up in a restart loop.
 - The machine must not sleep. On a Mac: System Settings, Energy, "Prevent automatic sleeping".
 - The service points at this checkout and its `venv`. If you move or delete the folder, run
   `service install` again from the new place.
-- Run only one bot per token. Stop a foreground `alfred run` before installing the service.
+- Run only one bot per token. Stop a foreground `consiglieri run` before installing the service.
 
 Conversations survive restarts by themselves: each chat's session id is stored in
-`~/.alfred/state/sessions.json` and resumed on the next message, and reminders that were due while the
+`~/.consiglieri/state/sessions.json` and resumed on the next message, and reminders that were due while the
 bot was down are delivered when it comes back. Background commands Consiglieri had running do not survive a
 restart.
 
@@ -100,7 +100,7 @@ withdraws its credentials, shows and cancels its reminders and usage alerts, and
 if the main bot had scheduled anything before it became a panel, **Old reminders**. A menu expires after
 30 minutes, when you open a newer one, or when Consiglieri restarts; its old buttons then just say so.
 
-Every allowed user (`ALFRED_ALLOWED_USERS`) has their own bots: `/bots`, the menu, every `/bot` command
+Every allowed user (`CONSIGLIERI_ALLOWED_USERS`) has their own bots: `/bots`, the menu, every `/bot` command
 and every button reach only the user's own, another user's bot reads as "no such bot", and a bot answers
 only its owner.
 
@@ -147,7 +147,7 @@ documents and voice notes are saved to the bot's inbox and handed to it by path.
 | `/backend [claude\|codex]` | Show or switch the backend for this chat. |
 | `/status` | Backend, model, session, whether its process is open, its directory. |
 
-The commands live in one list (`COMMANDS` in `alfred/telegram_bot.py`, and `PANEL_COMMANDS` for the
+The commands live in one list (`COMMANDS` in `consiglieri/telegram_bot.py`, and `PANEL_COMMANDS` for the
 panel); adding one is a line there plus a `_cmd_<name>` method. Any other `/command` is passed to the
 agent as text, so `/disk-report` is a short way to ask for that skill. In a chat with topics, each topic
 is its own conversation.
@@ -162,13 +162,13 @@ as that preset, including bots made before presets existed.
 [docs/SECURITY_PRESETS.md](docs/SECURITY_PRESETS.md) has what each preset sets and how to add one.
 
 A bot created without choosing (`/bot new` with no options, or in @BotFather yourself) starts with the
-least: its own directory, the `alfred` command (to post and to schedule reminders in its own chat) and
+least: its own directory, the `consiglieri` command (to post and to schedule reminders in its own chat) and
 nothing else. Grant more when you create it or later with `/bot perm`:
 
 | Permission | Default | Values |
 | --- | --- | --- |
 | `mode` | `dontAsk` | Claude Code permission mode: `dontAsk`, `acceptEdits`, `auto`, `plan`, `default`, `bypassPermissions` |
-| `shell` | `alfred` | `alfred` (only the alfred command) or `full` (any shell command) |
+| `shell` | `consiglieri` | `consiglieri` (only the consiglieri command) or `full` (any shell command) |
 | `sandbox` | `on` | With `shell full`, run commands inside Claude Code's OS sandbox |
 | `edit` | `off` | Edit files in its working directory and extra folders (its own directory, always) |
 | `folders` | none | Extra folders it may read, and edit with `edit on`, separated by commas |
@@ -179,16 +179,16 @@ nothing else. Grant more when you create it or later with `/bot perm`:
 | `contact` | `off` | Post or schedule messages to chats other than yours |
 | `bots` | `off` | List bots, change other bots' settings, ask you for new ones. Never destroy |
 | `shared` | `off` | Write the shared memory. Reading it is always allowed; no preset turns this on. Every other agent reads what it writes |
-| `usage` | `on` | **Used only with your express permission**: on by default, like `schedule`, but the bot runs these commands only when you ask it to check the usage, give it a rule about usage, or say yes when it asks; otherwise it asks first (its manual and the `alfred:usage` skill say so; `usage off` removes the tool). Ask the usage monitor for a verdict (`alfred usage running_low`, `alfred usage check '<condition>'`, `alfred usage forecast`), read the plan usage (`alfred usage`), set usage alerts that wake it (`alfred usage-alert`, `usage-alert waste`), and put a usage condition on a scheduled item so it is not delivered when the limits are nearly used (`alfred schedule add --skip-if-low`, `--skip-if`, `--only-if`, `--only-if-waste`). The questions and the conditions on scheduled items work with `ALFRED_USAGE_MONITOR` off; the report and the alerts need it on, and the panel says so. See the `alfred:usage` skill and [docs/USAGE_MONITOR_RESEARCH.md](docs/USAGE_MONITOR_RESEARCH.md) |
-| `calendar` | `on` | Read your Google Calendar and add events to it, through the Google Calendar connector of your claude.ai account (connect it once in claude.ai → Settings → Connectors). On by default for every bot and preset; turn it off per bot with `/bot perm <bot> calendar off`. It works with `mcp` off, and `mcp on` alone does not give it. The bot adds an event only when you asked for it or said yes. See the `alfred:calendar` skill and [docs/CALENDAR.md](docs/CALENDAR.md) |
-| `creds` | `off` | Log in by itself with the credentials you grant it. They live in KeePassXC; its browser extension, loaded in the bot's own browser (`ALFRED_BROWSER=bot`), fills them in, only on each credential's sites, and the bot never sees them. You add them on the machine (`alfred creds add`, which asks for the password there) and grant each one to each bot from the panel (`/bot` → a bot → **Credentials**) or the machine (`alfred creds grant <name> <bot>`), never through a bot's chat and never through a bot admin. In no preset. See [Credentials](#credentials) and [docs/CREDENTIALS.md](docs/CREDENTIALS.md) |
+| `usage` | `on` | **Used only with your express permission**: on by default, like `schedule`, but the bot runs these commands only when you ask it to check the usage, give it a rule about usage, or say yes when it asks; otherwise it asks first (its manual and the `consiglieri:usage` skill say so; `usage off` removes the tool). Ask the usage monitor for a verdict (`consiglieri usage running_low`, `consiglieri usage check '<condition>'`, `consiglieri usage forecast`), read the plan usage (`consiglieri usage`), set usage alerts that wake it (`consiglieri usage-alert`, `usage-alert waste`), and put a usage condition on a scheduled item so it is not delivered when the limits are nearly used (`consiglieri schedule add --skip-if-low`, `--skip-if`, `--only-if`, `--only-if-waste`). The questions and the conditions on scheduled items work with `CONSIGLIERI_USAGE_MONITOR` off; the report and the alerts need it on, and the panel says so. See the `consiglieri:usage` skill and [docs/USAGE_MONITOR_RESEARCH.md](docs/USAGE_MONITOR_RESEARCH.md) |
+| `calendar` | `on` | Read your Google Calendar and add events to it, through the Google Calendar connector of your claude.ai account (connect it once in claude.ai → Settings → Connectors). On by default for every bot and preset; turn it off per bot with `/bot perm <bot> calendar off`. It works with `mcp` off, and `mcp on` alone does not give it. The bot adds an event only when you asked for it or said yes. See the `consiglieri:calendar` skill and [docs/CALENDAR.md](docs/CALENDAR.md) |
+| `creds` | `off` | Log in by itself with the credentials you grant it. They live in KeePassXC; its browser extension, loaded in the bot's own browser (`CONSIGLIERI_BROWSER=bot`), fills them in, only on each credential's sites, and the bot never sees them. You add them on the machine (`consiglieri creds add`, which asks for the password there) and grant each one to each bot from the panel (`/bot` → a bot → **Credentials**) or the machine (`consiglieri creds grant <name> <bot>`), never through a bot's chat and never through a bot admin. In no preset. See [Credentials](#credentials) and [docs/CREDENTIALS.md](docs/CREDENTIALS.md) |
 | `soul` | `off` | Edit its own `SOUL.md`: its role and mission as well as its tone, so what it does and how, never what it may do. No preset turns this on, and it never opens another bot's |
 | `allow`, `deny` | none | Extra Claude Code permission rules, separated by `;` |
 
 Most of this is enforced by Claude Code itself: each bot runs with its own `--settings` file (permission
 mode, allow and deny rules, its directories, and the switches that stop the file tools at the edge of
 those directories), and your own `~/.claude/settings.json` is not loaded for it, so its allow rules never
-widen a bot. Some is enforced by the `alfred` command, and a little is only an instruction in the bot's
+widen a bot. Some is enforced by the `consiglieri` command, and a little is only an instruction in the bot's
 manual. [docs/AGENT_CHATS_RESEARCH.md](docs/AGENT_CHATS_RESEARCH.md) has the exact split. In short: with
 `shell full` and no sandbox, a bot can do whatever your user can, whatever the other switches say.
 
@@ -203,26 +203,26 @@ messages and wakes up when something arrives:
 - **A scheduled task or reminder** coming due.
 - **A background job of its own finishing.** A bot can start something slow, tell you it is running,
   and write again when it ends.
-- **An event from another program:** `~/.alfred/bin/alfred event --bot <bot> --chat-id <id> "the backup
+- **An event from another program:** `~/.consiglieri/bin/consiglieri event --bot <bot> --chat-id <id> "the backup
   finished"` wakes that bot with the note. Your Telegram user id is the chat id of your private chat with
   the bot. There is no main agent to wake: an event always names a bot.
 
-A bot's last message of a turn is posted to the chat. It can also post earlier with `alfred send`, and
+A bot's last message of a turn is posted to the chat. It can also post earlier with `consiglieri send`, and
 it stays quiet when it has nothing to add. The process is started by the first message after a restart
-and is closed by `/stop`, `/new` and `/backend`. Set `ALFRED_LIVE=0` to go back to one process per
+and is closed by `/stop`, `/new` and `/backend`. Set `CONSIGLIERI_LIVE=0` to go back to one process per
 message; Codex always works that way, so with Codex messages wait their turn and nothing wakes it
 between them.
 
 ### Choosing the model
 
-Set `ALFRED_CLAUDE_MODEL` in `.env` to an alias (`fable`, `opus`, `sonnet`, `haiku`) or a full model
-name; `ALFRED_CODEX_MODEL` does the same for Codex. Unset means the backend's own default. The file is
+Set `CONSIGLIERI_CLAUDE_MODEL` in `.env` to an alias (`fable`, `opus`, `sonnet`, `haiku`) or a full model
+name; `CONSIGLIERI_CODEX_MODEL` does the same for Codex. Unset means the backend's own default. The file is
 read again for every message, so a change applies from your next message with no restart: the bot closes
 the chat's process once it is idle and reopens it on the new model, in the same conversation.
 `/status` shows the model in use. A name the backend does not know comes back as an error reply.
 
-`ALFRED_CLAUDE_EFFORT` (`low`, `medium`, `high`, `xhigh`, `max`) sets how hard Claude thinks, and
-`ALFRED_CODEX_EFFORT` sets Codex's `model_reasoning_effort`. They apply the same way as the model.
+`CONSIGLIERI_CLAUDE_EFFORT` (`low`, `medium`, `high`, `xhigh`, `max`) sets how hard Claude thinks, and
+`CONSIGLIERI_CODEX_EFFORT` sets Codex's `model_reasoning_effort`. They apply the same way as the model.
 Unset, the backend decides: Claude Code uses the effort saved in your own settings for that model
 (`/model` in Claude Code), or its default. Claude Code ignores a value it does not know and uses its
 default, so check `/status` after a change.
@@ -239,20 +239,20 @@ Things to try:
 You can also talk to the same agent from a terminal, with no Telegram involved:
 
 ```bash
-venv/bin/alfred chat                  # interactive
-venv/bin/alfred chat -m "disk report" # one message
+venv/bin/consiglieri chat                  # interactive
+venv/bin/consiglieri chat -m "disk report" # one message
 ```
 
 ## Browser
 
 A bot with the `browser` permission has a real browser. It can open pages, click, fill in forms, upload and download files, and send
-you screenshots, using sites you are already logged in to. Pick one with `ALFRED_BROWSER`: `orca` and `chrome` are one
+you screenshots, using sites you are already logged in to. Pick one with `CONSIGLIERI_BROWSER`: `orca` and `chrome` are one
 browser for all the bots; `bot` gives each bot a browser of its own (see [Each bot its own browser](#each-bot-its-own-browser)).
 
 | | `orca` (default) | `chrome` |
 | --- | --- | --- |
 | What it is | The browser built into the Orca app, driven by the `orca` CLI | Your own Google Chrome, driven by the Claude in Chrome extension |
-| Setup | `venv/bin/alfred browser-setup` | Install the Claude extension in Chrome and sign in with the account Claude Code uses |
+| Setup | `venv/bin/consiglieri browser-setup` | Install the Claude extension in Chrome and sign in with the account Claude Code uses |
 | Must be running | The Orca app (Consiglieri starts it if needed) | A Chrome window |
 | Backends | Claude and Codex | Claude only |
 | Logins | Whatever you log in to inside Orca's browser | The sessions in its Chrome profile (see below) |
@@ -263,7 +263,7 @@ browser for all the bots; `bot` gives each bot a browser of its own (see [Each b
 With `chrome`, give Consiglieri a Chrome profile of its own, so it only reaches the sites you choose and
 never your personal tabs, mail or bank:
 
-1. Set `ALFRED_CHROME_PROFILE=Alfred` in `.env` and run `venv/bin/alfred chrome`. It opens a window of
+1. Set `CONSIGLIERI_CHROME_PROFILE=Consiglieri` in `.env` and run `venv/bin/consiglieri chrome`. It opens a window of
    that profile, creating it the first time.
 2. In that window, install the Claude extension and sign in with the account Claude Code uses.
 3. Remove or turn off the Claude extension in your other profiles. With more than one browser
@@ -271,30 +271,30 @@ never your personal tabs, mail or bank:
 4. Log in, in that window, to the sites you want Consiglieri to use. It keeps a list in
    `memory/web-logins.md`.
 
-Keep a window of the profile open. When none is, Consiglieri runs `alfred chrome` itself. When a session
+Keep a window of the profile open. When none is, Consiglieri runs `consiglieri chrome` itself. When a session
 expires, Consiglieri sends you a screenshot and waits for you to log in again (the `web-logins` skill);
 from away, use macOS Screen Sharing. Consiglieri never asks for or types passwords.
 
-`alfred browser-setup` registers Consiglieri's home as an Orca workspace and opens a test page, so Consiglieri's
+`consiglieri browser-setup` registers Consiglieri's home as an Orca workspace and opens a test page, so Consiglieri's
 tabs open in its own workspace instead of in whatever you have on screen. `/status` in Telegram shows
 which browser is configured.
 
 ### Each bot its own browser
 
-With `ALFRED_BROWSER=bot` (or, for one bot only, `/bot set <bot> browser bot`, or **My bots → a bot → Browser** in
+With `CONSIGLIERI_BROWSER=bot` (or, for one bot only, `/bot set <bot> browser bot`, or **My bots → a bot → Browser** in
 `/bot`), every bot with the `browser` permission gets a Chromium of its own: its own profile,
 cookies and sessions, which no other bot shares. Consiglieri starts it without a window on the bot's first browser
-command, and the bot drives it with `alfred browser open|snapshot|click|fill|...`: ordinary commands, so it works the
+command, and the bot drives it with `consiglieri browser open|snapshot|click|fill|...`: ordinary commands, so it works the
 same with Claude or Codex and needs neither Orca nor the Claude in Chrome extension.
 
 ```bash
 venv/bin/pip install -e '.[browser]'   # Playwright
-venv/bin/alfred browser install         # Playwright's Chromium and the KeePassXC-Browser extension (checked by its hash)
-echo ALFRED_BROWSER=bot >> ~/.alfred/.env
+venv/bin/consiglieri browser install         # Playwright's Chromium and the KeePassXC-Browser extension (checked by its hash)
+echo CONSIGLIERI_BROWSER=bot >> ~/.consiglieri/.env
 ```
 
-To log in by hand in a bot's browser (a site with a captcha, or your first login), `alfred browser show --bot <bot>`
-opens it in a window on the machine; `alfred browser hide --bot <bot>` when you are done.
+To log in by hand in a bot's browser (a site with a captcha, or your first login), `consiglieri browser show --bot <bot>`
+opens it in a window on the machine; `consiglieri browser hide --bot <bot>` when you are done.
 
 ### Credentials
 
@@ -305,11 +305,11 @@ way.
 
 ```bash
 brew install --cask keepassxc                       # or your system's package; quit any other KeePassXC you run
-venv/bin/alfred creds setup                          # the store, in ~/.alfred/state/credentials
-venv/bin/alfred creds add tum --url moodle.tum.de --url login.tum.de --username ge12abc --totp
-venv/bin/alfred creds grant tum @uni_bot             # or from the panel; and /bot perm uni_bot creds on
-venv/bin/alfred creds list
-venv/bin/alfred creds revoke tum @uni_bot
+venv/bin/consiglieri creds setup                          # the store, in ~/.consiglieri/state/credentials
+venv/bin/consiglieri creds add tum --url moodle.tum.de --url login.tum.de --username ge12abc --totp
+venv/bin/consiglieri creds grant tum @uni_bot             # or from the panel; and /bot perm uni_bot creds on
+venv/bin/consiglieri creds list
+venv/bin/consiglieri creds revoke tum @uni_bot
 ```
 
 `add` asks for the password (and the TOTP key, from the site's QR code) at the terminal, without echo; there is no
@@ -317,7 +317,7 @@ other way in. Each credential is its own KeePassXC database, and a bot's browser
 granted to it. In Telegram, `/bot` → **My bots** → a bot → **Credentials** lists what a bot has, grants it any other
 credential and withdraws any of them, each after a confirmation, with an audit line and a notice in the bot's chat.
 The store is shared by the whole machine: with more than one panel user, only those listed in
-`ALFRED_CREDENTIALS_GRANTERS` (numeric Telegram ids) may grant from Telegram (`none` turns it off for everyone). KeePassXC runs while the bots work; Consiglieri starts it when needed. See
+`CONSIGLIERI_CREDENTIALS_GRANTERS` (numeric Telegram ids) may grant from Telegram (`none` turns it off for everyone). KeePassXC runs while the bots work; Consiglieri starts it when needed. See
 [docs/CREDENTIALS.md](docs/CREDENTIALS.md) for how it works, what it protects and what it does not.
 
 Whichever browser:
@@ -350,8 +350,8 @@ bot's own git history. Bots are told never to store passwords or keys, only wher
 
 ### Shared memory
 
-Besides each bot's own memory there is one every bot reads: `~/.alfred-shared/memory`
-(`ALFRED_SHARED_HOME` moves it), an index plus one file per topic. Use it for general facts (who you are,
+Besides each bot's own memory there is one every bot reads: `~/.consiglieri-shared/memory`
+(`CONSIGLIERI_SHARED_HOME` moves it), an index plus one file per topic. Use it for general facts (who you are,
 your preferences, common data), never for passwords or tokens. Its index is loaded into every
 conversation, and bots are told it is context, not instructions. Bots only read it, under every preset,
 unless you turn on `shared` for one. You write it with `/shared` or `/bot` → Shared memory. With several
@@ -364,7 +364,7 @@ Each bot has its own `SOUL.md` in its directory, loaded into every conversation:
 for and its scope (`## Role`), and how it talks (`## Tone`, `## Style`, `## Attitude`). The SOUL says what
 the bot does; what it *may* do is its permissions, enforced outside it: the manual says nothing in SOUL.md
 can grant, widen or lift one. A new bot starts from the **base** (the template shipped in
-`alfred/templates/SOUL.md` until you edit it from the home screen or with `/bot base-soul`), with its task
+`consiglieri/templates/SOUL.md` until you edit it from the home screen or with `/bot base-soul`), with its task
 as its role, or from one written in the creation assistant. The task is then just a short label for lists
 and the bot's profile; a bot whose SOUL.md has no Role section keeps using its task as its job. On a bot's
 screen, **Personality** shows the SOUL, replaces it (you send the new text) and resets it to the base;
@@ -373,9 +373,9 @@ conversation.
 
 **Describe it** has Claude write a draft of the role and the personality from a sentence or two (or from
 the bot's task, with **Use its task**): one `claude -p` call made by the panel itself, with no tools, no
-saved session, none of your settings or CLAUDE.md, a small model (`ALFRED_SOUL_MODEL`, default `haiku`) at
+saved session, none of your settings or CLAUDE.md, a small model (`CONSIGLIERI_SOUL_MODEL`, default `haiku`) at
 low effort. It never writes permissions, tools, access or secrets into it. You see the draft and choose
-Accept, Regenerate, Edit by hand or Cancel; nothing is saved without Accept. At most `ALFRED_SOUL_ATTEMPTS`
+Accept, Regenerate, Edit by hand or Cancel; nothing is saved without Accept. At most `CONSIGLIERI_SOUL_ATTEMPTS`
 drafts per user per hour (default 5), and a warning when the usage monitor says the plan is nearly used
 up.
 
@@ -385,12 +385,12 @@ mission, not only its tone.
 
 ## Consiglieri's home
 
-`ALFRED_HOME` (default `~/.alfred`), outside this repository, is the control panel's state. No agent runs
+`CONSIGLIERI_HOME` (default `~/.consiglieri`), outside this repository, is the control panel's state. No agent runs
 there, and every bot is denied all of it, at every level and with cross-agent access too:
 
 ```text
-~/.alfred/
-  bin/alfred              the launcher every bot finds on its PATH (rewritten on every start)
+~/.consiglieri/
+  bin/consiglieri              the launcher every bot finds on its PATH (rewritten on every start)
   .env                    your settings and the panel's token (optional; the .env next to the code also works)
   state/
     bots/<bot id>/        each bot's settings, permissions, token, sessions and Claude Code settings
@@ -398,7 +398,7 @@ there, and every bot is denied all of it, at every level and with cross-agent ac
     audit.log             grants and withdrawals of cross-agent access
     usage.json            the usage monitor's recent readings
     soul-base.md          the base personality, once you edit it
-    alfred.log            the service's log
+    consiglieri.log            the service's log
 ```
 
 A home from before the panel also still has the old main agent's `CLAUDE.md`, `SOUL.md`, `memory/`,
@@ -407,11 +407,11 @@ A home from before the panel also still has the old main agent's `CLAUDE.md`, `S
 
 ### The bots' own directories
 
-Each bot has a directory of its own in `~/.alfred-bots/<bot id>/` (`ALFRED_BOTS_HOME`): `CLAUDE.md` (its
+Each bot has a directory of its own in `~/.consiglieri-bots/<bot id>/` (`CONSIGLIERI_BOTS_HOME`): `CLAUDE.md` (its
 manual, written from its task and permissions), `SOUL.md` (its personality), `memory/`, `inbox/`, `outbox/`
 and `extensions/`. Its agent runs there, and the directory is its own git repository. It is next to the
 home and not inside it on purpose: Claude Code reads every `CLAUDE.md` from its working directory up to the
-root, so a bot inside `~/.alfred` would also read whatever manual an old home still has.
+root, so a bot inside `~/.consiglieri` would also read whatever manual an old home still has.
 
 What a bot must not be able to change lives in the home, under `state/bots/<bot id>/` (folder `0700`,
 files `0600`, never committed): `bot.json` (settings and permissions), `token`, `sessions.json` and
@@ -423,9 +423,9 @@ item records the bot, chat and topic it belongs to and is only ever delivered th
 Consiglieri keeps what it is given apart from what it adds to itself (full protocol in
 [docs/EXTENSIONS.md](docs/EXTENSIONS.md)):
 
-- **Base**: this code plus its built-in plugin, `alfred/plugin/`. Its skills appear as `alfred:browser`,
-  `alfred:reminders`, `alfred:web-logins`, `alfred:orca-agents` and `alfred:extensions` (the protocol
-  itself), and its `bin/` adds commands such as `alfred-wait-agent`. It changes when you update Consiglieri;
+- **Base**: this code plus its built-in plugin, `consiglieri/plugin/`. Its skills appear as `consiglieri:browser`,
+  `consiglieri:reminders`, `consiglieri:web-logins`, `consiglieri:orca-agents` and `consiglieri:extensions` (the protocol
+  itself), and its `bin/` adds commands such as `consiglieri-wait-agent`. It changes when you update Consiglieri;
   Consiglieri is told never to edit it.
 - **Extensions**: what a bot writes, in `extensions/<name>/` of its own directory, one Claude Code plugin
   per domain, with skills (`<name>:<skill>`), commands in `bin/`, tests, and, only with your yes, hooks or
@@ -436,9 +436,9 @@ Every turn that adds, changes or removes an extension ends with a 🧩 note in t
 it adds something that runs by itself. To manage them yourself:
 
 ```bash
-ALFRED_BOT_ID=<bot id> ~/.alfred/bin/alfred ext list
-ALFRED_BOT_ID=<bot id> ~/.alfred/bin/alfred ext check <name>
-ALFRED_BOT_ID=<bot id> ~/.alfred/bin/alfred ext disable <name>     # or enable, remove
+CONSIGLIERI_BOT_ID=<bot id> ~/.consiglieri/bin/consiglieri ext list
+CONSIGLIERI_BOT_ID=<bot id> ~/.consiglieri/bin/consiglieri ext check <name>
+CONSIGLIERI_BOT_ID=<bot id> ~/.consiglieri/bin/consiglieri ext disable <name>     # or enable, remove
 ```
 
 Because the backend is your own Claude Code installation, a bot can also reach what that has (your global
@@ -447,11 +447,11 @@ tool at all.
 
 ## Upgrading from a main agent
 
-Earlier versions ran an agent in the main bot's own chat, with its memory in `~/.alfred`. Now the main bot
+Earlier versions ran an agent in the main bot's own chat, with its memory in `~/.consiglieri`. Now the main bot
 is only the control panel:
 
-- Its old files in `~/.alfred` (`CLAUDE.md`, `SOUL.md`, `memory/`, `extensions/`, `.git`) are left as they
-  were, never rewritten and closed to every bot. `alfred chat` needs `--bot <bot>`.
+- Its old files in `~/.consiglieri` (`CLAUDE.md`, `SOUL.md`, `memory/`, `extensions/`, `.git`) are left as they
+  were, never rewritten and closed to every bot. `consiglieri chat` needs `--bot <bot>`.
 - What it had scheduled in your chat is kept: reminder messages are still posted there by the panel, timed
   tasks and events are announced instead of run. **Old reminders** on the menu's home screen lists and
   cancels them; nothing deletes them.
@@ -460,7 +460,46 @@ is only the control panel:
 
 The first version's layout (`SOUL.md`, `SKILLS.md` and `memory/chats/` next to this README) is no longer
 imported; copy what you want into a bot's directory by hand. Its `scheduler.sqlite3` moved to
-`~/.alfred/state/`; `alfred run` replaces the old `scheduler_worker.py`.
+`~/.consiglieri/state/`; `consiglieri run` replaces the old `scheduler_worker.py`.
+
+## Upgrading from before the rename
+
+The project was called Alfred: the command `alfred`, the settings `ALFRED_*`, the home `~/.alfred` (with <!-- rename-compat -->
+`~/.alfred-bots` and `~/.alfred-shared`) and the service `com.alfred.bot` / `alfred.service`. Until you <!-- rename-compat -->
+migrate, an old install keeps working after pulling this version:
+
+- The old service still starts (`python -m alfred run` runs this version through a small compatibility <!-- rename-compat -->
+  package), and `consiglieri service status|restart|logs|uninstall` act on it while it is the one installed.
+  Restart it right after pulling: the running process still has the old code in memory.
+- Every `CONSIGLIERI_X` setting is also read as `ALFRED_X` when the new name is not set (the new name wins), <!-- rename-compat -->
+  and the bots' agents get both names.
+- `~/.alfred` is the home while `~/.consiglieri` does not exist, and its old launcher stays in `bin/` next to <!-- rename-compat -->
+  `consiglieri` until you migrate (a new home never has it). The bots' permission rules are written for
+  both names, so the old one is no way around them.
+- Run `venv/bin/pip install -e '.[browser]'` once to get `venv/bin/consiglieri`; the old `venv/bin/alfred` <!-- rename-compat -->
+  needs it too.
+
+To move to the new names, with the panel stopped (it takes a few seconds; the steps are in
+[docs/RENAME_PLAN.md](docs/RENAME_PLAN.md), phase 4):
+
+```bash
+venv/bin/consiglieri service uninstall      # stops and removes the old service
+venv/bin/consiglieri creds stop             # if you use the bots' credentials
+venv/bin/consiglieri migrate --dry-run      # what it would move and rewrite; nothing changes
+venv/bin/consiglieri migrate
+venv/bin/consiglieri service install        # com.consiglieri.bot, with the new home
+venv/bin/consiglieri browser-setup          # links the new home to its Orca workspace again
+venv/bin/pip uninstall -y alfred            # the old distribution and its console script  # rename-compat
+```
+
+`migrate` moves the three folders and Claude Code's folders for them (so every bot resumes its
+conversations), rewrites the old paths and setting names in the panel's state and the `.env` files,
+removes the old command's launcher, lists any extension or skill a bot wrote that still calls the old
+command, and refuses to start while anything still runs or a destination exists. `--from` and `--to` move
+another home, such as a test instance.
+
+Bots already created keep their Telegram usernames (Telegram can't change them); new bots of a panel whose
+username starts with the old name are offered `consiglieri_...` instead.
 
 ## Security
 
@@ -472,7 +511,7 @@ tokens like SSH keys.
 - Anyone who knows the panel's username can open a bot-creation link naming it as manager. Such a bot is
   ignored unless its creator is on the allow-list; its token is never fetched.
 - Tokens live only in `.env` (the panel's) and `state/bots/<id>/token` (`0600`, git-ignored). They are
-  not passed to the agents' environment, `alfred send` looks them up itself, and every bot is denied
+  not passed to the agents' environment, `consiglieri send` looks them up itself, and every bot is denied
   reading Consiglieri's home. `httpx`, which logs Bot API URLs with the token in them, is kept quiet.
 - Bots start in `dontAsk` mode with the least permissions (see [Permissions](#permissions)). Widening a
   bot to `shell full` without the sandbox, or to `bypassPermissions`, gives it what your user can do.
@@ -499,12 +538,12 @@ or credentials.
 
 ## Troubleshooting
 
-- **No answer at all:** check that your id or username is in `ALFRED_ALLOWED_USERS` (send `/start`), and
+- **No answer at all:** check that your id or username is in `CONSIGLIERI_ALLOWED_USERS` (send `/start`), and
   look at the log for "ignored message from unauthorized user".
 - **"claude backend failed: `claude` is not installed or not on PATH":** the bot's environment differs
-  from your shell's. Set `ALFRED_CLAUDE_BIN` to the full path.
+  from your shell's. Set `CONSIGLIERI_CLAUDE_BIN` to the full path.
 - **Polling conflict from Telegram:** two processes are using the same token. Stop the old bot.
 - **"no sign of life for 900 seconds, so I stopped it":** a turn produced nothing for that long. Raise
-  `ALFRED_TIMEOUT`, or ask Consiglieri to run long jobs in the background.
+  `CONSIGLIERI_TIMEOUT`, or ask Consiglieri to run long jobs in the background.
 - **Consiglieri went quiet after you asked for something:** send `/status`. "Busy: yes" means it is still
   working; you can write to it, or `/stop` it.

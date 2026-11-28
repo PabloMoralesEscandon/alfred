@@ -15,15 +15,15 @@ from typing import Any, Dict, List, Optional
 from unittest import mock
 
 try:
-    from alfred.telegram_bot import PANEL_COMMANDS, BotPool, ControlPanel
+    from consiglieri.telegram_bot import PANEL_COMMANDS, BotPool, ControlPanel
 except ImportError:  # pragma: no cover
     BotPool = None  # type: ignore
     PANEL_COMMANDS = []
 
-from alfred import bots, home, scheduler, shared_memory, usage_gate
-from alfred.agent import Chat
-from alfred.bots import BotRecord
-from alfred.scheduler import Postpone, Skip
+from consiglieri import bots, home, scheduler, shared_memory, usage_gate
+from consiglieri.agent import Chat
+from consiglieri.bots import BotRecord
+from consiglieri.scheduler import Postpone, Skip
 from fakes import Sandbox, claude_lines
 
 OWNER = 99
@@ -95,7 +95,7 @@ class TestPool(BotPool):  # type: ignore[misc,valid-type]
         self.dropped.append(drop_pending)
         if token in self.refuse:
             raise RuntimeError("Unauthorized")
-        username = getattr(getattr(frontend, "record", None), "username", "") or "AlfredPanelBot"
+        username = getattr(getattr(frontend, "record", None), "username", "") or "FamilyPanelBot"
         bot = FakeBot(token, username)
         await frontend.started(SimpleNamespace(bot=bot))
         self.connections.append(username)
@@ -136,7 +136,7 @@ class PanelHarness(unittest.TestCase):
             self.skipTest("python-telegram-bot is not installed")
         self.sandbox = Sandbox()
         self.addCleanup(self.sandbox.cleanup)
-        self.sandbox.environ["ALFRED_ALLOWED_USERS"] = str(OWNER)
+        self.sandbox.environ["CONSIGLIERI_ALLOWED_USERS"] = str(OWNER)
         self.sandbox.environ["TELEGRAM_BOT_TOKEN"] = token_for(1, "P")
         self.config = self.sandbox.config
         home.prepare(self.config)
@@ -193,17 +193,17 @@ class PanelTests(PanelHarness):
             await self.command("/bot new Research +web model=sonnet Summarize new papers\non protein folding.")
             replies = self.panel_bot.sent[-2:]
             # First the keyboard button, which does not depend on Telegram opening a deep link.
-            self.assertIn('tap "Create @alfredpanel_research_bot" on the keyboard below', replies[0]["text"])
+            self.assertIn('tap "Create @familypanel_research_bot" on the keyboard below', replies[0]["text"])
             self.assertIn("It can", replies[0]["text"])
             keyboard = replies[0]["reply_markup"].to_dict()
             self.assertTrue(keyboard["one_time_keyboard"])
             create, cancel = keyboard["keyboard"][0][0], keyboard["keyboard"][1][0]
             request = create["request_managed_bot"]
-            self.assertEqual((request["suggested_name"], request["suggested_username"]), ("Research", "alfredpanel_research_bot"))
+            self.assertEqual((request["suggested_name"], request["suggested_username"]), ("Research", "familypanel_research_bot"))
             self.assertTrue(0 < request["request_id"] < 2 ** 31)
             self.assertEqual(cancel, {"text": "Cancel"})
             # Then the link, as the second option.
-            link = "https://t.me/newbot/AlfredPanelBot/alfredpanel_research_bot?name=Research"
+            link = "https://t.me/newbot/FamilyPanelBot/familypanel_research_bot?name=Research"
             self.assertIn("Second option, the link: %s" % link, replies[1]["text"])
             button = replies[1]["reply_markup"].inline_keyboard[0][0]
             self.assertEqual(button.url, link)
@@ -255,7 +255,7 @@ class PanelTests(PanelHarness):
             self.assertIn("I hadn't asked for it", self.panel_bot.texts[-1])
             rules = json.loads(self.pool.registry.settings_file(RESEARCH).read_text())["permissions"]
             self.assertEqual(rules["defaultMode"], "dontAsk")
-            self.assertIn("Bash(alfred bots *)", rules["deny"])
+            self.assertIn("Bash(consiglieri bots *)", rules["deny"])
 
         self.play(scenario)
 
@@ -344,8 +344,8 @@ class PanelTests(PanelHarness):
         self.play(scenario)
 
     def test_nothing_ever_opens_a_claude_session_for_the_panels_own_chat(self) -> None:
-        from alfred.agent import Agent, NoAgent
-        from alfred.telegram_bot import TelegramBot
+        from consiglieri.agent import Agent, NoAgent
+        from consiglieri.telegram_bot import TelegramBot
 
         async def scenario() -> None:
             # Messages, commands and the old main bot's scheduled items, in the panel's own chat.
@@ -729,7 +729,7 @@ class PanelTests(PanelHarness):
         self.play(scenario)
 
     def test_browser_setting_and_no_telegram_credential_grant(self) -> None:
-        from alfred import keepass
+        from consiglieri import keepass
 
         async def scenario() -> None:
             await self.create(RESEARCH, "research_bot", "Research", "/bot new Research +browser")

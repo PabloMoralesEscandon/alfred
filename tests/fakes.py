@@ -10,7 +10,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from alfred.config import Config
+from consiglieri.config import Config
 
 FAKE_CLI = """#!{python}
 import json, os, subprocess, sys, threading, time
@@ -84,11 +84,11 @@ class Sandbox:
         self._tempdir = tempfile.TemporaryDirectory()
         self.root = Path(self._tempdir.name).resolve()
         self.home = self.root / "home"
-        self.environ: Dict[str, str] = {"ALFRED_HOME": str(self.home), "ALFRED_AUTOSAVE": "0", "PATH": os.environ["PATH"]}
+        self.environ: Dict[str, str] = {"CONSIGLIERI_HOME": str(self.home), "CONSIGLIERI_AUTOSAVE": "0", "PATH": os.environ["PATH"]}
         # Tests never read the real .env next to the code, which may hold a live bot token.
-        self.environ["ALFRED_ENV_FILE"] = str(self.root / "repo.env")
+        self.environ["CONSIGLIERI_ENV_FILE"] = str(self.root / "repo.env")
         # Tests never talk to a real Orca app; install_fake_orca() overrides this.
-        self.environ["ALFRED_ORCA_BIN"] = str(self.root / "no-orca")
+        self.environ["CONSIGLIERI_ORCA_BIN"] = str(self.root / "no-orca")
         # Claude Code's own folder (transcripts, auto memory), named in the bots' rules: never the real one.
         self.environ["CLAUDE_CONFIG_DIR"] = str(self.root / "claude-config")
         self.config = Config(home=self.home, env_files=[self.home / ".env", self.root / "repo.env"], environ=self.environ)
@@ -100,7 +100,7 @@ class Sandbox:
                 permissions: Optional[Dict[str, str]] = None, settings: Optional[Dict[str, str]] = None,
                 token: Optional[str] = None, chat_ids: Tuple[int, ...] = (7,)) -> Tuple[Any, Config]:
         """Register a bot (there is no main agent: every agent is one) and return (its record, its config)."""
-        from alfred import bots, home
+        from consiglieri import bots, home
 
         home.prepare(self.config)
         registry = bots.BotRegistry(self.config)
@@ -128,7 +128,7 @@ class Sandbox:
             encoding="utf-8",
         )
         executable.chmod(executable.stat().st_mode | stat.S_IXUSR)
-        self.environ["ALFRED_%s_BIN" % name.upper()] = str(executable)
+        self.environ["CONSIGLIERI_%s_BIN" % name.upper()] = str(executable)
         return executable
 
     def live_pid(self, name: str) -> int:
@@ -216,5 +216,5 @@ def install_fake_orca(sandbox: "Sandbox", *, running: bool = True, registered: b
     executable = sandbox.root / "orca"
     executable.write_text(FAKE_ORCA.format(python=sys.executable, state=str(state)), encoding="utf-8")
     executable.chmod(executable.stat().st_mode | stat.S_IXUSR)
-    sandbox.environ["ALFRED_ORCA_BIN"] = str(executable)
+    sandbox.environ["CONSIGLIERI_ORCA_BIN"] = str(executable)
     return state

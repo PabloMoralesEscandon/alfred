@@ -1,2 +1,11 @@
-# Files that mention the old name on purpose (see scripts/check_old_name.sh)
+# Files that mention the old name on purpose (see scripts/check_old_name.sh). One reason each.
+# The plan of the rename itself: it has to name what is being renamed.
 docs/RENAME_PLAN.md
+# The compatibility package `alfred`: the old LaunchAgent runs `python -m alfred run`; it goes in phase 4.
+alfred
+alfred/*
+# `consiglieri migrate`: it moves ~/.alfred* and renames ALFRED_* settings, so it names them.
+consiglieri/migrate.py
+# Tests of the compatibility (old settings, both command names in the rules, old service) and of the migration.
+tests/test_rename_compat.py
+tests/test_migrate.py

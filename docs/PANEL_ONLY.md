@@ -22,24 +22,24 @@ creación; cada usuario decide sus agentes».
 |---|---|---|---|
 | 1 | `agent.py`, `Agent` | Se podía crear con la configuración del panel (bot 0) y trabajar en el home | `Agent` rechaza la configuración del panel (`NoAgent`). Solo un bot tiene agente |
 | 2 | `agent.py`, `_prepare_workspace` | Para el bot 0 refrescaba `SHARED_MEMORY.md` en el home | Eliminado: siempre prepara el directorio del bot |
-| 3 | `agent.py`, `_environment` | `ALFRED_WORKSPACE` solo para bots | Siempre: todo agente es un bot |
-| 4 | `telegram_bot.py`, `TelegramBot` | `record=None` era «el bot principal», con `/help` «I'm Alfred», `title` «Alfred» y su propio planificador (`_post_init`/`_post_shutdown`, `run_polling`) | Exige un bot registrado y su token. Eliminados la rama principal, el planificador propio y el arranque suelto |
-| 5 | `home.py`, `bootstrap` | Escribía `CLAUDE.md`, `AGENTS.md`, `SOUL.md`, `MEMORY.md`, `memory/`, `.claude/skills/`, `extensions/` y `inbox/` en el home, iniciaba un repo git, importaba el diseño de la primera versión y retiraba skills sembradas | Sustituido por `home.prepare`: solo `state/`, el lanzador `bin/alfred` y la memoria compartida (fuera del home). Eliminados la importación antigua, la memoria de un fichero y la retirada de skills |
+| 3 | `agent.py`, `_environment` | `CONSIGLIERI_WORKSPACE` solo para bots | Siempre: todo agente es un bot |
+| 4 | `telegram_bot.py`, `TelegramBot` | `record=None` era «el bot principal», con un `/help` y un `title` que se presentaban con el nombre del agente principal, y su propio planificador (`_post_init`/`_post_shutdown`, `run_polling`) | Exige un bot registrado y su token. Eliminados la rama principal, el planificador propio y el arranque suelto |
+| 5 | `home.py`, `bootstrap` | Escribía `CLAUDE.md`, `AGENTS.md`, `SOUL.md`, `MEMORY.md`, `memory/`, `.claude/skills/`, `extensions/` y `inbox/` en el home, iniciaba un repo git, importaba el diseño de la primera versión y retiraba skills sembradas | Sustituido por `home.prepare`: solo `state/`, el lanzador `bin/consiglieri` y la memoria compartida (fuera del home). Eliminados la importación antigua, la memoria de un fichero y la retirada de skills |
 | 6 | `home.autosave` | Hacía commit del home tras cada turno del agente principal | Nunca hace commit del home; solo del directorio de un bot |
 | 7 | `templates/CLAUDE.md`, `templates/AGENTS.md` | Manual del agente principal | Borrados. El manual de cada bot es `BOT.md` |
-| 8 | `templates/SOUL.md` | «Your name is Alfred.», personalidad del agente principal | Ahora es la plantilla de la personalidad base de los bots (§5) |
+| 8 | `templates/SOUL.md` | La personalidad del agente principal, con su nombre | Ahora es la plantilla de la personalidad base de los bots (§5) |
 | 9 | `shared_memory.py`, modo `MAIN` | El agente principal escribía la memoria compartida | Eliminado. La escriben el usuario desde el panel y los bots con el permiso `shared` |
-| 10 | `bots.py`, `other_agents` | El agente principal era un «otro agente» (`OtherAgent("Alfred", home, main=True)`) | Eliminado. Los «otros agentes» son solo bots |
+| 10 | `bots.py`, `other_agents` | El agente principal era un «otro agente» (`OtherAgent(<nombre del agente principal>, home, main=True)`) | Eliminado. Los «otros agentes» son solo bots |
 | 11 | `bots.py`, `blacklist` | Con acceso entre agentes se abrían la memoria y las herramientas del home | El home queda cerrado siempre, a todos los niveles y también con acceso entre agentes, incluidas sus transcripciones de Claude Code |
 | 12 | `extensions.held_back` | El bot 0 cargaba hooks y servidores MCP de sus extensiones sin límites | Sin excepción: las mismas reglas para todos |
-| 13 | `cli.py`, `resolve_bot_id` | Sin `--bot` ni `ALFRED_BOT_ID`, el bot 0; alias `main` y `alfred` | Sin alias. `send`, `schedule`, `event` y `usage-alert` exigen un bot; `skills` y `ext`, el turno de un bot |
+| 13 | `cli.py`, `resolve_bot_id` | Sin `--bot` ni `CONSIGLIERI_BOT_ID`, el bot 0; alias `main` y `consiglieri` | Sin alias. `send`, `schedule`, `event` y `usage-alert` exigen un bot; `skills` y `ext`, el turno de un bot |
 | 14 | `cli.py`, `chat` | Sin `--bot` hablaba con el agente principal en el home | `--bot` obligatorio |
-| 15 | `cli.py`, `screenshot` | Guardaba en `~/.alfred/outbox` | En el `outbox/` del bot |
+| 15 | `cli.py`, `screenshot` | Guardaba en `~/.consiglieri/outbox` | En el `outbox/` del bot |
 | 16 | `cli.py`, `init`, `browser-setup`, `service install` | Llamaban a `bootstrap` | Llaman a `home.prepare` |
 | 17 | Planificador, `bot_id = 0` | Recordatorios y tareas del chat principal | Se conservan; ver §3 |
 | 18 | Comandos de bot en el chat del panel (`/new`, `/stop`, `/memory`, `/skills`, `/backend`) | Asumían una sesión principal | El panel nunca los tuvo registrados (`PANEL_COMMANDS`); escritos como texto, el panel responde que no tiene agente. Un test lo comprueba |
-| 19 | Textos: panel, menús, presets, manuales, skill `extensions`, README, docs | «the other bots and Alfred», «Alfred's main agent», «your home» | Corregidos: «your other bots», «the bot's own directory», etc. |
-| 20 | Textos de la fase 1 del renombrado | Decían que Alfred seguía como agente principal | Corregidos en el código y en `RENAME_PLAN.md` |
+| 19 | Textos: panel, menús, presets, manuales, skill `extensions`, README, docs | «the other bots and <agente principal>», «<agente principal>'s main agent», «your home» | Corregidos: «your other bots», «the bot's own directory», etc. |
+| 20 | Textos de la fase 1 del renombrado | Decían que el agente principal seguía existiendo con el nombre anterior del proyecto | Corregidos en el código y en `RENAME_PLAN.md` |
 
 Dos errores que el agente principal tapaba y que han salido al quitarlo: la primera nota de progreso se
 perdía en los primeros 2,5 s del proceso (`_last_edit = 0.0` con un `time.monotonic()` que empieza en 0), y
@@ -48,13 +48,13 @@ tools yet». Ambos corregidos.
 
 ## 2. Qué se conserva: el home como estado del panel
 
-`~/.alfred` (o `ALFRED_HOME`) sigue existiendo, pero no tiene agente. Es solo estado del sistema y está
+`~/.consiglieri` (o `CONSIGLIERI_HOME`) sigue existiendo, pero no tiene agente. Es solo estado del sistema y está
 siempre fuera del alcance de los bots: `Read` y `Edit` denegados en todo el home, reglas de shell sobre sus
 partes privadas y `denyRead`/`denyWrite` en el sandbox, con o sin acceso entre agentes.
 
 | Ruta | Qué es |
 |---|---|
-| `bin/alfred` | El lanzador que todo bot tiene en el PATH (lo ejecuta; no puede leerlo ni editarlo) |
+| `bin/consiglieri` | El lanzador que todo bot tiene en el PATH (lo ejecuta; no puede leerlo ni editarlo) |
 | `.env` | Ajustes y token del panel |
 | `state/bots/<id>/` | Registro de cada bot: `bot.json` (propietario, ajustes, permisos), `token`, `sessions.json`, `claude-settings.json`, alertas de uso |
 | `state/bots/pending.json` | Peticiones de creación en curso, por usuario |
@@ -62,8 +62,8 @@ partes privadas y `denyRead`/`denyWrite` en el sandbox, con o sin acceso entre a
 | `state/audit.log` | Concesiones y retiradas de acceso entre agentes (ahora con el propietario del bot) |
 | `state/usage.json` | Lecturas recientes del monitor de uso |
 | `state/soul-base.md` | La personalidad base, cuando se edita |
-| `state/alfred.log` | El log del servicio |
-| `~/.alfred-shared/memory` | La memoria compartida y su índice (junto al home, no dentro) |
+| `state/consiglieri.log` | El log del servicio |
+| `~/.consiglieri-shared/memory` | La memoria compartida y su índice (junto al home, no dentro) |
 
 ## 3. Recordatorios y tareas del chat principal
 
@@ -74,23 +74,23 @@ Decisión: **se conservan y no se borran.**
   There is no main agent any more…») y no se ejecuta, porque no hay agente que lo haga.
 - En el menú, **⏰ Old reminders (N)** aparece en el inicio solo si el usuario tiene alguno pendiente en su
   chat. Los lista y permite cancelarlos uno a uno. Solo se ven los del chat de cada usuario.
-- No se puede crear ninguno nuevo para el bot 0: `alfred schedule` exige un bot.
+- No se puede crear ninguno nuevo para el bot 0: `consiglieri schedule` exige un bot.
   `SchedulerStore.delete_for_bot(0)` sigue rechazándose.
 - Para que una tarea antigua vuelva a ejecutarse, se pide a uno de los bots en su chat («recuérdame cada
-  lunes…») o el bot la programa con `alfred schedule`. No hay migración automática: decidir a qué bot va
+  lunes…») o el bot la programa con `consiglieri schedule`. No hay migración automática: decidir a qué bot va
   cada tarea es cosa del usuario.
 
 ## 4. Lo que queda del antiguo agente principal en un home existente
 
-En el home real (`~/.alfred`) siguen `CLAUDE.md`, `AGENTS.md`, `SOUL.md`, `memory/` (con su `MEMORY.md`),
+En el home real (`~/.consiglieri`) siguen `CLAUDE.md`, `AGENTS.md`, `SOUL.md`, `memory/` (con su `MEMORY.md`),
 `extensions/`, `inbox/`, `outbox/`, `.claude/`, `.git/` y, fuera del home,
-`~/.claude/projects/-Users-…--alfred/` (sus transcripciones y su memoria automática de Claude Code).
+`~/.claude/projects/-Users-…--consiglieri/` (sus transcripciones y su memoria automática de Claude Code).
 
 - Nada los lee, los reescribe ni los borra. `home.prepare` no los toca (hay un test que lo comprueba).
 - Todos los bots los tienen denegados, también con acceso entre agentes.
-- `alfred chat` ya no puede hablar con ese agente.
+- `consiglieri chat` ya no puede hablar con ese agente.
 
-Qué hacer con ellos es decisión del usuario (ver §6). Nada de esto se ha tocado en `~/.alfred`.
+Qué hacer con ellos es decisión del usuario (ver §6). Nada de esto se ha tocado en `~/.consiglieri`.
 
 ## 5. Rol y personalidad por bot (SOUL.md)
 
@@ -104,10 +104,10 @@ Qué hacer con ellos es decisión del usuario (ver §6). Nada de esto se ha toca
   `## Attitude`. **El SOUL dice qué hace el agente; lo que puede hacer lo fijan los permisos**, que se
   aplican fuera. El manual lo dice así, y añade que nada en `SOUL.md` concede, amplía ni levanta un
   permiso, ni puede pedir que se salte.
-- **Dónde vive.** Cada bot tiene `SOUL.md` en su directorio (`~/.alfred-bots/<id>/SOUL.md`), importado por
+- **Dónde vive.** Cada bot tiene `SOUL.md` en su directorio (`~/.consiglieri-bots/<id>/SOUL.md`), importado por
   su manual (`@SOUL.md`; Codex recibe «Read SOUL.md…»).
 - **De dónde sale.** Del texto escrito o generado en el asistente de creación o, si no hay, de la **base**:
-  `state/soul-base.md` si se ha editado, si no la plantilla `alfred/templates/SOUL.md`. La plantilla tiene
+  `state/soul-base.md` si se ha editado, si no la plantilla `consiglieri/templates/SOUL.md`. La plantilla tiene
   un hueco `{role}` que se rellena con el `task` del bot al crearlo. Si una base editada no tiene ni el
   hueco ni sección Role, se le añade una con el `task`. Un bot creado antes de esto recibe la base, con su
   `task` como rol, en su siguiente mensaje. Nunca se sobrescribe un `SOUL.md` que ya existe.
@@ -153,7 +153,7 @@ Qué hacer con ellos es decisión del usuario (ver §6). Nada de esto se ha toca
 - **Propietario.** Ver, cambiar, restablecer y generar solo sobre bots propios (`find`/`get_owned` con
   el propietario, en comandos y botones).
 
-### 5.1 Borradores con Claude (`alfred/soul_writer.py`)
+### 5.1 Borradores con Claude (`consiglieri/soul_writer.py`)
 
 A partir de una explicación corta (máximo 2.000 caracteres), o del `task` del bot por defecto, el
 proceso del panel (no un agente) hace **una** llamada:
@@ -168,7 +168,7 @@ claude -p --output-format json --tools "" --no-session-persistence --setting-sou
   proyecto. Las fuentes `project,local` dejan fuera `~/.claude/settings.json` y el `CLAUDE.md` de usuario.
   No se usa `--bare` porque exige `ANTHROPIC_API_KEY` y no sirve con la sesión de suscripción.
 - El entorno no lleva las variables de una sesión padre de Claude Code, ni `TELEGRAM_BOT_TOKEN`, ni
-  ninguna `ALFRED_*`.
+  ninguna `CONSIGLIERI_*`.
 - El prompt de sistema es fijo. Pide convertir la descripción en **rol más personalidad**, con la
   estructura de la plantilla (el ejemplo lleva un rol de muestra) y como mucho unos 2.500 caracteres
   (antes 1.500). Ya no prohíbe la función. Sigue prohibiendo, sin cambios, otorgar, ampliar o mencionar
@@ -184,12 +184,12 @@ claude -p --output-format json --tools "" --no-session-persistence --setting-sou
   guarda sin Accept o sin el texto editado.
 - **Coste:**
   - Una llamada por intento, cuente o falle.
-  - Tope de `ALFRED_SOUL_ATTEMPTS` por usuario y hora (5 por defecto). Se guarda en memoria, así que un
+  - Tope de `CONSIGLIERI_SOUL_ATTEMPTS` por usuario y hora (5 por defecto). Se guarda en memoria, así que un
     reinicio pone la cuenta a cero.
   - Si el monitor de uso está activo y su última lectura de sesión o semanal es de al menos el 90 %, avisa
     («Little plan usage left…»).
-  - Modelo y esfuerzo configurables: `ALFRED_SOUL_MODEL` (por defecto `haiku`) y `ALFRED_SOUL_EFFORT`
-    (por defecto `low`). Tiempo máximo: `ALFRED_SOUL_TIMEOUT`, 120 s por defecto.
+  - Modelo y esfuerzo configurables: `CONSIGLIERI_SOUL_MODEL` (por defecto `haiku`) y `CONSIGLIERI_SOUL_EFFORT`
+    (por defecto `low`). Tiempo máximo: `CONSIGLIERI_SOUL_TIMEOUT`, 120 s por defecto.
 - **Errores** con mensaje claro: límite alcanzado, sin red, Claude Code sin sesión iniciada, binario no
   disponible, tiempo agotado y borrador inválido. Tras un error se vuelve a pedir la descripción.
 - **Log:** solo metadatos (usuario, bot, resultado, duración, caracteres de entrada y de salida); nunca el
@@ -199,10 +199,10 @@ claude -p --output-format json --tools "" --no-session-persistence --setting-sou
 
 ## 6. Cómo recrear el asistente personal como un bot más (decisión abierta)
 
-No se ha creado ningún bot ni se ha movido nada. Si el usuario quiere recuperar a «Alfred», sería un bot
+No se ha creado ningún bot ni se ha movido nada. Si el usuario quiere recuperar al antiguo asistente personal, sería un bot
 más de los Consiglieri:
 
-1. **Crearlo** desde el menú: nombre (por ejemplo «Alfred»), tarea («asistente personal general: agenda,
+1. **Crearlo** desde el menú: nombre (el que tenía u otro), tarea («asistente personal general: agenda,
    recordatorios, recados, búsquedas…»), personalidad (pegar el `SOUL.md` antiguo, o describirla) y
    modelo.
 2. **Preset.** El agente principal corría con `bypassPermissions`, sin sandbox y con acceso total. Como
@@ -212,18 +212,18 @@ más de los Consiglieri:
 3. **Acceso entre agentes:** no por defecto. Si este bot debe consultar lo que saben los demás bots del
    usuario, se concede desde Permisos, con aviso y auditoría. Aun así no abre el home antiguo.
 4. **Memoria a mover**, a mano y con el bot en pausa:
-   - `~/.alfred/memory/` (el índice y las carpetas de temas) a `~/.alfred-bots/<id>/memory/`. Conviene
+   - `~/.consiglieri/memory/` (el índice y las carpetas de temas) a `~/.consiglieri-bots/<id>/memory/`. Conviene
      revisar el índice: lo general para todos los bots encaja mejor en la memoria compartida (`/shared`).
-   - La memoria automática de Claude Code en `~/.claude/projects/-Users-…--alfred/memory/` a la del
+   - La memoria automática de Claude Code en `~/.claude/projects/-Users-…--consiglieri/memory/` a la del
      proyecto del bot. Es opcional y se puede leer y copiar a mano.
    - Las transcripciones `*.jsonl` no se pueden reanudar en otra carpeta: el bot empieza conversación nueva.
-5. **Extensiones:** copiar las útiles de `~/.alfred/extensions/` a `extensions/` del bot y pasarle
-   `alfred ext check`. Hooks, monitores y LSP no se cargan en un bot, y los servidores MCP solo con el
+5. **Extensiones:** copiar las útiles de `~/.consiglieri/extensions/` a `extensions/` del bot y pasarle
+   `consiglieri ext check`. Hooks, monitores y LSP no se cargan en un bot, y los servidores MCP solo con el
    permiso `mcp`.
 6. **Recordatorios:** los del bot 0 siguen entregándose desde el panel (§3). Si deben pasar a ser del bot
    nuevo, se cancelan en Old reminders y se crean de nuevo hablando con el bot. Se podría añadir un
    comando para «adoptar» recordatorios antiguos en un bot si se quiere.
-7. **Después:** decidir si se archiva o borra lo que queda del antiguo agente en `~/.alfred` (sus ficheros
+7. **Después:** decidir si se archiva o borra lo que queda del antiguo agente en `~/.consiglieri` (sus ficheros
    y su `.git`). Nada lo necesita ya.
 
 ## 7. Gestión desde el menú
@@ -240,8 +240,8 @@ Todo lo que se gestionaba con comandos de texto o a mano también está en el me
 | Pausar, reanudar, destruir | Pause / Resume / Destroy (destruir pide confirmación) | `/bot pause\|resume\|destroy` |
 | Memoria compartida | Inicio → Shared memory: temas, añadir, borrar un hecho, borrar un tema | `/shared` |
 | Permiso del monitor de uso | Permissions → Customize → Plan usage and alerts | `/bot perm <bot> usage on` |
-| Alertas de uso | Mis bots → un bot → Usage alerts: lista, estado del monitor, borrar | (las crea el bot con `alfred usage-alert`) |
-| Recordatorios de cada bot | Mis bots → un bot → Reminders: lista en todos sus chats, cancelar | (los crea el bot con `alfred schedule`) |
+| Alertas de uso | Mis bots → un bot → Usage alerts: lista, estado del monitor, borrar | (las crea el bot con `consiglieri usage-alert`) |
+| Recordatorios de cada bot | Mis bots → un bot → Reminders: lista en todos sus chats, cancelar | (los crea el bot con `consiglieri schedule`) |
 | Recordatorios antiguos del bot principal | Inicio → Old reminders | — |
 | Personalidad | Mis bots → un bot → Personality; Inicio → Base personality | `/bot soul`, `/bot base-soul` |
 
@@ -262,25 +262,25 @@ Quedan solo como texto, a propósito:
 - Un bot solo atiende a su propietario, también en `/start`, que además no registra el chat de otro.
 - El acceso entre agentes solo abre los demás bots del mismo propietario. Los de otro usuario y los
   directorios sin dueño siguen cerrados.
-- Un bot con el permiso `bots` solo lista y cambia bots de su propietario (`alfred bots list|set`).
+- Un bot con el permiso `bots` solo lista y cambia bots de su propietario (`consiglieri bots list|set`).
 - La auditoría guarda el propietario del bot en cada entrada y cada usuario ve solo la de sus bots. Las
   entradas antiguas sin propietario se atribuyen al dueño actual del bot.
 - `tests/test_owners.py` lo prueba con dos usuarios permitidos: comandos, menú con botones falsificados,
-  confirmaciones, chat de un bot ajeno, acceso entre agentes, auditoría y `alfred bots`.
+  confirmaciones, chat de un bot ajeno, acceso entre agentes, auditoría y `consiglieri bots`.
 
 ## 9. Decisiones abiertas para el usuario
 
 1. **Memoria compartida con varios usuarios.** Hoy hay una sola: todo usuario permitido la lee y la
    escribe desde el panel, y todos los bots de todos los usuarios la leen. ¿Una global, una por usuario
-   (por ejemplo `~/.alfred-shared/<user id>/memory`) o una global más una por usuario?
+   (por ejemplo `~/.consiglieri-shared/<user id>/memory`) o una global más una por usuario?
 2. **Panel de auditoría con varios usuarios.** Ahora cada usuario ve solo la de sus bots. ¿Debe haber un
-   administrador (por ejemplo el primero de `ALFRED_ALLOWED_USERS`) que vea la auditoría global?
+   administrador (por ejemplo el primero de `CONSIGLIERI_ALLOWED_USERS`) que vea la auditoría global?
 3. **Personalidad base con varios usuarios.** Hoy es una sola y cualquier usuario permitido puede
    cambiarla, lo que afecta a los bots nuevos de los demás. ¿Global, por usuario o solo un administrador?
 4. **Monitor de uso.** Mide una sola cuenta de Claude, la de la máquina, compartida por todos los bots de
-   todos los usuarios. Sus avisos van a `ALFRED_USAGE_CHAT_ID`. ¿Basta así?
-5. **Recrear a Alfred como bot** (§6): si se hace, con qué preset, qué memoria se mueve y qué pasa
-   después con lo que queda del antiguo agente en `~/.alfred`.
+   todos los usuarios. Sus avisos van a `CONSIGLIERI_USAGE_CHAT_ID`. ¿Basta así?
+5. **Recrear el antiguo asistente personal como bot** (§6): si se hace, con qué preset, qué memoria se mueve y qué pasa
+   después con lo que queda del antiguo agente en `~/.consiglieri`.
 6. **Tope de borradores en memoria:** ¿persistirlo en `state/` para que un reinicio no lo ponga a cero?
 7. **«Adoptar» recordatorios antiguos** en un bot con un botón, en lugar de cancelarlos y crearlos de
    nuevo.

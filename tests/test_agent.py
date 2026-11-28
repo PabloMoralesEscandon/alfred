@@ -4,9 +4,9 @@ import asyncio
 import json
 import unittest
 
-from alfred import bots, extensions, home, shared_memory
-from alfred.agent import Agent, Listener, NoAgent, SessionStore
-from alfred.backends import BackendError
+from consiglieri import bots, extensions, home, shared_memory
+from consiglieri.agent import Agent, Listener, NoAgent, SessionStore
+from consiglieri.backends import BackendError
 from fakes import Sandbox, claude_lines
 
 CODEX_REPLY = [
@@ -109,7 +109,7 @@ class AgentTests(unittest.TestCase):
 
         first, second = self.sandbox.calls("codex")
         self.assertIn("<skills>", first["stdin"])
-        self.assertIn("- alfred:reminders (%s):" % (extensions.BASE_PLUGIN / "skills" / "reminders" / "SKILL.md"), first["stdin"])
+        self.assertIn("- consiglieri:reminders (%s):" % (extensions.BASE_PLUGIN / "skills" / "reminders" / "SKILL.md"), first["stdin"])
         self.assertNotIn("<skills>", second["stdin"])
         self.assertEqual(second["argv"][-2:], ["thread-1", "-"])
         self.assertIn("sess-A", self.sandbox.calls("claude")[1]["argv"])
@@ -117,9 +117,9 @@ class AgentTests(unittest.TestCase):
             self.agent.set_backend(7, "gemini")
 
     def test_default_backend_comes_from_config(self) -> None:
-        self.sandbox.environ["ALFRED_BACKEND"] = "codex"
+        self.sandbox.environ["CONSIGLIERI_BACKEND"] = "codex"
         self.assertEqual(self.agent.backend_name(1), "codex")
-        self.sandbox.environ["ALFRED_BACKEND"] = "nonsense"
+        self.sandbox.environ["CONSIGLIERI_BACKEND"] = "nonsense"
         self.assertEqual(self.agent.backend_name(1), "claude")
 
     def test_skill_written_during_a_turn_is_reported(self) -> None:
@@ -128,17 +128,17 @@ class AgentTests(unittest.TestCase):
             "#!/bin/sh\ncat > /dev/null\n"
             "mkdir -p .claude/skills/weather\n"
             "printf -- '---\\nname: weather\\ndescription: Forecasts.\\n---\\n' > .claude/skills/weather/SKILL.md\n"
-            'printf \'{"type":"result","is_error":false,"session_id":"s","result":"%s %s"}\\n\' "$ALFRED_CHAT_ID" "$(command -v alfred)"\n',
+            'printf \'{"type":"result","is_error":false,"session_id":"s","result":"%s %s"}\\n\' "$CONSIGLIERI_CHAT_ID" "$(command -v consiglieri)"\n',
             encoding="utf-8",
         )
         writer.chmod(0o755)
-        self.sandbox.environ["ALFRED_CLAUDE_BIN"] = str(writer)
+        self.sandbox.environ["CONSIGLIERI_CLAUDE_BIN"] = str(writer)
 
         result = self.ask(7, "learn the weather")
 
         self.assertEqual(result.new_skills, ["weather"])
-        # The turn ran in the bot's own directory with the chat id and the `alfred` launcher available.
-        self.assertEqual(result.text, "7 %s" % (self.sandbox.home / "bin" / "alfred"))
+        # The turn ran in the bot's own directory with the chat id and the `consiglieri` launcher available.
+        self.assertEqual(result.text, "7 %s" % (self.sandbox.home / "bin" / "consiglieri"))
         self.assertEqual(self.ask(7, "again").new_skills, [])
 
     def test_memory_written_during_a_turn_is_reported(self) -> None:
@@ -150,7 +150,7 @@ class AgentTests(unittest.TestCase):
             encoding="utf-8",
         )
         writer.chmod(0o755)
-        self.sandbox.environ["ALFRED_CLAUDE_BIN"] = str(writer)
+        self.sandbox.environ["CONSIGLIERI_CLAUDE_BIN"] = str(writer)
 
         self.assertEqual(self.ask(7, "my brother is Sam").memory_changes, ["saved people/sam"])
         self.assertEqual(self.ask(7, "more about Sam").memory_changes, ["updated people/sam"])
@@ -158,7 +158,7 @@ class AgentTests(unittest.TestCase):
     def test_backend_failure_becomes_an_error_reply_and_keeps_the_session(self) -> None:
         self.sandbox.fake_cli("claude", {"fresh": claude_lines("Hello.", "sess-A")})
         self.ask(7, "hi")
-        self.sandbox.environ["ALFRED_CLAUDE_BIN"] = str(self.sandbox.root / "missing")
+        self.sandbox.environ["CONSIGLIERI_CLAUDE_BIN"] = str(self.sandbox.root / "missing")
 
         result = self.ask(7, "hi")
 
@@ -170,12 +170,12 @@ class AgentTests(unittest.TestCase):
         slow = self.sandbox.root / "claude"
         slow.write_text(
             "#!/bin/sh\ncat > /dev/null\n"
-            'echo start >> "$ALFRED_HOME/order.log"; sleep 0.3; echo end >> "$ALFRED_HOME/order.log"\n'
+            'echo start >> "$CONSIGLIERI_HOME/order.log"; sleep 0.3; echo end >> "$CONSIGLIERI_HOME/order.log"\n'
             'printf \'{"type":"result","is_error":false,"session_id":"s","result":"ok"}\\n\'\n',
             encoding="utf-8",
         )
         slow.chmod(0o755)
-        self.sandbox.environ["ALFRED_CLAUDE_BIN"] = str(slow)
+        self.sandbox.environ["CONSIGLIERI_CLAUDE_BIN"] = str(slow)
 
         async def both() -> None:
             first = asyncio.ensure_future(self.agent.ask(7, "one"))
@@ -200,13 +200,13 @@ class AgentTests(unittest.TestCase):
             async def result(self, chat_id: int, result) -> None:
                 events.append(("result", chat_id, result.text, result.new_skills, result.memory_changes))
 
-        self.sandbox.environ["ALFRED_AUTOSAVE"] = "1"
+        self.sandbox.environ["CONSIGLIERI_AUTOSAVE"] = "1"
         bots.prepare_workspace(self.config)  # now with its git repository
         agent = Agent(self.config, Recorder())
         learn = (
             "mkdir -p .claude/skills/weather memory/people && echo '- brother' > memory/people/sam.md && "
             "printf -- '---\\nname: weather\\ndescription: Forecasts.\\n---\\n' > .claude/skills/weather/SKILL.md && "
-            'echo "$ALFRED_CHAT_ID $(command -v alfred)" > seen.txt'
+            'echo "$CONSIGLIERI_CHAT_ID $(command -v consiglieri)" > seen.txt'
         )
         lines = claude_lines("Learned.", "sess-A", tool=True)
         self.sandbox.fake_cli("claude", {"fresh": lines[:1] + [{"_run": learn}] + lines[1:]})
@@ -233,9 +233,9 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(events[0], ("start", 7))
         self.assertIn(("progress", 7, "Bash: List files"), events)
         self.assertEqual(agent.sessions.session(7, "claude"), "sess-A")
-        # It ran in the bot's own directory with the chat id and the `alfred` launcher available.
+        # It ran in the bot's own directory with the chat id and the `consiglieri` launcher available.
         self.assertEqual(
-            (self.workspace / "seen.txt").read_text().strip(), "7 %s" % (self.sandbox.home / "bin" / "alfred")
+            (self.workspace / "seen.txt").read_text().strip(), "7 %s" % (self.sandbox.home / "bin" / "consiglieri")
         )
         prompt = self.sandbox.calls("claude")[0]["stdin"]
         self.assertTrue(prompt.startswith('<context source="telegram" chat_id="7" time="'))

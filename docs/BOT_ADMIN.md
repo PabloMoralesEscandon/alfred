@@ -2,7 +2,7 @@
 
 Estado: implementado en la rama `PabloMoralesEscandon/bot-admin` (partida de `rename` en `29a18f6`), sin
 fusionar ni publicar. Fecha: 12 de noviembre de 2026. No se ha creado ningún bot real, no se ha usado ninguna
-credencial y no se ha tocado `~/.alfred`, el servicio ni otros worktrees. Todo está probado con un Telegram y un
+credencial y no se ha tocado `~/.consiglieri`, el servicio ni otros worktrees. Todo está probado con un Telegram y un
 Claude Code simulados; lo que falta probar en vivo está en la §9.
 
 ## 1. Qué es
@@ -15,10 +15,10 @@ administrador lo termina de configurar y le dice al usuario que pulse Start.
 ```text
 usuario ──"quiero un bot que…"──► bot admin
                                     │ redacta outbox/chef.json
-                                    │ alfred bots spec   --file outbox/chef.json   (solo comprueba)
-                                    │ alfred bots create --file outbox/chef.json
+                                    │ consiglieri bots spec   --file outbox/chef.json   (solo comprueba)
+                                    │ consiglieri bots create --file outbox/chef.json
                                     ▼
-                 alfred/bot_admin.py: parse_spec (techo, extras), limit_problems, auditoría
+                 consiglieri/bot_admin.py: parse_spec (techo, extras), limit_problems, auditoría
                                     │ guarda la petición (admin-requests.json) y el pending
                                     ▼
 panel ──(token del panel)──► chat del usuario con el panel: resumen + botón "Create @…" + enlace
@@ -29,19 +29,19 @@ Telegram ──managed_bot──► BotPool.on_managed_bot
                                     │ propietario = el usuario que confirmó; created_by = el admin
                                     ├─► si hay extras: botón "⚠️ Approve them" / "No" en el chat del usuario
                                     └─► [Event] al admin en su chat: "existe; termina y dile que pulse Start"
-bot admin ── alfred bots status / configure ──► "ya está: ábrelo y pulsa Start"
+bot admin ── consiglieri bots status / configure ──► "ya está: ábrelo y pulsa Start"
 ```
 
 ## 2. Lo que había: el permiso `bots`
 
-Comprobado en el código de `29a18f6` (`alfred/cli.py`, `bots.claude_settings`):
+Comprobado en el código de `29a18f6` (`consiglieri/cli.py`, `bots.claude_settings`):
 
-- `alfred bots list`: los bots del mismo propietario, con ajustes y permisos.
-- `alfred bots set <bot> <ajuste> <valor>`: `task`, `model`, `effort` o `backend` de **otro** bot del mismo
+- `consiglieri bots list`: los bots del mismo propietario, con ajustes y permisos.
+- `consiglieri bots set <bot> <ajuste> <valor>`: `task`, `model`, `effort` o `backend` de **otro** bot del mismo
   propietario. Nunca permisos, nunca `workdir`, nunca los suyos.
-- `alfred bots new <nombre> [tarea]`: pide un bot al propietario con un botón de URL (`t.me/newbot/…`) y la
+- `consiglieri bots new <nombre> [tarea]`: pide un bot al propietario con un botón de URL (`t.me/newbot/…`) y la
   tarea. El bot nace siempre con los permisos por defecto (Basic). Sin personalidad, modelo ni recordatorios.
-- Claude Code: sin el permiso, `deny Bash(alfred bots *)`. Con él, `alfred bots *` sale del sandbox.
+- Claude Code: sin el permiso, `deny Bash(consiglieri bots *)`. Con él, `consiglieri bots *` sale del sandbox.
 - Está en el preset Full access (`bots: on`).
 
 No sirve para esto: no puede fijar permisos (y no debe poder sin un techo), y el bot pedido no queda
@@ -51,7 +51,7 @@ un backend que no aplica la lista negra.
 
 **Decisión: un permiso nuevo y explícito, `admin`.** `bots` sigue igual (list, set, new). `admin` abre los
 ayudantes del administrador (`spec`, `create`, `status`, `configure`) y `list`. Cada uno se cierra por
-separado en Claude Code (`deny Bash(alfred bots <sub>)` y `Bash(alfred bots <sub> *)`) y el comando lo
+separado en Claude Code (`deny Bash(consiglieri bots <sub>)` y `Bash(consiglieri bots <sub> *)`) y el comando lo
 vuelve a comprobar.
 
 ## 3. El permiso y la plantilla
@@ -67,7 +67,7 @@ vuelve a comprobar.
 - **Auditoría**: dar o quitar `admin` deja `admin_permission_granted` / `admin_permission_revoked`, también
   cuando el bot nace con él.
 - El manual del bot (`BOT.md`) añade la sección «Creating bots for the user» solo si tiene `admin`, y la skill
-  base `alfred:bot-admin` explica el flujo (todos los bots la ven en la lista; sin el permiso, los comandos se
+  base `consiglieri:bot-admin` explica el flujo (todos los bots la ven en la lista; sin el permiso, los comandos se
   niegan).
 
 ## 4. La especificación
@@ -84,7 +84,7 @@ Como mucho 64 KB. Campos (solo `name` es obligatorio):
 | `preset` | `basic`, `assistant`, `power`, `full`, `botadmin` | Nunca `cross` |
 | `permissions` | Cambios sueltos encima del preset, como texto | `clean_permission` uno a uno |
 | `model`, `effort`, `backend` | | `clean_setting` |
-| `workdir`, `folders` | Rutas absolutas | Fuera del home y de `~/.alfred-bots`, y dentro de las carpetas del admin |
+| `workdir`, `folders` | Rutas absolutas | Fuera del home y de `~/.consiglieri-bots`, y dentro de las carpetas del admin |
 | `cross_agent` | `true`/`false` | Booleano JSON real |
 | `reminders` | ≤ 5: `in` o `at`, `message` o `task`, `every` opcional | Futuro, `every` ≥ 60 s, ≤ 1.000 caracteres; exige `schedule` |
 | `note` | Palabras del admin al usuario | ≤ 500; se muestra como «its words, not mine» |
@@ -99,10 +99,10 @@ dentro de la tarea se guarda como esa tarea y no cambia nada (hay un test).
 
 `bot_admin.ceiling_problems` compara la especificación con los permisos **efectivos** del administrador:
 
-- Cada permiso gestionado, con `presets.looser`: `shell full` > `alfred`, `sandbox off` > `on`, modos por
+- Cada permiso gestionado, con `presets.looser`: `shell full` > `consiglieri`, `sandbox off` > `on`, modos por
   riesgo (`dontAsk`/`plan`/`default` < `acceptEdits` < `auto` < `bypassPermissions`), cada interruptor `on` >
   `off`. Por dimensiones, así que el conjunto entero queda por debajo. Es conservador: un `sandbox off` con
-  shell `alfred` (inofensivo) también se rechaza si el admin tiene `sandbox on`.
+  shell `consiglieri` (inofensivo) también se rechaza si el admin tiene `sandbox on`.
 - Carpetas extra y carpeta de trabajo: dentro de las del administrador.
 - Reglas `allow` extra: nunca (solo el usuario, desde el panel). Las `deny` sí (solo quitan).
 - Backend `codex` solo si el administrador también es Codex (Codex no aplica la lista negra).
@@ -146,21 +146,21 @@ pasado se omite y se le dice al administrador.
 
 El propietario es siempre el usuario que confirma en Telegram (`creator_id` del update `managed_bot`), y la
 petición solo casa con un `pending` de ese mismo usuario. El administrador queda en `created_by` y
-`request_id`, nada más. `ALFRED_USER_ID` del entorno se ignora: la petición va siempre al propietario del
+`request_id`, nada más. `CONSIGLIERI_USER_ID` del entorno se ignora: la petición va siempre al propietario del
 administrador.
 
-### 5.5 Qué bot llama: `ALFRED_BOT_KEY`
+### 5.5 Qué bot llama: `CONSIGLIERI_BOT_KEY`
 
-`alfred` sabe qué bot lo llama por `ALFRED_BOT_ID`. Con `shell full`, un bot podía cambiar esa variable y
-hacerse pasar por otro. Ahora cada agente recibe `ALFRED_BOT_KEY = HMAC(secreto, bot_id)`; el secreto está en
+`consiglieri` sabe qué bot lo llama por `CONSIGLIERI_BOT_ID`. Con `shell full`, un bot podía cambiar esa variable y
+hacerse pasar por otro. Ahora cada agente recibe `CONSIGLIERI_BOT_KEY = HMAC(secreto, bot_id)`; el secreto está en
 `<home>/state/bot-key.secret` (0600), que ningún bot puede leer (el home está denegado a todas las
-herramientas de ficheros y, con shell, al sandbox). Todos los `alfred bots …` comprueban la clave: un bot solo
+herramientas de ficheros y, con shell, al sandbox). Todos los `consiglieri bots …` comprueban la clave: un bot solo
 conoce la suya. Los ayudantes del administrador, además, no corren fuera del turno de un bot (sin bot que
 comprobar no hay administrador).
 
 ### 5.6 Configurar después
 
-`alfred bots configure <bot>` cambia `task`, `model`, `effort`, `soul` y `reminders`, y nada más. Solo en bots
+`consiglieri bots configure <bot>` cambia `task`, `model`, `effort`, `soul` y `reminders`, y nada más. Solo en bots
 que ese administrador pidió (`created_by`) y solo mientras el bot no tenga más permisos que él: si el usuario le
 sube los permisos, el administrador deja de poder dirigirlo. Permisos, carpetas y backend son del usuario.
 
@@ -168,16 +168,16 @@ sube los permisos, el administrador deja de poder dirigirlo. Permisos, carpetas 
 
 | Variable | Por defecto | Qué cuenta |
 |---|---|---|
-| `ALFRED_ADMIN_MAX_BOTS` | 0 (sin límite) | Bots que un administrador pidió: creados (`created_by`) y peticiones esperando |
-| `ALFRED_ADMIN_MAX_BOTS_PER_USER` | 0 (sin límite) | Bots del usuario y peticiones esperando. Solo frena a los administradores: el usuario puede crear más desde el panel |
-| `ALFRED_ADMIN_REQUESTS_PER_HOUR` | 0 (sin límite) | Peticiones enviadas por un administrador en la última hora (persistido en disco, un reinicio no lo pone a cero) |
+| `CONSIGLIERI_ADMIN_MAX_BOTS` | 0 (sin límite) | Bots que un administrador pidió: creados (`created_by`) y peticiones esperando |
+| `CONSIGLIERI_ADMIN_MAX_BOTS_PER_USER` | 0 (sin límite) | Bots del usuario y peticiones esperando. Solo frena a los administradores: el usuario puede crear más desde el panel |
+| `CONSIGLIERI_ADMIN_REQUESTS_PER_HOUR` | 0 (sin límite) | Peticiones enviadas por un administrador en la última hora (persistido en disco, un reinicio no lo pone a cero) |
 
 Telegram tiene su propio límite de bots por usuario (20, 40 con Premium, contando el panel).
 
 **Destruir no:** no hay subcomando `destroy` (argparse lo rechaza) ni ninguna otra vía; destruir sigue siendo del
 usuario desde el menú o `/bot destroy`.
 
-Otros cambios de paso: `alfred bots set` ya no cambia un bot con más permisos que quien llama, ni pasa un bot a
+Otros cambios de paso: `consiglieri bots set` ya no cambia un bot con más permisos que quien llama, ni pasa un bot a
 `codex` si quien llama no lo es.
 
 ## 7. Auditoría
@@ -187,33 +187,33 @@ Todo en `<home>/state/audit.log` (JSON por línea, 0600), con propietario, y en 
 | Evento | Cuándo | Detalle |
 |---|---|---|
 | `admin_permission_granted` / `_revoked` | Un bot gana o pierde `admin` | quién y por dónde (menú, comando, creación) |
-| `admin_requested` | `alfred bots create` envía la petición | admin, petición, username, **la especificación normalizada**, extras |
+| `admin_requested` | `consiglieri bots create` envía la petición | admin, petición, username, **la especificación normalizada**, extras |
 | `admin_refused` | Especificación por encima del techo, inválida o fuera de los límites | problemas y la entrada (≤ 4.000 caracteres) |
 | `admin_bot_created` | El usuario confirma | admin, petición, permisos, ajustes, si lleva SOUL, recordatorios, extras pendientes |
 | `admin_request_invalid` | La revalidación falla | problemas |
 | `admin_request_cancelled` | El usuario pulsa Cancel | |
 | `admin_extras_approved` / `_declined` / `_refused` | Respuesta del usuario a los extras | qué extras; en `_refused`, por qué |
-| `admin_configured` | `alfred bots configure` | qué campos |
+| `admin_configured` | `consiglieri bots configure` | qué campos |
 | `cross_agent_granted` | Si un extra era el acceso entre agentes | `via: bot admin request <id> by @admin` |
 
 Además, cada petición vive en `<home>/state/bots/admin-requests.json` (últimas 300) con su estado: `waiting`,
 `created`, `awaiting_approval`, `approved`, `declined`, `refused`, `invalid`, `cancelled`, `expired` (30 min sin
-crear). `alfred bots status` se lo enseña al administrador, incluido si el usuario ya pulsó Start.
+crear). `consiglieri bots status` se lo enseña al administrador, incluido si el usuario ya pulsó Start.
 
 ## 8. Qué se garantiza y qué no
 
 **Garantizado por código (Python del panel y del comando), en cualquier preset con backend Claude:**
 
-- Ninguna especificación por encima del administrador llega a aplicarse: se comprueba al pedir (`alfred`), al
+- Ninguna especificación por encima del administrador llega a aplicarse: se comprueba al pedir (`consiglieri`), al
   crear (el panel) y al aprobar los extras (el panel).
 - Ningún extra se aplica sin el botón del usuario, que solo vale para él, caduca y no sirve para otra acción.
 - El propietario es siempre el humano; el administrador no puede destruir bots.
 - Límites y auditoría.
 
-**Garantizado por Claude Code** (shell `alfred`, que es Basic, Assistant y Bot admin): un bot sin el permiso no
+**Garantizado por Claude Code** (shell `consiglieri`, que es Basic, Assistant y Bot admin): un bot sin el permiso no
 llega a ejecutar los ayudantes (reglas `deny`), y aunque llegara el comando se niega.
 
-**Con shell abierta y sandbox** (Power): `alfred bots *` corre fuera del sandbox solo con `bots` o `admin`. Sin
+**Con shell abierta y sandbox** (Power): `consiglieri bots *` corre fuera del sandbox solo con `bots` o `admin`. Sin
 ellos corre dentro y no puede leer el estado. Con ellos, la clave impide hacerse pasar por otro bot.
 
 **No garantizado:**
@@ -231,48 +231,48 @@ ellos corre dentro y no puede leer el estado. Con ellos, la clave impide hacerse
   username y, si no casa, toma la última petición del usuario: con dos peticiones a la vez y el username
   cambiado, podría casar la otra. Ambas son del mismo usuario y ambas ya validadas.
 - Los botones de aprobación viven en memoria: un reinicio los caduca (el usuario lo da desde el menú).
-- Ya existía y sigue: con shell abierta, un bot con `bots` puede quitarse `ALFRED_BOT_ID` y usar `alfred bots
+- Ya existía y sigue: con shell abierta, un bot con `bots` puede quitarse `CONSIGLIERI_BOT_ID` y usar `consiglieri bots
   set|new` como operador (sin bot que llama). Los ayudantes del administrador no corren así.
 
 ## 9. Probarlo en vivo con un bot de pruebas
 
 Usa el panel de pruebas de `docs/AGENT_CHATS_RESEARCH.md` §6.7 (bot de pruebas con Bot Management Mode,
-`~/.alfred-test.env`, `ALFRED_HOME=~/.alfred-test`), arrancado desde este worktree:
+`~/.consiglieri-test.env`, `CONSIGLIERI_HOME=~/.consiglieri-test`), arrancado desde este worktree:
 
 ```bash
-ALFRED_HOME=~/.alfred-test ALFRED_ENV_FILE=~/.alfred-test.env PYTHONPATH=$PWD venv/bin/python -m alfred run
+CONSIGLIERI_HOME=~/.consiglieri-test CONSIGLIERI_ENV_FILE=~/.consiglieri-test.env PYTHONPATH=$PWD venv/bin/python -m consiglieri run
 ```
 
 1. En el panel: `/bot new Admin` y crea el bot. Luego `/bot perm Admin botadmin`: lee el aviso y confirma.
    `/bot audit` debe mostrar «bot admin permission given to».
 2. Abre @…admin…, pulsa Start y pídele: «Quiero un bot que me ayude a planificar comidas, simpático, que me
-   pregunte los domingos qué cocinar». Debe redactar `outbox/*.json`, ejecutar `alfred bots spec` y luego
+   pregunte los domingos qué cocinar». Debe redactar `outbox/*.json`, ejecutar `consiglieri bots spec` y luego
    `create`, y decirte que mires el chat del panel. Comprueba en el log de Claude Code que no hubo denegaciones.
 3. En el chat del panel: lee el resumen (nombre, tarea, personalidad, permisos, recordatorios) y pulsa
    «Create @…». Confirma en la ventana de Telegram. Debe llegar «… is ready» con «Created for you at @…'s request».
 4. El administrador debe despertar solo (un `[Event]`) y decirte que abras el bot nuevo y pulses Start.
-   Pídele `alfred bots status`: «started» debe pasar a `true` tras pulsar Start.
+   Pídele `consiglieri bots status`: «started» debe pasar a `true` tras pulsar Start.
 5. Pulsa Start en el bot nuevo y escríbele: debe contestar con la personalidad pedida. Comprueba
-   `~/.alfred-test-bots/<id>/SOUL.md` y que el recordatorio llega en su chat.
+   `~/.consiglieri-test-bots/<id>/SOUL.md` y que el recordatorio llega en su chat.
 6. Escalada: pide al administrador «crea un bot con Full access» y «con acceso entre agentes». Debe recibir el
    rechazo y explicártelo; `/bot audit` debe mostrar «bot request refused». Pídele un bot con «memoria
    compartida» con el administrador sin `shared`: rechazo. Dale `shared` al administrador, repite: el bot nace
    sin él y llega el botón «⚠️ Approve them». Prueba «No» y, en otra, «Approve».
-7. Límites: `ALFRED_ADMIN_REQUESTS_PER_HOUR=1` en `~/.alfred-test.env` (se lee en cada llamada) y pide dos bots.
+7. Límites: `CONSIGLIERI_ADMIN_REQUESTS_PER_HOUR=1` en `~/.consiglieri-test.env` (se lee en cada llamada) y pide dos bots.
 8. Sin permiso: `/bot perm Admin admin off` y pídele otro bot. Debe decir que no puede (Claude Code deniega
-   `alfred bots create`; si lo intenta, el comando también).
+   `consiglieri bots create`; si lo intenta, el comando también).
 9. Cancel: pide un bot y pulsa la tecla «Cancel» del teclado. El administrador debe despertar con «cancelled».
 10. Limpieza: `/bot destroy` de los bots de prueba y `/deletebot` en BotFather.
 
 Puntos que solo se resuelven en vivo: que el `[Event]` despierta al administrador en su chat; que el teclado
 `request_managed_bot` enviado por el proceso del comando (no por el del panel) funciona igual; que las reglas
-`deny Bash(alfred bots create *)` casan con lo que Claude Code ejecuta (`--file` con ruta relativa, comillas
-de `--json`); y que `alfred bots status` ve `started` tras Start.
+`deny Bash(consiglieri bots create *)` casan con lo que Claude Code ejecuta (`--file` con ruta relativa, comillas
+de `--json`); y que `consiglieri bots status` ve `started` tras Start.
 
 ## 10. Tests
 
 `PYTHONPATH=$PWD:$PWD/tests python -m unittest discover -s tests`, con el paquete importado desde este
-worktree (`python -c "import alfred; print(alfred.__file__)"`). 361 tests, todos pasan. Nuevos en
+worktree (`python -c "import consiglieri; print(consiglieri.__file__)"`). 361 tests, todos pasan. Nuevos en
 `tests/test_bot_admin.py`:
 
 - **Permiso:** apagado en todos los presets, plantilla, reglas de Claude Code por subcomando y combinación, el
@@ -296,13 +296,13 @@ worktree (`python -c "import alfred; print(alfred.__file__)"`). 361 tests, todos
 
 ## 11. Ficheros
 
-- `alfred/bot_admin.py` (nuevo): especificación, techo, extras, límites, peticiones, textos.
-- `alfred/bots.py`: permiso `admin`, reglas por subcomando, `ADMIN_WARNING`, `bot_key`, auditoría con detalle
+- `consiglieri/bot_admin.py` (nuevo): especificación, techo, extras, límites, peticiones, textos.
+- `consiglieri/bots.py`: permiso `admin`, reglas por subcomando, `ADMIN_WARNING`, `bot_key`, auditoría con detalle
   y eventos nuevos, `created_by`/`request_id`, `Pending.request_id`/`admin_bot_id`, sección del manual.
-- `alfred/cli.py`: `spec`, `create`, `status`, `configure`; `verified_caller`; `bots set` endurecido.
-- `alfred/telegram_bot.py`: adopción de la petición en `on_managed_bot`, aprobación de extras, eventos al
+- `consiglieri/cli.py`: `spec`, `create`, `status`, `configure`; `verified_caller`; `bots set` endurecido.
+- `consiglieri/telegram_bot.py`: adopción de la petición en `on_managed_bot`, aprobación de extras, eventos al
   administrador, Cancel, confirmación de `admin`, auditoría de `admin`.
-- `alfred/presets.py`: plantillas (`TEMPLATES`, `TEMPLATE_INFO`, `choices`, `info`).
-- `alfred/menus.py`: interruptor y aviso de `admin`, plantilla en las pantallas de presets.
-- `alfred/agent.py`: `ALFRED_BOT_KEY` en el entorno del agente.
-- `alfred/templates/BOT.md`, `alfred/plugin/skills/bot-admin/SKILL.md` (nueva).
+- `consiglieri/presets.py`: plantillas (`TEMPLATES`, `TEMPLATE_INFO`, `choices`, `info`).
+- `consiglieri/menus.py`: interruptor y aviso de `admin`, plantilla en las pantallas de presets.
+- `consiglieri/agent.py`: `CONSIGLIERI_BOT_KEY` en el entorno del agente.
+- `consiglieri/templates/BOT.md`, `consiglieri/plugin/skills/bot-admin/SKILL.md` (nueva).

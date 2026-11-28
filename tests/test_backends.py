@@ -4,8 +4,8 @@ import asyncio
 import os
 import unittest
 
-from alfred.backends import BackendError, create_backend
-from alfred.backends.claude import describe_tool_use
+from consiglieri.backends import BackendError, create_backend
+from consiglieri.backends.claude import describe_tool_use
 from fakes import CLAUDE_SESSION_GONE, Sandbox, claude_lines
 
 
@@ -49,9 +49,9 @@ class ClaudeBackendTests(BackendTestCase):
         self.assertEqual(call["argv"][call["argv"].index("--output-format") + 1], "stream-json")
 
     def test_resume_and_model_flags(self) -> None:
-        self.sandbox.environ["ALFRED_CLAUDE_MODEL"] = "sonnet"
-        self.sandbox.environ["ALFRED_CLAUDE_PERMISSION_MODE"] = "acceptEdits"
-        self.sandbox.environ["ALFRED_CLAUDE_EFFORT"] = "High"
+        self.sandbox.environ["CONSIGLIERI_CLAUDE_MODEL"] = "sonnet"
+        self.sandbox.environ["CONSIGLIERI_CLAUDE_PERMISSION_MODE"] = "acceptEdits"
+        self.sandbox.environ["CONSIGLIERI_CLAUDE_EFFORT"] = "High"
         self.sandbox.fake_cli("claude", {"fresh": claude_lines("ok", "sess-9")})
 
         self.run_backend("claude", session_id="sess-9")
@@ -100,24 +100,24 @@ class ClaudeBackendTests(BackendTestCase):
         probe.write_text(
             "#!/bin/sh\ncat > /dev/null\n"
             'printf \'{"type":"result","is_error":false,"session_id":"s","result":"[%s][%s]"}\\n\' '
-            '"$CLAUDECODE" "$ALFRED_CHAT_ID"\n',
+            '"$CLAUDECODE" "$CONSIGLIERI_CHAT_ID"\n',
             encoding="utf-8",
         )
         probe.chmod(0o755)
-        self.sandbox.environ["ALFRED_CLAUDE_BIN"] = str(probe)
-        env = dict(os.environ, CLAUDECODE="1", ALFRED_CHAT_ID="42")
+        self.sandbox.environ["CONSIGLIERI_CLAUDE_BIN"] = str(probe)
+        env = dict(os.environ, CLAUDECODE="1", CONSIGLIERI_CHAT_ID="42")
         self.assertEqual(self.run_backend("claude", env=env).text, "[][42]")
 
     def test_missing_binary_and_timeout_raise_backend_errors(self) -> None:
-        self.sandbox.environ["ALFRED_CLAUDE_BIN"] = str(self.sandbox.root / "does-not-exist")
+        self.sandbox.environ["CONSIGLIERI_CLAUDE_BIN"] = str(self.sandbox.root / "does-not-exist")
         with self.assertRaises(BackendError):
             self.run_backend("claude")
 
         sleeper = self.sandbox.root / "sleeper"
         sleeper.write_text("#!/bin/sh\nsleep 30\n", encoding="utf-8")
         sleeper.chmod(0o755)
-        self.sandbox.environ["ALFRED_CLAUDE_BIN"] = str(sleeper)
-        self.sandbox.environ["ALFRED_TIMEOUT"] = "0.3"
+        self.sandbox.environ["CONSIGLIERI_CLAUDE_BIN"] = str(sleeper)
+        self.sandbox.environ["CONSIGLIERI_TIMEOUT"] = "0.3"
         with self.assertRaises(BackendError) as caught:
             self.run_backend("claude")
         self.assertIn("timed out", str(caught.exception))
@@ -165,8 +165,8 @@ class CodexBackendTests(BackendTestCase):
         self.assertEqual(argv[-1], "-")
 
     def test_resume_puts_the_session_before_the_stdin_marker(self) -> None:
-        self.sandbox.environ["ALFRED_CODEX_SANDBOX"] = "workspace-write"
-        self.sandbox.environ["ALFRED_CODEX_EFFORT"] = "low"
+        self.sandbox.environ["CONSIGLIERI_CODEX_SANDBOX"] = "workspace-write"
+        self.sandbox.environ["CONSIGLIERI_CODEX_EFFORT"] = "low"
         self.sandbox.fake_cli("codex", {"fresh": self.FRESH})
 
         self.run_backend("codex", session_id="thread-1")

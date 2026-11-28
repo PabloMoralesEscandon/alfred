@@ -3,7 +3,7 @@
 .env.*
 !.env.example
 
-# Runtime state from the pre-refactor layout (now lives in ALFRED_HOME, outside this repo)
+# Runtime state from the pre-refactor layout (now lives in CONSIGLIERI_HOME, outside this repo)
 /SOUL.md
 /SKILLS.md
 memory/

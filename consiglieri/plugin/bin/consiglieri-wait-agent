@@ -1,0 +1,94 @@
+#!/usr/bin/env python3
+"""Wait until an agent running in Orca stops working, then print what happened as JSON.
+
+    consiglieri-wait-agent --pane <paneKey> [--timeout 3600] [--interval 5]
+
+Meant to be started in the background: when it exits, the outcome is on stdout.
+`state` is what Orca last reported for the agent ("done", or whatever it shows
+when the agent is waiting for someone), "gone" if its terminal was closed, or
+"timeout" if it was still working when the time ran out.
+"""
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+import time
+
+WORKING = "working"
+
+
+def find_agent(orca, pane):
+    """The agent's row from `orca worktree ps`, with its worktree, or None when it is not listed."""
+    completed = subprocess.run(
+        [orca, "worktree", "ps", "--json"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=60
+    )
+    reply = json.loads(completed.stdout)
+    if not reply.get("ok"):
+        raise RuntimeError((reply.get("error") or {}).get("message") or "orca worktree ps failed")
+    for worktree in (reply.get("result") or {}).get("worktrees") or []:
+        for agent in worktree.get("agents") or []:
+            if agent.get("paneKey") == pane:
+                return dict(agent, worktree=worktree.get("path"), repo=worktree.get("repo"))
+    return None
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--pane", required=True, help="the agent's paneKey from the launch reply or `orca worktree ps`")
+    parser.add_argument("--timeout", type=float, default=3600, help="seconds to wait before giving up")
+    parser.add_argument("--interval", type=float, default=5, help="seconds between checks")
+    args = parser.parse_args()
+
+    orca = os.environ.get("CONSIGLIERI_ORCA_BIN") or os.environ.get("ALFRED_ORCA_BIN") or "orca"  # rename-compat
+    deadline = time.monotonic() + args.timeout
+    seen = None  # the last row Orca gave us for this agent
+    misses = 0  # checks in a row where Orca did not list it
+    failures = 0
+    settled = 0  # checks in a row where it was not working
+
+    while True:
+        try:
+            agent = find_agent(orca, args.pane)
+            failures = 0
+        except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as exc:
+            failures += 1
+            if failures >= 5:
+                print(json.dumps({"ok": False, "pane": args.pane, "error": "cannot ask Orca: %s" % exc}))
+                return 1
+            agent = seen
+        else:
+            if agent is None:
+                misses += 1
+                # A freshly launched agent takes a moment to be listed; one that was listed and vanished is gone.
+                if (seen is not None and misses >= 2) or misses >= 12:
+                    return report(args.pane, "gone", seen)
+            else:
+                misses, seen = 0, agent
+                settled = settled + 1 if agent.get("state") != WORKING else 0
+                if settled >= 2:  # twice in a row, so a pause between two steps is not taken for the end
+                    return report(args.pane, agent.get("state") or "unknown", agent)
+        if time.monotonic() >= deadline:
+            return report(args.pane, "timeout", seen)
+        time.sleep(args.interval)
+
+
+def report(pane, state, agent):
+    agent = agent or {}
+    print(json.dumps({
+        "ok": True,
+        "pane": pane,
+        "state": state,
+        "agent": agent.get("agentType"),
+        "repo": agent.get("repo"),
+        "worktree": agent.get("worktree"),
+        "prompt": agent.get("prompt"),
+        "last_message": agent.get("lastAssistantMessage"),
+        "interrupted": agent.get("interrupted"),
+    }, ensure_ascii=False))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

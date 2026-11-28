@@ -11,9 +11,9 @@ import unittest
 from pathlib import Path
 from typing import Any, Dict, List
 
-from alfred import bots, extensions, home
-from alfred.agent import Agent, Chat, Listener
-from alfred.bots import BotError, BotRecord, BotRegistry
+from consiglieri import bots, extensions, home
+from consiglieri.agent import Agent, Chat, Listener
+from consiglieri.bots import BotError, BotRecord, BotRegistry
 from fakes import Sandbox, claude_lines
 
 TOKEN = "5000000001:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
@@ -82,7 +82,7 @@ class RegistryTests(BotsTestCase):
         self.assertIsNone(self.registry.token(5000000001))
 
     def test_the_token_stays_out_of_every_git_history(self) -> None:
-        self.sandbox.environ["ALFRED_AUTOSAVE"] = "1"
+        self.sandbox.environ["CONSIGLIERI_AUTOSAVE"] = "1"
         home.prepare(self.config)
         self.add_bot()
         self.registry.set_token(5000000001, TOKEN)
@@ -135,7 +135,7 @@ class ConfigTests(BotsTestCase):
         self.assertEqual(self.config.memory_dir, self.config.home / "memory")  # the main home is unchanged
 
     def test_settings_override_env_and_unset_ones_fall_back(self) -> None:
-        self.sandbox.environ.update(ALFRED_CLAUDE_MODEL="opus", ALFRED_CLAUDE_EFFORT="high", ALFRED_WORKDIR="/tmp")
+        self.sandbox.environ.update(CONSIGLIERI_CLAUDE_MODEL="opus", CONSIGLIERI_CLAUDE_EFFORT="high", CONSIGLIERI_WORKDIR="/tmp")
         self.add_bot(settings={"model": "sonnet"})
         config = self.registry.config_for(5000000001)
         self.assertEqual(config.claude_model, "sonnet")
@@ -166,7 +166,7 @@ class ConfigTests(BotsTestCase):
         research = self.registry.config_for(5000000001)
         hooked = extensions.scaffold(research, "hooked", "Runs a hook").path
         (hooked / "hooks").mkdir()
-        (hooked / "hooks" / "hooks.json").write_text(json.dumps({"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "cat ~/.alfred/memory/x"}]}]}}))
+        (hooked / "hooks" / "hooks.json").write_text(json.dumps({"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "cat ~/.consiglieri/memory/x"}]}]}}))
         served = extensions.scaffold(research, "served", "An MCP server").path
         (served / ".mcp.json").write_text(json.dumps({"mcpServers": {"notes": {"command": "notes-server"}}}))
         extensions.scaffold(research, "plain", "Skills and commands only")
@@ -199,7 +199,7 @@ class SettingTests(BotsTestCase):
         clean = lambda name, value: bots.clean_permission(self.config, name, value)
         self.assertEqual(clean("web", "yes"), "on")
         self.assertEqual(clean("mode", "acceptedits"), "acceptEdits")
-        self.assertEqual(clean("shell", "default"), "alfred")
+        self.assertEqual(clean("shell", "default"), "consiglieri")
         self.assertEqual(clean("allow", "Bash(git status); mcp__github__*"), "Bash(git status);mcp__github__*")
         for name, value in (("web", "maybe"), ("mode", "yolo"), ("shell", "some"), ("folders", "/"),
                             ("allow", "rm -rf /"), ("task", "x")):
@@ -220,7 +220,7 @@ class SettingTests(BotsTestCase):
     def test_usernames_extend_the_panels(self) -> None:
         suggest = bots.suggest_username
         self.assertEqual(suggest("Gestor calendarios", "manolito_bot"), "manolito_gestor_calendarios_bot")
-        self.assertEqual(suggest("Research", "AlfredPanelBot"), "alfredpanel_research_bot")
+        self.assertEqual(suggest("Research", "FamilyPanelBot"), "familypanel_research_bot")
         self.assertEqual(suggest("Research", "@Manolito_Bot"), "manolito_research_bot")
         self.assertEqual(bots.username_prefix("manolitobot"), "manolito")
         # Without a panel username (the CLI before it knows it): just the slug.
@@ -275,8 +275,8 @@ class SettingTests(BotsTestCase):
 
     def test_creation_links(self) -> None:
         self.assertEqual(
-            bots.creation_link("@AlfredPanelBot", "research_bot", "Research Bot"),
-            "https://t.me/newbot/AlfredPanelBot/research_bot?name=Research+Bot",
+            bots.creation_link("@FamilyPanelBot", "research_bot", "Research Bot"),
+            "https://t.me/newbot/FamilyPanelBot/research_bot?name=Research+Bot",
         )
 
 
@@ -289,17 +289,17 @@ class PermissionTests(BotsTestCase):
         rules = self.settings_for()["permissions"]
         workspace = "//" + str(self.config.bots_home / "5000000001").lstrip("/")
         self.assertEqual(rules["defaultMode"], "dontAsk")
-        self.assertIn("Bash(alfred *)", rules["allow"])
+        self.assertIn("Bash(consiglieri *)", rules["allow"])
         self.assertNotIn("Bash", rules["allow"])
         self.assertIn("Edit(%s/**)" % workspace, rules["allow"])
         # The calendar connector is on by default: no blanket mcp__* deny (it would remove it), and in dontAsk
         # any other MCP tool, having no allow rule, is refused anyway.
         self.assertIn("mcp__claude_ai_Google_Calendar__*", rules["allow"])
         self.assertNotIn("mcp__*", rules["deny"])
-        for denied in ("WebFetch", "WebSearch", "Bash(orca *)", "Bash(alfred bots *)", "Bash(alfred run *)",
+        for denied in ("WebFetch", "WebSearch", "Bash(orca *)", "Bash(consiglieri bots *)", "Bash(consiglieri run *)",
                        "Read(//%s/**)" % str(self.config.home).lstrip("/"), "Edit(%s/CLAUDE.md)" % workspace):
             self.assertIn(denied, rules["deny"], denied)
-        self.assertNotIn("Bash(alfred schedule *)", rules["deny"])  # reminders are on by default
+        self.assertNotIn("Bash(consiglieri schedule *)", rules["deny"])  # reminders are on by default
         self.assertTrue(rules["blockReadsOutsideWorkingDirectories"])
         self.assertTrue(rules["blockWritesOutsideWorkingDirectories"])
         self.assertTrue(rules["denyInsteadOfPrompting"])
@@ -317,12 +317,12 @@ class PermissionTests(BotsTestCase):
         self.assertIn("mcp__claude-in-chrome__*", rules["allow"])
         self.assertIn("mcp__github__*", rules["allow"])
         self.assertIn("Bash(git push *)", rules["deny"])
-        self.assertIn("Bash(alfred schedule *)", rules["deny"])
+        self.assertIn("Bash(consiglieri schedule *)", rules["deny"])
         self.assertNotIn("mcp__*", rules["deny"])  # the browser is an MCP server
         sandbox = settings["sandbox"]
         self.assertEqual((sandbox["enabled"], sandbox["allowUnsandboxedCommands"], sandbox["failIfUnavailable"]), (True, False, True))
         self.assertIn(str(self.config.home), sandbox["filesystem"]["denyRead"])
-        self.assertIn("alfred bots *", sandbox["excludedCommands"])
+        self.assertIn("consiglieri bots *", sandbox["excludedCommands"])
 
         no_sandbox = self.settings_for(shell="full", sandbox="off")
         self.assertNotIn("sandbox", no_sandbox)
@@ -371,19 +371,19 @@ class BlacklistTests(BotsTestCase):
         return "%s(//%s%s)" % (tool, str(path).lstrip("/"), suffix)
 
     def levels(self) -> Dict[str, Dict[str, str]]:
-        from alfred import presets
+        from consiglieri import presets
 
         levels = {name: presets.apply(name, {}) for name in presets.keys()}  # Basic, Assistant, Power, Full access
         levels["full access"] = {name: "on" for name in bots.SWITCHES if name != "sandbox"}
         levels["full access"].update(shell="full", sandbox="off", mode="bypassPermissions")
         levels["full access, sandboxed"] = dict(levels["full access"], sandbox="on")
         levels["auto"] = {"mode": "auto"}
-        levels["bypass, shell alfred"] = {"mode": "bypassPermissions"}
+        levels["bypass, shell consiglieri"] = {"mode": "bypassPermissions"}
         # Extra allow rules that name the other agents' files: deny rules win over them.
         levels["allow rules"] = {"allow": "Read(%s/**);Bash" % self.rule("", self.chef, "")[1:-1], "edit": "on"}
         # Every combination of the switches, the two shells and every mode.
         for index, mode in enumerate(bots.PERMISSION_MODES):
-            for shell in ("alfred", "full"):
+            for shell in ("consiglieri", "full"):
                 switches = {name: ("on" if (bit + index) % 2 else "off") for bit, name in enumerate(bots.SWITCHES)}
                 levels["mix %s %s" % (mode, shell)] = dict(switches, mode=mode, shell=shell)
         return levels
@@ -434,7 +434,7 @@ class BlacklistTests(BotsTestCase):
             self.assertEqual(filesystem.get("allowWrite", []), [str(shared)] if writable else [], level)
 
     def test_the_shared_memory_is_readable_at_every_level_and_written_only_with_the_permission(self) -> None:
-        from alfred import presets
+        from consiglieri import presets
 
         shared = self.config.shared_memory_dir
         for cross in (False, True):
@@ -457,7 +457,7 @@ class BlacklistTests(BotsTestCase):
     def test_an_open_shell_runs_in_the_sandbox_unless_it_is_switched_off(self) -> None:
         for permissions in ({"shell": "full"}, {"mode": "bypassPermissions"}, {"mode": "auto"}):
             self.assertIn("sandbox", self.settings(permissions), permissions)
-        self.assertNotIn("sandbox", self.settings({}))  # only `alfred`: nothing to sandbox
+        self.assertNotIn("sandbox", self.settings({}))  # only `consiglieri`: nothing to sandbox
         self.assertNotIn("sandbox", self.settings({"shell": "full", "sandbox": "off"}))
 
     def test_the_switches_cannot_take_it_away(self) -> None:
@@ -476,7 +476,7 @@ class BlacklistTests(BotsTestCase):
                 bots.clean_setting(self.config, "workdir", str(folder))
         # Every permission at every value it takes leaves cross-agent access off.
         for name, _, _ in bots.PERMISSIONS:
-            for value in ("on", "off", "full", "alfred", "bypassPermissions", "default"):
+            for value in ("on", "off", "full", "consiglieri", "bypassPermissions", "default"):
                 try:
                     cleaned = bots.clean_permission(self.config, name, value)
                 except BotError:
@@ -559,7 +559,7 @@ class BlacklistTests(BotsTestCase):
 
 class WorkspaceTests(BotsTestCase):
     def test_prepare_writes_manual_settings_and_memory(self) -> None:
-        self.sandbox.environ["ALFRED_AUTOSAVE"] = "1"
+        self.sandbox.environ["CONSIGLIERI_AUTOSAVE"] = "1"
         self.add_bot(settings={"task": "Summarize new papers on protein folding.", "workdir": str(self.work)})
         config = self.registry.config_for(5000000001)
         folder = bots.prepare_workspace(config)
@@ -630,7 +630,7 @@ class AgentIsolationTests(BotsTestCase):
         workspace = self.registry.workspace(5000000001)
         self.assertEqual(os.path.realpath((self.sandbox.root / "cwd.txt").read_text().strip()), os.path.realpath(str(workspace)))
         env = dict(line.split("=", 1) for line in (self.sandbox.root / "env.txt").read_text().splitlines() if "=" in line)
-        self.assertEqual((env["ALFRED_BOT_ID"], env["ALFRED_CHAT_ID"], env["ALFRED_WORKDIR"]), ("5000000001", "99", str(self.work)))
+        self.assertEqual((env["CONSIGLIERI_BOT_ID"], env["CONSIGLIERI_CHAT_ID"], env["CONSIGLIERI_WORKDIR"]), ("5000000001", "99", str(self.work)))
         self.assertEqual(env["CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD"], "1")
         self.assertNotIn("TELEGRAM_BOT_TOKEN", env)
         self.assertEqual(self.registry.config_for(5000000001).sessions_path.exists(), True)
