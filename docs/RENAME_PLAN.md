@@ -1,10 +1,14 @@
 # Plan de cambio de nombre: Alfred → Consiglieri
 
-Estado (2026-11-27): **fases 0 a 3 hechas y el código de la fase 4 listo** en la rama `rename-consiglieri`
-(desde `master`), sin fusionar ni publicar. Falta lo que solo puede hacer el usuario: fusionar, ejecutar la
-migración en vivo ([pasos exactos](#migración-en-vivo-pasos-exactos)), retirar la compatibilidad (fase 4,
-final) y la fase 5. `scripts/check_old_name.sh -v` sale limpio: lo que queda del nombre viejo está marcado
-`rename-compat` o en `.rename-allow`, cada excepción con su motivo.
+Estado (2026-11-28): **fases 0 a 3 hechas, rama fusionada en `master` y migración en vivo ejecutada**
+([pasos exactos](#migración-en-vivo-pasos-exactos)): el servicio es `com.consiglieri.bot` con
+`~/.consiglieri`, los 6 bots conectados, y la instancia de pruebas está en `~/.consiglieri-test`
+(`~/.consiglieri-test.env`). Copia previa en `~/consiglieri-backup-2026-11-28.tgz` (sin el plist viejo:
+`service uninstall` lo había borrado). Falta retirar la compatibilidad (fase 4, final: una semana sin
+incidencias, hacia 2026-12-05) y la fase 5. `scripts/check_old_name.sh --runtime` ya no ve nada en la
+máquina; en el repo solo queda `CONSIGLIERI_CHROME_PROFILE=Alfred` en `.env` (no versionado), que es el nombre
+de la carpeta del perfil de Chrome. Lo demás está marcado `rename-compat` o en `.rename-allow`, cada
+excepción con su motivo.
 
 **Corrección posterior a la fase 1:** el usuario decidió que no haya agente principal. Alfred ya no es un
 personaje dentro de Consiglieri: el bot base es solo el panel, y cada agente es un bot de un usuario.
@@ -304,7 +308,7 @@ copia del plist).
 - **Reversión**: parar el servicio nuevo (`consiglieri service uninstall`); mover a mano las tres carpetas
   y las de `~/.claude/projects` de vuelta; restaurar el plist copiado y `launchctl bootstrap gui/$(id -u)
   ~/Library/LaunchAgents/com.alfred.bot.plist`; en el peor caso, restaurar el `tar`. No hay `--reverse`.
-- **Código hecho; la migración en vivo, no.** Cambios respecto a lo previsto:
+- **Código hecho; migración en vivo ejecutada el 2026-11-28.** Cambios respecto a lo previsto:
   - El comando es `consiglieri migrate [--dry-run] [--from <home viejo>] [--to <home nuevo>]`
     (`consiglieri/migrate.py`, `tests/test_migrate.py`, siempre sobre una carpeta de usuario falsa).
   - **No deja enlace `~/.alfred → ~/.consiglieri`**: sería una segunda ruta a todo lo que los bots tienen
@@ -365,8 +369,8 @@ copia del plist).
 
 ## Migración en vivo: pasos exactos
 
-Para el usuario, en `/Users/…/orca/alfred`, cuando la rama esté fusionada en `master`. Nadie lo ha
-ejecutado. Unos minutos sin bots.
+Para el usuario, en `/Users/…/orca/alfred`, cuando la rama esté fusionada en `master`. Unos minutos sin bots.
+Ejecutado el 2026-11-28, con estos pasos.
 
 **0. Copia de seguridad** (con el servicio aún en marcha da igual; mejor justo después del paso 1):
 
